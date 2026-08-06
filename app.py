@@ -136,14 +136,16 @@ def init_db():
             c.executemany(
                 "INSERT INTO machines(machine,department,standard_manpower,target_ton) VALUES (?,?,?,?)",
                 [
-                    ("Corrugator-1","Corrugation",18,50),
-                    ("Corrugator-2","Corrugation",17,48),
-                    ("Printer-1","Printing",10,20),
-                    ("Printer-2","Printing",9,20),
-                    ("Pasting","Conversion",12,25),
-                    ("Die Cutting","Conversion",14,25),
-                    ("Finishing","Finishing",10,15),
-                    ("Dispatch","Dispatch",8,12),
+                    ("Corrugation","Corrugation",18,50),
+                    ("Topra 1228","Printing",17,48),
+                    ("Topra 1632","Printing",10,20),
+                    ("Flexo 2535","Printing",9,20),
+                    ("Glue Folder","Finishing",10,22),
+                    ("Stitching Machine 1","Finishing",12,25),
+                    ("Stitching Machine 2","Finishing",10,20),
+                    ("Stitching Machine 3","Finishing",10,20),
+                    ("Stitching Machine 4","Finishing",12,25),
+                    ("Stitching Machine 5","Finishing",14,25),
                 ]
             )
 
