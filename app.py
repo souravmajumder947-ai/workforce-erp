@@ -189,15 +189,37 @@ def normalize_date(value):
 
 def import_employee_excel(uploaded_file):
     try:
-        excel = pd.ExcelFile(uploaded_file)
-        sheet = "Employee_Data" if "Employee_Data" in excel.sheet_names else excel.sheet_names[0]
-        df = pd.read_excel(uploaded_file, sheet_name=sheet, header=2)
+        excel = pd.ExcelFile(
+            uploaded_file,
+            engine="openpyxl"
+        )
+    
+        sheet = (
+            "Employee_Data"
+            if "Employee_Data" in excel.sheet_names
+            else excel.sheet_names[0]
+        )
+
+        df = pd.read_excel(
+            uploaded_file,
+            sheet_name=sheet,
+            header=2,
+            engine="openpyxl"
+        )
+
     except Exception as exc:
-        raise ValueError(f"Unable to read Excel file: {exc}") from exc
+        raise ValueError(
+            f"Unable to read Excel file: {exc}"
+        ) from exc
 
     required = [
-        "Employee ID", "Employee Name", "Department", "Designation",
-        "Employee Type", "Shift", "Monthly Salary"
+        "Employee ID",
+        "Employee Name",
+        "Department",
+        "Designation",
+        "Employee Type",
+        "Shift",
+        "Monthly Salary",
     ]
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -571,32 +593,154 @@ elif page == "Employee Master":
     st.dataframe(employees, width="stretch", hide_index=True)
 
 elif page == "Attendance":
-    st.subheader("Attendance and Overtime")
-    employees = read_df(
-        "SELECT employee_id,employee_name FROM employees WHERE status='Active' ORDER BY employee_name"
-    )
+    st.subheader("Daily Attendance & Overtime")
+
+    c1, c2 = st.columns(2)
+    work_date = c1.date_input("Attendance Date", value=date.today())
+    shift = c2.selectbox("Shift", ["A", "B", "General"])
+
+    employees = read_df("""
+        SELECT employee_id, employee_name, department
+        FROM employees
+        WHERE status = 'Active'
+        ORDER BY department, employee_name
+    """)
+
     if employees.empty:
-        st.info("Add or import employees first.")
+        st.info("Please add or import employees first.")
+
     else:
-        employee_options = employees["employee_id"] + " - " + employees["employee_name"]
-        with st.form("attendance_form"):
-            c1,c2,c3,c4,c5 = st.columns(5)
-            work_date = c1.date_input("Date", value=date.today())
-            shift = c2.selectbox("Shift", ["A","B"])
-            selected_employee = c3.selectbox("Employee", employee_options)
-            status = c4.selectbox("Status", ["Present","Absent","Leave"])
-            ot_hours = c5.number_input("OT Hours", min_value=0.0, max_value=24.0, step=0.5)
-            save = st.form_submit_button("Save Attendance", width="stretch")
-        if save:
-            employee_id = selected_employee.split(" - ")[0]
-            upsert("""
-            INSERT INTO attendance(work_date,shift,employee_id,status,ot_hours)
-            VALUES (?,?,?,?,?)
-            ON CONFLICT(work_date,shift,employee_id) DO UPDATE SET
-                status=excluded.status, ot_hours=excluded.ot_hours
-            """, (work_date.isoformat(),shift,employee_id,status,float(ot_hours)))
-            st.success("Attendance saved.")
+        existing = read_df("""
+            SELECT employee_id, status, ot_hours
+            FROM attendance
+            WHERE work_date = ? AND shift = ?
+        """, (work_date.isoformat(), shift))
+
+        attendance_df = employees.merge(
+            existing,
+            on="employee_id",
+            how="left"
+        )
+
+        attendance_df["status"] = attendance_df["status"].fillna("Not Marked")
+        attendance_df["ot_hours"] = attendance_df["ot_hours"].fillna(0.0)
+
+        st.caption(
+            f"Employees: {len(attendance_df)} | "
+            f"Date: {work_date.strftime('%d-%m-%Y')} | Shift: {shift}"
+        )
+
+        edited_attendance = st.data_editor(
+            attendance_df,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "employee_id": st.column_config.TextColumn(
+                    "Employee ID",
+                    disabled=True
+                ),
+                "employee_name": st.column_config.TextColumn(
+                    "Employee Name",
+                    disabled=True
+                ),
+                "department": st.column_config.TextColumn(
+                    "Department",
+                    disabled=True
+                ),
+                "status": st.column_config.SelectboxColumn(
+                    "Attendance Status",
+                    options=[
+                        "Not Marked",
+                        "Present",
+                        "Absent",
+                        "Leave",
+                        "Holiday"
+                    ],
+                    required=True
+                ),
+                "ot_hours": st.column_config.NumberColumn(
+                    "OT Hours",
+                    min_value=0.0,
+                    max_value=12.0,
+                    step=0.5
+                )
+            }
+        )
+
+        if st.button(
+            "Save Attendance",
+            type="primary",
+            width="stretch"
+        ):
+            rows_saved = 0
+
+            with get_conn() as c:
+                for _, row in edited_attendance.iterrows():
+
+                    if row["status"] == "Not Marked":
+                        continue
+
+                    ot_hours = float(row["ot_hours"])
+
+                    if row["status"] != "Present":
+                        ot_hours = 0.0
+
+                    c.execute("""
+                        INSERT INTO attendance(
+                            work_date,
+                            shift,
+                            employee_id,
+                            status,
+                            ot_hours
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+
+                        ON CONFLICT(work_date, shift, employee_id)
+                        DO UPDATE SET
+                            status = excluded.status,
+                            ot_hours = excluded.ot_hours
+                    """, (
+                        work_date.isoformat(),
+                        shift,
+                        str(row["employee_id"]),
+                        row["status"],
+                        ot_hours
+                    ))
+
+                    rows_saved += 1
+
+            st.success(
+                f"Attendance saved successfully for {rows_saved} employees."
+            )
             st.rerun()
+
+        st.divider()
+
+        present_count = int(
+            (edited_attendance["status"] == "Present").sum()
+        )
+
+        absent_count = int(
+            (edited_attendance["status"] == "Absent").sum()
+        )
+
+        leave_count = int(
+            (edited_attendance["status"] == "Leave").sum()
+        )
+
+        total_ot = float(
+            edited_attendance.loc[
+                edited_attendance["status"] == "Present",
+                "ot_hours"
+            ].sum()
+        )
+
+        m1, m2, m3, m4 = st.columns(4)
+
+        m1.metric("Present", present_count)
+        m2.metric("Absent", absent_count)
+        m3.metric("Leave", leave_count)
+        m4.metric("Total OT Hours", f"{total_ot:.1f}")
 
 elif page == "Manpower Allocation":
     st.subheader("Employee-to-Machine Allocation")
