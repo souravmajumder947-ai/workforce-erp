@@ -1001,16 +1001,22 @@ elif page == "Production Entry":
     allocated_manpower = read_df(
         """
         SELECT
-            ma.employee_id,
-            e.employee_name,
-            ma.role,
-            e.department,
-            e.designation,
-            e.monthly_salary,
-            e.working_days
-        FROM manpower_allocation ma
-        LEFT JOIN employees e
-            ON e.employee_id = ma.employee_id
+    ma.employee_id,
+    e.employee_name,
+    ma.role,
+    e.department,
+    e.designation,
+    e.monthly_salary,
+    e.working_days,
+    e.ot_rate,
+    COALESCE(a.ot_hours, 0) AS ot_hours
+FROM manpower_allocation ma
+LEFT JOIN employees e
+    ON e.employee_id = ma.employee_id
+LEFT JOIN attendance a
+    ON a.employee_id = ma.employee_id
+    AND a.work_date = ma.work_date
+    AND a.shift = ma.shift
         WHERE ma.work_date = ?
           AND ma.shift = ?
           AND ma.machine = ?
@@ -1023,14 +1029,16 @@ elif page == "Production Entry":
         st.warning("No manpower allocated for this date, shift and machine.")
     else:
         allocated_manpower.columns = [
-            "Employee ID",
-            "Employee Name",
-            "Role",
-            "Department",
-            "Designation",
-            "Monthly Salary",
-            "Working Days",
-        ]
+    "Employee ID",
+    "Employee Name",
+    "Role",
+    "Department",
+    "Designation",
+    "Monthly Salary",
+    "Working Days",
+    "OT Rate",
+    "OT Hours",
+]
 
         allocated_manpower["Monthly Salary"] = pd.to_numeric(
             allocated_manpower["Monthly Salary"],
@@ -1041,7 +1049,15 @@ elif page == "Production Entry":
             allocated_manpower["Working Days"],
             errors="coerce"
         ).fillna(0.0)
+        allocated_manpower["OT Rate"] = pd.to_numeric(
+            allocated_manpower["OT Rate"],
+            errors="coerce"
+        ).fillna(0.0)
 
+        allocated_manpower["OT Hours"] = pd.to_numeric(
+            allocated_manpower["OT Hours"],
+            errors="coerce"
+        ).fillna(0.0)
         allocated_manpower["Daily Cost"] = allocated_manpower.apply(
             lambda row: (
                 float(row["Monthly Salary"]) / float(row["Working Days"])
@@ -1050,9 +1066,17 @@ elif page == "Production Entry":
             ),
             axis=1
         )
+        allocated_manpower["OT Cost"] = (
+            allocated_manpower["OT Rate"]
+            * allocated_manpower["OT Hours"]
+        )
 
+        allocated_manpower["Total Employee Cost"] = (
+            allocated_manpower["Daily Cost"]
+            + allocated_manpower["OT Cost"]
+        )
         total_manpower_cost = float(
-            allocated_manpower["Daily Cost"].sum()
+            allocated_manpower["Total Employee Cost"].sum()
         )
 
         production_ton_value = float(production_ton)
@@ -1062,12 +1086,15 @@ elif page == "Production Entry":
             if production_ton_value > 0
             else 0.0
         )
-
-        m1, m2, m3 = st.columns(3)
+        total_ot_cost = float(
+        allocated_manpower["OT Cost"].sum()
+    )
+        m1, m2, m3, m4 = st.columns(4)
 
         m1.metric("Allocated Employees", len(allocated_manpower))
         m2.metric("Total Manpower Cost", f"₹{total_manpower_cost:,.2f}")
         m3.metric("Manpower Cost / Ton", f"₹{manpower_cost_per_ton:,.2f}")
+        m4.metric("Total OT Cost", f"₹{total_ot_cost:,.2f}")
 
         st.dataframe(
             allocated_manpower,
