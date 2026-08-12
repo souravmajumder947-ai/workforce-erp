@@ -866,6 +866,80 @@ elif page == "Manpower Allocation":
             hide_index=True
         )
 
+    if not saved_allocations.empty:
+        st.subheader("Manage Allocation")
+
+        allocation_options = (
+            saved_allocations["Employee ID"].astype(str)
+            + " - "
+            + saved_allocations["Employee Name"].astype(str)
+            + " - "
+            + saved_allocations["Machine"].astype(str)
+        )
+
+        selected_allocation = st.selectbox(
+            "Select Allocation",
+            allocation_options.tolist()
+        )
+
+        selected_index = allocation_options[
+            allocation_options == selected_allocation
+        ].index[0]
+
+        selected_row = saved_allocations.loc[selected_index]
+
+        c1, c2 = st.columns(2)
+
+        new_role = c1.selectbox(
+            "Update Role",
+            ["Operator", "Helper", "Supervisor"],
+            index=["Operator", "Helper", "Supervisor"].index(
+                selected_row["Role"]
+            )
+            if selected_row["Role"] in ["Operator", "Helper", "Supervisor"]
+            else 0
+        )
+
+        if c1.button("Update Allocation"):
+            upsert(
+                """
+                UPDATE manpower_allocation
+                SET role = ?
+                WHERE work_date = ?
+                  AND shift = ?
+                  AND machine = ?
+                  AND employee_id = ?
+                """,
+                (
+                    new_role,
+                    str(selected_row["Date"]),
+                    selected_row["Shift"],
+                    selected_row["Machine"],
+                    str(selected_row["Employee ID"]),
+                )
+            )
+            st.success("Allocation updated.")
+            st.rerun()
+
+        if c2.button("Delete Allocation"):
+            upsert(
+                """
+                DELETE FROM manpower_allocation
+                WHERE work_date = ?
+                  AND shift = ?
+                  AND machine = ?
+                  AND employee_id = ?
+                """,
+                (
+                    str(selected_row["Date"]),
+                    selected_row["Shift"],
+                    selected_row["Machine"],
+                    str(selected_row["Employee ID"]),
+                )
+            )
+            st.success("Allocation deleted.")
+            st.rerun()       
+
 elif page == "Production Entry":
     st.subheader("Production Entry")
     machine_df = read_df("SELECT machine,target_ton FROM machines ORDER BY machine")
