@@ -995,6 +995,47 @@ elif page == "Production Entry":
         st.success("Production saved.")
         st.rerun()
 
+    st.divider()
+    st.subheader("Allocated Manpower")
+
+    allocated_manpower = read_df(
+        """
+        SELECT
+            ma.employee_id,
+            e.employee_name,
+            ma.role,
+            e.department,
+            e.designation
+        FROM manpower_allocation ma
+        LEFT JOIN employees e
+            ON e.employee_id = ma.employee_id
+        WHERE ma.work_date = ?
+          AND ma.shift = ?
+          AND ma.machine = ?
+        ORDER BY e.employee_name
+        """,
+        (work_date.isoformat(), shift, machine)
+    )
+
+    if allocated_manpower.empty:
+        st.warning("No manpower allocated for this date, shift and machine.")
+    else:
+        allocated_manpower.columns = [
+            "Employee ID",
+            "Employee Name",
+            "Role",
+            "Department",
+            "Designation",
+        ]
+
+        st.metric("Allocated Employees", len(allocated_manpower))
+
+        st.dataframe(
+            allocated_manpower,
+            use_container_width=True,
+            hide_index=True
+        )
+
 elif page == "Machine Master":
     st.subheader("Machine Master")
     machines = read_df("SELECT * FROM machines ORDER BY machine")
