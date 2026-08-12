@@ -1005,7 +1005,9 @@ elif page == "Production Entry":
             e.employee_name,
             ma.role,
             e.department,
-            e.designation
+            e.designation,
+            e.monthly_salary,
+            e.working_days
         FROM manpower_allocation ma
         LEFT JOIN employees e
             ON e.employee_id = ma.employee_id
@@ -1026,9 +1028,28 @@ elif page == "Production Entry":
             "Role",
             "Department",
             "Designation",
+            "Monthly Salary",
+            "Working Days",
         ]
 
-        st.metric("Allocated Employees", len(allocated_manpower))
+        allocated_manpower["Daily Cost"] = (
+            allocated_manpower["Monthly Salary"]
+            / allocated_manpower["Working Days"]
+        )
+
+        total_manpower_cost = allocated_manpower["Daily Cost"].sum()
+
+        manpower_cost_per_ton = (
+            total_manpower_cost / production_ton
+            if production_ton > 0
+            else 0
+        )
+
+        m1, m2, m3 = st.columns(3)
+
+        m1.metric("Allocated Employees", len(allocated_manpower))
+        m2.metric("Total Manpower Cost", f"₹{total_manpower_cost:,.2f}")
+        m3.metric("Manpower Cost / Ton", f"₹{manpower_cost_per_ton:,.2f}")
 
         st.dataframe(
             allocated_manpower,
