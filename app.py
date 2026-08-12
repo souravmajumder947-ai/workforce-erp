@@ -888,29 +888,50 @@ elif page == "Manpower Allocation":
 
         selected_row = saved_allocations.loc[selected_index]
 
-        c1, c2 = st.columns(2)
+        machine_list = machines
+        current_machine = str(selected_row["Machine"])
 
-        new_role = c1.selectbox(
-            "Update Role",
-            ["Operator", "Helper", "Supervisor"],
-            index=["Operator", "Helper", "Supervisor"].index(
-                selected_row["Role"]
-            )
-            if selected_row["Role"] in ["Operator", "Helper", "Supervisor"]
+        machine_index = (
+            machine_list.index(current_machine)
+            if current_machine in machine_list
             else 0
         )
+
+        new_machine = st.selectbox(
+            "Update Machine",
+            machine_list,
+            index=machine_index
+        )
+
+        role_list = ["Operator", "Helper", "Supervisor"]
+        current_role = str(selected_row["Role"])
+
+        role_index = (
+            role_list.index(current_role)
+            if current_role in role_list
+            else 0
+        )
+
+        new_role = st.selectbox(
+            "Update Role",
+            role_list,
+            index=role_index
+        )
+
+        c1, c2 = st.columns(2)
 
         if c1.button("Update Allocation"):
             upsert(
                 """
                 UPDATE manpower_allocation
-                SET role = ?
+                SET machine = ?, role = ?
                 WHERE work_date = ?
                   AND shift = ?
                   AND machine = ?
                   AND employee_id = ?
                 """,
                 (
+                    new_machine,
                     new_role,
                     str(selected_row["Date"]),
                     selected_row["Shift"],
