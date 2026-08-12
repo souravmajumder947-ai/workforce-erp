@@ -1032,17 +1032,35 @@ elif page == "Production Entry":
             "Working Days",
         ]
 
-        allocated_manpower["Daily Cost"] = (
-            allocated_manpower["Monthly Salary"]
-            / allocated_manpower["Working Days"]
+        allocated_manpower["Monthly Salary"] = pd.to_numeric(
+            allocated_manpower["Monthly Salary"],
+            errors="coerce"
+        ).fillna(0.0)
+
+        allocated_manpower["Working Days"] = pd.to_numeric(
+            allocated_manpower["Working Days"],
+            errors="coerce"
+        ).fillna(0.0)
+
+        allocated_manpower["Daily Cost"] = allocated_manpower.apply(
+            lambda row: (
+                float(row["Monthly Salary"]) / float(row["Working Days"])
+                if float(row["Working Days"]) > 0
+                else 0.0
+            ),
+            axis=1
         )
 
-        total_manpower_cost = allocated_manpower["Daily Cost"].sum()
+        total_manpower_cost = float(
+            allocated_manpower["Daily Cost"].sum()
+        )
+
+        production_ton_value = float(production_ton)
 
         manpower_cost_per_ton = (
-            total_manpower_cost / production_ton
-            if production_ton > 0
-            else 0
+            total_manpower_cost / production_ton_value
+            if production_ton_value > 0
+            else 0.0
         )
 
         m1, m2, m3 = st.columns(3)
