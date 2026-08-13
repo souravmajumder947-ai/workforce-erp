@@ -50,6 +50,53 @@ def test_postgres_connection():
     conn.close()
     return database_name
 
+def test_postgres_connection():
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT current_database();")
+    database_name = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return database_name
+
+
+def migrate_postgres():
+    conn = get_pg_conn()
+
+    try:
+        cur = conn.cursor()
+
+        cur.execute("""
+            ALTER TABLE production
+            ADD COLUMN IF NOT EXISTS paper_cost DOUBLE PRECISION DEFAULT 0
+        """)
+
+        cur.execute("""
+            ALTER TABLE production
+            ADD COLUMN IF NOT EXISTS ink_cost DOUBLE PRECISION DEFAULT 0
+        """)
+
+        cur.execute("""
+            ALTER TABLE production
+            ADD COLUMN IF NOT EXISTS glue_cost DOUBLE PRECISION DEFAULT 0
+        """)
+
+        cur.execute("""
+            ALTER TABLE production
+            ADD COLUMN IF NOT EXISTS other_material_cost DOUBLE PRECISION DEFAULT 0
+        """)
+
+        conn.commit()
+        cur.close()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+
 def init_db():
     with get_conn() as c:
         c.execute("""
@@ -117,6 +164,10 @@ def init_db():
             target_ton REAL NOT NULL DEFAULT 0,
             waste_ton REAL NOT NULL DEFAULT 0,
             breakdown_hours REAL NOT NULL DEFAULT 0,
+            paper_cost REAL NOT NULL DEFAULT 0,
+            ink_cost REAL NOT NULL DEFAULT 0,
+            glue_cost REAL NOT NULL DEFAULT 0,
+            other_material_cost REAL NOT NULL DEFAULT 0,
             UNIQUE(work_date, shift, machine)
         )
         """)
@@ -488,6 +539,7 @@ def dashboard_data(report_date, selected_shift):
 
 
 # init_db()   # Old SQLite database initialization disabled
+migrate_postgres()
 
 st.title("HR & Production Cost Management System")
 st.caption("Employee cost, attendance, manpower allocation, production and cost-per-ton analysis")
@@ -978,6 +1030,32 @@ elif page == "Production Entry":
         target_ton = c2.number_input("Target Ton", min_value=0.0, value=default_target, step=0.1)
         waste_ton = c3.number_input("Waste Ton", min_value=0.0, step=0.1)
         breakdown_hours = c4.number_input("Breakdown Hours", min_value=0.0, max_value=24.0, step=0.5)
+
+        c5, c6, c7, c8 = st.columns(4)
+
+        paper_cost = c5.number_input(
+        "Paper Cost",
+        min_value=0.0,
+        step=100.0
+        )
+
+        ink_cost = c6.number_input(
+        "Ink Cost",
+        min_value=0.0,
+        step=100.0
+        )
+
+        glue_cost = c7.number_input(
+        "Glue / Starch Cost",
+        min_value=0.0,
+        step=100.0
+        )
+
+        other_material_cost = c8.number_input(
+        "Other Material Cost",
+        min_value=0.0,
+        step=100.0
+        )
         save = st.form_submit_button("Save Production", width="stretch")
     if save:
         upsert("""
