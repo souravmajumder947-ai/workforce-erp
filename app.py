@@ -1164,15 +1164,34 @@ LEFT JOIN attendance a
             if production_ton_value > 0
             else 0.0
         )
+
         total_ot_cost = float(
         allocated_manpower["OT Cost"].sum()
-    )
+        )
+
+        total_material_cost = float(
+        paper_cost
+        + ink_cost
+        + glue_cost
+        + other_material_cost
+        )
+
+        total_production_cost = float(
+            total_manpower_cost + total_material_cost
+        )
+
+        production_cost_per_ton = (
+            total_production_cost / production_ton_value
+            if production_ton_value > 0
+            else 0.0
+        )
+
         m1, m2, m3, m4 = st.columns(4)
 
         m1.metric("Allocated Employees", len(allocated_manpower))
-        m2.metric("Total Manpower Cost", f"₹{total_manpower_cost:,.2f}")
-        m3.metric("Manpower Cost / Ton", f"₹{manpower_cost_per_ton:,.2f}")
-        m4.metric("Total OT Cost", f"₹{total_ot_cost:,.2f}")
+        m2.metric("Material Cost", f"₹{total_material_cost:,.2f}")
+        m3.metric("Total Production Cost", f"₹{total_production_cost:,.2f}")
+        m4.metric("Production Cost / Ton", f"₹{production_cost_per_ton:,.2f}")
 
         st.dataframe(
             allocated_manpower,
