@@ -12,6 +12,7 @@ import hmac
 import secrets
 
 from datetime import date, datetime, timedelta, time
+from zoneinfo import ZoneInfo
 from calendar import monthrange
 from decimal import Decimal
 import base64
@@ -1842,6 +1843,31 @@ def upsert(sql, params):
         conn.close()
 
 
+
+# ============================================================
+# INDIA TIME DISPLAY
+# Database timestamps remain unchanged; user-facing timestamps
+# are displayed in Asia/Kolkata (IST).
+# ============================================================
+IST = ZoneInfo("Asia/Kolkata")
+
+def _to_ist_display(value):
+    """Convert a DB timestamp (stored/server UTC) to naive IST for display."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return value
+    try:
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            return value
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        return ts.tz_convert("Asia/Kolkata").tz_localize(None)
+    except Exception:
+        return value
+
+
 def hash_user_password(password, salt=None):
     if salt is None:
         salt = secrets.token_hex(16)
@@ -1864,11 +1890,16 @@ def verify_user_password(password, stored_hash):
 
 
 def get_app_users():
-    return read_df("""
+    df = read_df("""
         SELECT user_id, username, full_name, role, is_active, created_at, last_login
         FROM app_users
         ORDER BY username
     """)
+    # Display timestamps in India Standard Time without changing stored DB values.
+    for _col in ("created_at", "last_login"):
+        if _col in df.columns:
+            df[_col] = df[_col].apply(_to_ist_display)
+    return df
 
 
 def create_app_user(username, full_name, password, role="Viewer", is_active=True):
@@ -5642,7 +5673,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
 """, unsafe_allow_html=True)
 
 if st.session_state.get("auth_user") is None:
-    _login_verified_time = datetime.now().strftime("%H:%M:%S")
+    _login_verified_time = datetime.now(IST).strftime("%H:%M:%S")
     st.markdown('<div class="v82-login-root"></div>', unsafe_allow_html=True)
     left_col, right_col = st.columns([1.20, .80], gap="medium")
 
@@ -5699,6 +5730,135 @@ if st.session_state.get("auth_user") is None:
             width=0,
         )
 
+
+    st.markdown("""
+    <style>
+    /* FINAL LOGIN READABILITY + BRANDING — visual only */
+    .v90-hero-telemetry{
+      font-size:clamp(10px,.48vw,17px)!important;
+      gap:clamp(9px,.55vw,18px)!important;
+      color:#9bb2ca!important;
+    }
+    .v90-hero-telemetry b{
+      font-size:clamp(11px,.54vw,19px)!important;
+      color:#d3e3f2!important;
+      letter-spacing:clamp(.9px,.075vw,1.8px)!important;
+    }
+    .v92-live-sync{
+      min-width:12ch!important;
+      color:#b7cce0!important;
+      font-size:clamp(10px,.48vw,17px)!important;
+      font-weight:800!important;
+      letter-spacing:.45px!important;
+      text-shadow:0 0 10px rgba(88,186,247,.18)!important;
+    }
+    .v92-live-sync.v92-tick{
+      color:#8de7ff!important;
+      text-shadow:0 0 12px rgba(52,211,255,.32)!important;
+    }
+
+    .v90-card-kicker{
+      font-size:clamp(12px,.54vw,19px)!important;
+      color:#78d1ff!important;
+      letter-spacing:clamp(1.4px,.13vw,3.2px)!important;
+    }
+    .v90-card-title{
+      font-size:clamp(34px,1.92vw,68px)!important;
+      color:#ffffff!important;
+    }
+    .v90-card-sub{
+      font-size:clamp(14px,.66vw,23px)!important;
+      color:#b2c3d6!important;
+      line-height:1.55!important;
+    }
+
+    .v92-company-brand{
+      position:relative;
+      overflow:hidden;
+      margin:clamp(-4px,-.1vw,0px) 0 clamp(18px,1vw,34px);
+      padding:clamp(13px,.75vw,23px) clamp(15px,.9vw,28px);
+      border:1px solid rgba(88,186,247,.20);
+      border-radius:clamp(12px,.7vw,20px);
+      background:
+        radial-gradient(circle at 12% 30%,rgba(47,111,235,.14),transparent 36%),
+        linear-gradient(110deg,rgba(12,31,54,.78),rgba(8,21,39,.64));
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 12px 30px rgba(0,0,0,.12);
+    }
+    .v92-company-brand:after{
+      content:"";
+      position:absolute;
+      top:-80%;
+      left:-18%;
+      width:14%;
+      height:250%;
+      background:linear-gradient(90deg,transparent,rgba(164,224,255,.15),transparent);
+      transform:skewX(-18deg);
+      animation:v92BrandSweep 5.8s ease-in-out infinite;
+      pointer-events:none;
+    }
+    .v92-company-name{
+      color:#f8fbff;
+      font-size:clamp(15px,.78vw,27px);
+      line-height:1.2;
+      font-weight:950;
+      letter-spacing:clamp(.7px,.07vw,1.7px);
+      text-transform:uppercase;
+      text-shadow:0 0 18px rgba(88,186,247,.16);
+    }
+    .v92-company-slogan{
+      margin-top:clamp(7px,.38vw,12px);
+      color:#7dd9ff;
+      font-size:clamp(11px,.52vw,18px);
+      font-weight:800;
+      letter-spacing:clamp(.7px,.065vw,1.5px);
+      text-transform:uppercase;
+      animation:v92SloganGlow 2.8s ease-in-out infinite;
+    }
+    .v92-company-meta{
+      margin-top:clamp(8px,.42vw,14px);
+      color:#9bb0c6;
+      font-size:clamp(10px,.43vw,15px);
+      font-weight:650;
+      letter-spacing:.3px;
+    }
+    @keyframes v92BrandSweep{
+      0%,58%{left:-22%;opacity:0}
+      66%{opacity:1}
+      86%{left:112%;opacity:.55}
+      100%{left:112%;opacity:0}
+    }
+    @keyframes v92SloganGlow{
+      0%,100%{color:#79cfee;text-shadow:0 0 0 rgba(88,186,247,0)}
+      50%{color:#a7eaff;text-shadow:0 0 14px rgba(88,186,247,.20)}
+    }
+
+    .v90-status b{
+      font-size:clamp(10px,.46vw,17px)!important;
+    }
+    .v90-status span{
+      font-size:clamp(9px,.40vw,15px)!important;
+      color:#9eb2c8!important;
+    }
+    .v90-status small{
+      font-size:clamp(8px,.34vw,13px)!important;
+      color:#7890aa!important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) [data-testid="stWidgetLabel"] p{
+      font-size:clamp(13px,.60vw,21px)!important;
+      color:#f0f5fb!important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input{
+      font-size:clamp(15px,.76vw,25px)!important;
+      color:#ffffff!important;
+    }
+    .v82-card-footer{
+      color:#a9b9ca!important;
+      font-size:clamp(10px,.42vw,16px)!important;
+      font-weight:600!important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     with right_col:
         with st.container(border=True):
             st.markdown('<div class="v82-login-card-marker"></div>', unsafe_allow_html=True)
@@ -5712,6 +5872,12 @@ if st.session_state.get("auth_user") is None:
                   </div>
                 </div>
                 <div class="v90-card-sub">Sign in to access live workforce intelligence, attendance, payroll and operations.</div>
+
+                <div class="v92-company-brand">
+                  <div class="v92-company-name">Reliable Packaging Industries Limited</div>
+                  <div class="v92-company-slogan">WE KNOW YOUR REPUTATION IS IN OUR BOX</div>
+                  <div class="v92-company-meta">Smart Manufacturing · Workforce · Payroll · Operations</div>
+                </div>
                 <div class="v90-status-grid">
                   <div class="v90-status active"><b><i class="v90-status-dot"></i>LIVE DATABASE</b><span>PostgreSQL services ready</span><small>Verified {_login_verified_time}</small></div>
                   <div class="v90-status"><b>✦ AI READY</b><span>HR intelligence online</span><small>Live decision support</small></div>
@@ -7731,7 +7897,7 @@ def _v83_system_online():
 
 def _v83_live_status_html():
     _online = _v83_system_online()
-    _now = datetime.now().strftime("%d %b %Y · %I:%M:%S %p")
+    _now = datetime.now(IST).strftime("%d %b %Y · %I:%M:%S %p")
     _db_label = "DATABASE LIVE" if _online else "DATABASE CHECK"
     _db_class = "v83-live-pill" if _online else "v83-sync-pill"
     return f"""
@@ -11545,6 +11711,253 @@ section[data-testid="stSidebar"] .stButton button,
 section[data-testid="stSidebar"] button {
     color: #F8FAFC !important;
     font-weight: 700 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# FINAL GLOBAL READABILITY
+# Typography/contrast only. Existing pages, buttons, calculations,
+# permissions, database operations and navigation remain unchanged.
+# ============================================================
+st.markdown("""
+<style>
+/* Overall text rendering */
+.stApp{
+  font-size:15px!important;
+  -webkit-font-smoothing:antialiased!important;
+  text-rendering:optimizeLegibility!important;
+}
+.stApp p,
+.stApp span,
+.stApp label,
+.stApp div{
+  -webkit-font-smoothing:antialiased!important;
+}
+
+/* Main headings and page copy */
+h1{font-size:clamp(30px,2vw,42px)!important;line-height:1.15!important;color:#ffffff!important}
+h2{font-size:clamp(24px,1.55vw,34px)!important;line-height:1.18!important;color:#f8fbff!important}
+h3{font-size:clamp(19px,1.15vw,27px)!important;line-height:1.22!important;color:#f4f8fd!important}
+p, .stMarkdown p{font-size:14px!important;line-height:1.48!important;color:#d3ddea!important}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p{
+  font-size:12px!important;
+  line-height:1.45!important;
+  color:#aebdd0!important;
+}
+
+/* Sidebar */
+.v5-sidebar-label{
+  font-size:10px!important;
+  color:#a9bbcf!important;
+  font-weight:900!important;
+  letter-spacing:1.25px!important;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label{
+  min-height:38px!important;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label p{
+  font-size:13.5px!important;
+  font-weight:750!important;
+  line-height:1.25!important;
+  color:#f5f8fc!important;
+}
+section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{
+  font-size:11.5px!important;
+  color:#cbd8e6!important;
+  font-weight:800!important;
+}
+section[data-testid="stSidebar"] input{
+  font-size:13.5px!important;
+}
+.v8-user-name{
+  font-size:13px!important;
+  color:#ffffff!important;
+  font-weight:900!important;
+}
+.v8-user-role{
+  font-size:10.5px!important;
+  color:#bccbdb!important;
+  font-weight:650!important;
+}
+.v8-made-india{
+  font-size:10.5px!important;
+  line-height:1.4!important;
+  color:#c5d2e0!important;
+}
+.v8-made-india b{font-size:11px!important;color:#f1f6fb!important}
+.v8-foot{
+  font-size:9.5px!important;
+  line-height:1.45!important;
+  color:#aebed0!important;
+}
+section[data-testid="stSidebar"] button p{
+  font-size:13px!important;
+  font-weight:800!important;
+}
+
+/* Live strip / heartbeat */
+.v83-live-pill,
+.v83-sync-pill{
+  font-size:10.5px!important;
+  font-weight:700!important;
+  color:#c8d6e5!important;
+}
+.v83-live-pill{color:#a8efd7!important}
+.v83-live-right .v83-sync-pill{
+  font-size:10px!important;
+}
+
+/* Welcome / page headers */
+.v8-eyebrow{font-size:10px!important;font-weight:900!important;color:#79cbff!important}
+.v8-page-title{font-size:clamp(26px,1.6vw,36px)!important;font-weight:950!important;color:#ffffff!important}
+.v8-page-sub{font-size:13px!important;line-height:1.45!important;color:#b8c7d7!important}
+.v8-context-pill,.v8-ai-pill{
+  font-size:10.5px!important;
+  font-weight:700!important;
+}
+.v8-section-label .t{
+  font-size:13px!important;
+  font-weight:900!important;
+  color:#eef4fb!important;
+}
+.v8-section-label .s{
+  font-size:10.5px!important;
+  color:#9eb0c4!important;
+}
+
+/* KPI cards */
+.v5-kpi .l{
+  font-size:9.5px!important;
+  color:#a9bbce!important;
+  font-weight:900!important;
+  letter-spacing:.8px!important;
+}
+.v5-kpi .v{
+  font-size:24px!important;
+  line-height:1.05!important;
+  color:#ffffff!important;
+  font-weight:950!important;
+}
+.v5-kpi .h{
+  font-size:10px!important;
+  line-height:1.35!important;
+  color:#a7b8ca!important;
+  white-space:normal!important;
+}
+
+/* Panel titles, AI cards and action queue */
+.v5-panel-title{
+  font-size:14px!important;
+  color:#f2f7fd!important;
+  font-weight:900!important;
+}
+.v5-panel-sub{
+  font-size:10.5px!important;
+  line-height:1.4!important;
+  color:#9eb0c5!important;
+}
+.v8-ai-card .t,
+.v5-action .t{
+  font-size:12.5px!important;
+  color:#f2f6fb!important;
+  font-weight:900!important;
+}
+.v8-ai-card .d,
+.v5-action .d{
+  font-size:10.5px!important;
+  line-height:1.42!important;
+  color:#9fb1c5!important;
+}
+.v5-action .n{
+  font-size:13px!important;
+  font-weight:950!important;
+}
+
+/* Inputs / selectors / date controls */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stDateInput"] input,
+[data-testid="stTextArea"] textarea{
+  font-size:14px!important;
+  color:#f8fbff!important;
+}
+[data-baseweb="select"] *{
+  font-size:13px!important;
+}
+[data-testid="stWidgetLabel"] p{
+  font-size:12px!important;
+  font-weight:800!important;
+  color:#dbe5f1!important;
+}
+
+/* Buttons everywhere */
+.stButton button,
+.stFormSubmitButton button,
+[data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-secondary"]{
+  min-height:40px!important;
+}
+.stButton button p,
+.stFormSubmitButton button p,
+[data-testid="stBaseButton-primary"] p,
+[data-testid="stBaseButton-secondary"] p{
+  font-size:13px!important;
+  font-weight:850!important;
+  color:inherit!important;
+}
+
+/* Native dataframes / editors */
+div[data-testid="stDataFrame"],
+div[data-testid="stDataEditor"]{
+  font-size:13px!important;
+}
+div[data-testid="stDataFrame"] [role="columnheader"],
+div[data-testid="stDataEditor"] [role="columnheader"]{
+  font-size:12.5px!important;
+  font-weight:850!important;
+}
+div[data-testid="stDataFrame"] [role="gridcell"],
+div[data-testid="stDataEditor"] [role="gridcell"]{
+  font-size:13px!important;
+}
+
+/* Tabs / radio / checkbox */
+[data-testid="stTabs"] button p{
+  font-size:13px!important;
+  font-weight:800!important;
+}
+div[role="radiogroup"] label p{
+  font-size:13px!important;
+}
+[data-testid="stCheckbox"] label p{
+  font-size:13px!important;
+}
+
+/* Metrics */
+[data-testid="stMetricLabel"] p{
+  font-size:11px!important;
+  color:#adbed0!important;
+  font-weight:800!important;
+}
+[data-testid="stMetricValue"]{
+  font-size:24px!important;
+  color:#ffffff!important;
+  font-weight:900!important;
+}
+
+/* Alerts / info / success / warning */
+[data-testid="stAlert"] p{
+  font-size:13px!important;
+  line-height:1.45!important;
+}
+
+/* Keep mobile/short screens usable */
+@media(max-width:1100px){
+  .stApp{font-size:14px!important}
+  section[data-testid="stSidebar"] div[role="radiogroup"] > label p{font-size:12.5px!important}
+  .v5-kpi .v{font-size:22px!important}
 }
 </style>
 """, unsafe_allow_html=True)
