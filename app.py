@@ -28,7 +28,7 @@ from openpyxl.drawing.image import Image as XLImage
 
 
 st.set_page_config(
-    page_title="Reliable Packaging HRMS V9.4 Fast Live Interface",
+    page_title="Reliable Packaging HRMS V9.2 Real Wall Live Interface",
     page_icon="🏭",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -947,28 +947,6 @@ def _postgres_pool():
     )
 
 
-def _invalidate_live_data_caches():
-    """Clear cached operational reads after any successful database write."""
-    for function_name in (
-        "get_setting_value",
-        "get_effective_permissions",
-        "calculate_live_payroll",
-        "v5_active_employees",
-        "v5_attendance_for_date",
-        "v5_latest_attendance_status",
-        "v5_active_departments",
-    ):
-        cached_function = globals().get(function_name)
-        clear_cache = getattr(cached_function, "clear", None)
-        if callable(clear_cache):
-            try:
-                clear_cache()
-            except Exception:
-                # A cache housekeeping issue must never turn a completed
-                # database commit into a false write failure for the user.
-                pass
-
-
 class _PooledConnection:
     """psycopg2 connection wrapper whose close() returns it to the pool."""
 
@@ -979,12 +957,6 @@ class _PooledConnection:
 
     def __getattr__(self, name):
         return getattr(self._conn, name)
-
-    def commit(self):
-        """Commit a write and invalidate only the short-lived live data caches."""
-        result = self._conn.commit()
-        _invalidate_live_data_caches()
-        return result
 
     def close(self):
         if self._returned:
@@ -1012,7 +984,7 @@ class _PooledConnection:
     def __exit__(self, exc_type, exc_value, traceback):
         try:
             if exc_type is None:
-                self.commit()
+                self._conn.commit()
             else:
                 self._conn.rollback()
         finally:
@@ -2269,7 +2241,6 @@ def can_view_salary(role):
     return str(role) in {"Owner", "Admin", "HR", "Manager"}
 
 
-@st.cache_data(ttl=60, show_spinner=False)
 def get_effective_permissions(user_id, role):
     role = str(role or "Viewer")
     if role in FULL_CONTROL_ROLES:
@@ -3450,7 +3421,6 @@ def _get_payroll_adjustments(payroll_month, division=None):
     return read_df(sql, tuple(params))
 
 
-@st.cache_data(ttl=30, show_spinner=False)
 def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
     first_day, last_day = _month_range(payroll_month)
     calendar_days = (last_day - first_day).days + 1
@@ -3494,42 +3464,17 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
         for _, row in adjustments.iterrows():
             adj_map[(str(row["division"]), str(row["employee_id"]))] = row.to_dict()
 
-    # Build the attendance lookup once. The previous implementation filtered the
-    # complete monthly table again for every employee, which became increasingly
-    # expensive as live data grew.
-    attendance_map = {}
-    empty_attendance = attendance.iloc[0:0].copy()
-    if not attendance.empty:
-        attendance = attendance.copy()
-        attendance["_employee_key"] = attendance["employee_id"].astype(str)
-        attendance["_division_key"] = attendance["division"].astype(str)
-        attendance["work_date_dt"] = pd.to_datetime(
-            attendance["work_date"], errors="coerce"
-        ).dt.date
-        if as_of >= first_day:
-            attendance = attendance[attendance["work_date_dt"] <= as_of].copy()
-        else:
-            attendance = attendance.iloc[0:0].copy()
-        attendance_map = {
-            (employee_key, division_key): group.copy()
-            for (employee_key, division_key), group in attendance.groupby(
-                ["_employee_key", "_division_key"], sort=False
-            )
-        }
-
-    # Payroll rules are global for the run; resolve them once instead of once
-    # per employee while preserving the same settings and calculation formulas.
-    ot_threshold_hours = get_setting_float("ot_threshold_hours", 12.0)
-    ot_multiplier = get_setting_float("ot_multiplier", 1.0)
-    pf_wage_ceiling = get_setting_float("pf_wage_ceiling", 15000.0)
-    pf_employee_rate = get_setting_float("pf_employee_rate_pct", 12.0) / 100.0
-    esic_employee_rate = get_setting_float("esic_employee_rate_pct", 0.75) / 100.0
-
     rows = []
     for _, emp in employees.iterrows():
         emp_id = str(emp["employee_id"])
         emp_div = str(emp.get("division") or "Greater Noida Plant")
-        emp_att = attendance_map.get((emp_id, emp_div), empty_attendance)
+        if attendance.empty:
+            emp_att = pd.DataFrame()
+        else:
+            emp_att = attendance[(attendance["employee_id"].astype(str) == emp_id) & (attendance["division"].astype(str) == emp_div)].copy()
+        if not emp_att.empty:
+            emp_att["work_date_dt"] = pd.to_datetime(emp_att["work_date"], errors="coerce").dt.date
+            emp_att = emp_att[emp_att["work_date_dt"] <= as_of].copy() if as_of >= first_day else emp_att.iloc[0:0]
 
         join_date = pd.to_datetime(emp.get("joining_date"), errors="coerce")
         eligible_start = first_day
@@ -3561,8 +3506,8 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
         additional_fixed_earned = fixed_monthly * ratio
 
         daily_salary_rate = monthly_salary / calendar_days if calendar_days else 0.0
-        ot_hourly_rate = daily_salary_rate / ot_threshold_hours if daily_salary_rate else 0.0
-        ot_pay = ot_hours * ot_hourly_rate * ot_multiplier
+        ot_hourly_rate = daily_salary_rate / get_setting_float("ot_threshold_hours", 12.0) if daily_salary_rate else 0.0
+        ot_pay = ot_hours * ot_hourly_rate * get_setting_float("ot_multiplier", 1.0)
 
         adj = adj_map.get((emp_div, emp_id), {})
         performance_incentive = _num(adj.get("performance_incentive"), 0)
@@ -3576,9 +3521,9 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
 
         pf_auto = 0.0
         if bool(emp.get("pf_applicable")):
-            prorated_ceiling = pf_wage_ceiling * ratio
-            pf_auto = min(basic_earned, prorated_ceiling) * pf_employee_rate
-        esic_auto = gross_earned * esic_employee_rate if bool(emp.get("esic_applicable")) else 0.0
+            prorated_ceiling = get_setting_float("pf_wage_ceiling", 15000.0) * ratio
+            pf_auto = min(basic_earned, prorated_ceiling) * (get_setting_float("pf_employee_rate_pct", 12.0) / 100.0)
+        esic_auto = gross_earned * (get_setting_float("esic_employee_rate_pct", 0.75) / 100.0) if bool(emp.get("esic_applicable")) else 0.0
 
         pf_override = adj.get("pf_override") if adj else None
         esic_override = adj.get("esic_override") if adj else None
@@ -6813,7 +6758,6 @@ def v5_division_clause(division, prefix=""):
         return "", ()
     return f" AND {col} = ?", (division,)
 
-@st.cache_data(ttl=30, show_spinner=False)
 def v5_active_employees(division=ALL_DIVISIONS):
     clause, params = v5_division_clause(division)
     return read_df(
@@ -6821,7 +6765,6 @@ def v5_active_employees(division=ALL_DIVISIONS):
         params,
     )
 
-@st.cache_data(ttl=20, show_spinner=False)
 def v5_attendance_for_date(work_date, division=ALL_DIVISIONS):
     clause, params = v5_division_clause(division)
     return read_df(
@@ -6833,7 +6776,6 @@ def v5_attendance_for_date(work_date, division=ALL_DIVISIONS):
         (work_date.isoformat(),) + params,
     )
 
-@st.cache_data(ttl=30, show_spinner=False)
 def v5_latest_attendance_status():
     employees = read_df(
         """SELECT division,
@@ -6870,11 +6812,6 @@ def v5_latest_attendance_status():
     if "Latest Attendance" not in result: result["Latest Attendance"]=""
     result["Latest Attendance"]=result["Latest Attendance"].fillna("Not uploaded")
     return result
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def v5_active_departments():
-    return read_df("SELECT department FROM departments WHERE active='Yes'")
 
 def v5_save_employee(values):
     upsert("""
@@ -7694,7 +7631,7 @@ st.sidebar.markdown(
       </div>
       <div class="v8-brand-meta">
         <span><span class="v8-live-dot"></span>HRMS LIVE</span>
-        <span>V9.4 FAST LIVE</span>
+        <span>V8.3</span>
       </div>
     </div>
     """,
@@ -7810,10 +7747,10 @@ def _v83_live_status_html():
     </div>
     """
 
-# A lightweight database heartbeat updates independently without rerunning the
-# whole page. The login clock still updates every second in the browser.
+# A real heartbeat fragment updates the clock / DB indicator automatically
+# without rerunning the entire page. Falls back gracefully on older Streamlit.
 if hasattr(st, "fragment"):
-    @st.fragment(run_every="60s")
+    @st.fragment(run_every="10s")
     def _v83_live_heartbeat():
         st.markdown(_v83_live_status_html(), unsafe_allow_html=True)
     _v83_live_heartbeat()
@@ -7848,7 +7785,7 @@ if page == "Home":
         )
         salary_available = int(_salary_ok.sum())
         salary_missing = int((~_salary_ok).sum())
-        _approved_dep = v5_active_departments()
+        _approved_dep = read_df("SELECT department FROM departments WHERE active='Yes'")
         _dep_set = set(_approved_dep["department"].astype(str).tolist()) if not _approved_dep.empty else set()
         dept_pending = int(
             (~employees["department"].fillna("").astype(str).isin(_dep_set)).sum()
