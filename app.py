@@ -11301,3 +11301,159 @@ elif page == "User Management":
             st.write("**Master Control:** Owner / Admin only")
             st.write("**Salary Basis:** Actual calendar days")
             st.write("**OT:** Single OT after 12 working hours")
+
+
+# ============================================================
+# COLOR-ONLY THEME OVERRIDE
+# Restores the previous Reliable Packaging dark/navy palette.
+# No layout, logic, calculations, database or feature changes.
+# This block runs only after successful login because the login
+# path stops before reaching the end of the file.
+# ============================================================
+st.markdown("""
+<style>
+:root{
+  --v8-bg:#070c13;
+  --v8-bg2:#0a111c;
+  --v8-surface:#0e1826;
+  --v8-surface-strong:#0e1826;
+  --v8-surface-soft:#111c2b;
+  --v8-border:#1f3044;
+  --v8-border-strong:#28527e;
+  --v8-text:#f5f8fc;
+  --v8-muted:#91a0b5;
+  --v8-blue:#2f6feb;
+  --v8-cyan:#58baf7;
+  --v8-purple:#9b51e0;
+  --v8-green:#22c55e;
+  --v8-amber:#f5b83d;
+  --v8-red:#ef5350;
+
+  --v5-bg:#070c13;
+  --v5-sidebar:#0c1420;
+  --v5-card:#0e1826;
+  --v5-card2:#111c2b;
+  --v5-border:#1f3044;
+  --v5-text:#f5f8fc;
+  --v5-muted:#91a0b5;
+  --v5-blue:#2f6feb;
+  --v5-blue2:#285f9d;
+}
+
+/* App canvas — color only */
+.stApp{
+  background:
+    radial-gradient(circle at 45% -20%,rgba(34,93,168,.10),transparent 32%),
+    #070c13 !important;
+  color:#f5f8fc !important;
+}
+.stApp:before{
+  background-image:none !important;
+}
+header[data-testid="stHeader"]{
+  background:rgba(7,12,19,.96) !important;
+  border-bottom-color:#182638 !important;
+}
+
+/* Sidebar — same structure, previous palette */
+section[data-testid="stSidebar"]{
+  background:linear-gradient(180deg,#0d1623 0%,#0a111c 100%) !important;
+  border-right-color:#182638 !important;
+  box-shadow:none !important;
+}
+.v8-brand{
+  background:linear-gradient(180deg,#0d1623,#0a111c) !important;
+  border-bottom-color:#182638 !important;
+}
+.v8-user-card{
+  background:#0d1724 !important;
+  border-color:#1c2c40 !important;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"]>label:hover{
+  background:rgba(47,111,235,.12) !important;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"]>label:has(input:checked){
+  background:linear-gradient(90deg,#1e5da7,#285f9d) !important;
+  border-color:rgba(124,183,255,.20) !important;
+  box-shadow:inset 0 0 0 1px rgba(124,183,255,.20) !important;
+}
+
+/* Page header and context — colors only */
+.v8-topbar{
+  background:linear-gradient(135deg,#0e1826,#0b1420) !important;
+  border-color:#1f3044 !important;
+  box-shadow:0 12px 34px rgba(0,0,0,.12) !important;
+}
+.v8-eyebrow{color:#58baf7 !important}
+.v8-page-title{color:#f8fafc !important}
+.v8-page-sub{color:#91a0b5 !important}
+.v8-context-pill{
+  background:#0d1724 !important;
+  border-color:#1f3044 !important;
+  color:#91a0b5 !important;
+}
+.v8-context-pill strong{color:#f5f8fc !important}
+.v8-ai-pill{
+  background:linear-gradient(90deg,rgba(47,111,235,.18),rgba(40,95,157,.16)) !important;
+  border-color:#28527e !important;
+  color:#cfe2ff !important;
+}
+
+/* KPI cards — colors only */
+.v5-kpi{
+  background:linear-gradient(155deg,#111c2b,#0e1826) !important;
+  border-color:#1f3044 !important;
+  box-shadow:0 15px 32px rgba(0,0,0,.18) !important;
+}
+.v5-kpi:before{
+  background:linear-gradient(145deg,rgba(47,111,235,.10),rgba(88,186,247,.025)) !important;
+  border-color:rgba(40,82,126,.25) !important;
+}
+.v5-kpi .l,.v5-kpi .h{color:#91a0b5 !important}
+.v5-kpi .v{color:#f8fafc !important}
+.v5-kpi.blue{border-color:#28527e !important}
+
+/* Cards / panels / metric surfaces — colors only */
+div[data-testid="stVerticalBlockBorderWrapper"]{
+  background:linear-gradient(160deg,#0e1826,#0b1420) !important;
+  border-color:#1f3044 !important;
+  box-shadow:0 15px 38px rgba(0,0,0,.14) !important;
+}
+.v5-panel-title{color:#dbe5f2 !important}
+.v5-panel-sub{color:#91a0b5 !important}
+.v5-action{
+  background:#0d1724 !important;
+  border-color:#1f3044 !important;
+}
+.v5-action:hover{border-color:#28527e !important}
+[data-testid="stMetric"]{
+  background:#0e1826 !important;
+  border-color:#1f3044 !important;
+}
+div[data-testid="stDataFrame"],
+div[data-testid="stDataEditor"]{
+  border-color:#1f3044 !important;
+}
+
+/* AI / readiness / action cards — colors only */
+.v8-ai-card,
+.v8-smart-action,
+.v8-welcome{
+  background:linear-gradient(145deg,#0e1826,#0b1420) !important;
+  border-color:#1f3044 !important;
+}
+.v8-section-label{color:#dbe5f2 !important}
+.v8-progress{background:#182638 !important}
+
+/* Inputs retain their dimensions; only palette changes */
+div[data-testid="stSelectbox"]>div>div,
+div[data-testid="stTextInput"]>div>div,
+div[data-testid="stNumberInput"]>div>div,
+div[data-testid="stDateInput"]>div>div,
+div[data-testid="stTextArea"]>div>div{
+  background:#0d1521 !important;
+  border-color:#203149 !important;
+  color:#f8fafc !important;
+}
+</style>
+""", unsafe_allow_html=True)
