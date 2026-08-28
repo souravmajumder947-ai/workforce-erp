@@ -11457,3 +11457,94 @@ div[data-testid="stTextArea"]>div>div{
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ============================================================
+# SIDEBAR TEXT VISIBILITY FIX
+# Text-only improvement: no layout, logic, database, or feature changes.
+# ============================================================
+st.markdown("""
+<style>
+/* Improve general sidebar readability without changing layout */
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] small,
+section[data-testid="stSidebar"] label {
+    color: #EAF1FA !important;
+    text-rendering: optimizeLegibility !important;
+    -webkit-font-smoothing: antialiased !important;
+}
+
+/* Navigation labels */
+section[data-testid="stSidebar"] div[role="radiogroup"] > label p {
+    color: #F3F7FC !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+}
+
+/* Section headings like WORKSPACE / LIVE CONTEXT */
+section[data-testid="stSidebar"] .v8-section-label,
+section[data-testid="stSidebar"] [class*="section-label"] {
+    color: #AFC0D4 !important;
+    font-weight: 800 !important;
+    letter-spacing: .08em !important;
+}
+
+/* Signed-in user card */
+.v8-user-card,
+.sidebar-user {
+    color: #F5F8FC !important;
+}
+.v8-user-card *,
+.sidebar-user * {
+    opacity: 1 !important;
+}
+.v8-user-card strong,
+.v8-user-card b,
+.sidebar-user-name {
+    color: #FFFFFF !important;
+    font-size: 11.5px !important;
+    font-weight: 800 !important;
+}
+.v8-user-card small,
+.v8-user-card .muted,
+.sidebar-user-role {
+    color: #B7C6D8 !important;
+    font-size: 9.5px !important;
+}
+
+/* Built in India / footer block */
+.v8-sidebar-foot,
+.sidebar-foot,
+.v8-built-india,
+[class*="built-india"] {
+    color: #DCE6F2 !important;
+}
+.v8-sidebar-foot *,
+.sidebar-foot *,
+.v8-built-india *,
+[class*="built-india"] * {
+    opacity: 1 !important;
+}
+.v8-sidebar-foot small,
+.sidebar-foot small,
+.v8-built-india small,
+[class*="built-india"] small {
+    color: #C0CDDC !important;
+    font-size: 9px !important;
+    line-height: 1.35 !important;
+}
+
+/* Company/legal footer text at very bottom */
+section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
+    text-shadow: 0 0 1px rgba(255,255,255,.06) !important;
+}
+
+/* Sign out button text */
+section[data-testid="stSidebar"] .stButton button,
+section[data-testid="stSidebar"] button {
+    color: #F8FAFC !important;
+    font-weight: 700 !important;
+}
+</style>
+""", unsafe_allow_html=True)
