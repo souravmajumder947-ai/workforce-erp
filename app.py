@@ -9613,8 +9613,8 @@ elif page == "Attendance":
                 )
                 bulk_status = cstatus.selectbox(
                     "Bulk Status for Selected",
-                    ["Keep Each Row Status","Present","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"],
-                    key="v80_bulk_review_status"
+                    ["Keep Each Row Status","Use Raw Biometric Status (Auto)","Present","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"],
+                    key="v82_bulk_review_status"
                 )
                 bulk_division = cdiv.selectbox(
                     "Bulk Division for Selected",
@@ -9654,8 +9654,9 @@ elif page == "Attendance":
 
                 selected_count = int(edited["Select"].fillna(False).astype(bool).sum()) if "Select" in edited.columns else 0
                 st.caption(
-                    f"Selected: {selected_count:,} row(s). Bulk Status/Division, when chosen, is applied only to selected rows. "
-                    "Raw Status is read-only and kept for biometric audit."
+                    f"Selected: {selected_count:,} row(s). For division mismatch, choose 'Use Raw Biometric Status (Auto)' "
+                    "to convert PP→Present, WO→WO, AA→Absent, EL→EL while keeping incomplete punches in HR Review. "
+                    "Raw Status remains read-only for biometric audit."
                 )
 
                 if can_edit_hr(_current_role):
@@ -9674,7 +9675,11 @@ elif page == "Attendance":
                             cur=conn.cursor(); master_ids=set(); resolved_rows=0; remaining_rows=0
                             for _,r in selected.iterrows():
                                 final_status = str(r["Status"])
-                                if bulk_status != "Keep Each Row Status":
+                                if bulk_status == "Use Raw Biometric Status (Auto)":
+                                    final_status = _map_attendance_status(
+                                        r["Raw Status"], r["Working Hrs"], r["Time In"], r["Time Out"]
+                                    )
+                                elif bulk_status != "Keep Each Row Status":
                                     final_status = bulk_status
                                 final_division = _clean_text(r["Division"])
                                 if bulk_division != "Keep Each Row Division":
