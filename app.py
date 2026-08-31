@@ -9540,8 +9540,76 @@ elif page == "Attendance":
                ORDER BY a.work_date DESC,COALESCE(e.employee_name,a.source_employee_name,a.employee_id)""",
             params
         )
+        # Unified HR Action Centre: attendance exceptions + temporary employee masters + missing attendance.
+        master_clause, master_params = v5_division_clause(global_division)
+        master_pending = read_df(
+            """SELECT division,employee_id,employee_name,department,designation,shift,status,remarks
+               FROM employees
+               WHERE status='Active' AND LOWER(TRIM(COALESCE(department,'')))='hr review' """ + master_clause + """
+               ORDER BY division,employee_name""",
+            master_params
+        )
+
+        missing_clause, missing_params = v5_division_clause(global_division, "e.")
+        missing_attendance = read_df(
+            """SELECT e.division,e.employee_id,e.employee_name,e.department,e.designation,e.shift
+               FROM employees e
+               LEFT JOIN attendance a
+                 ON a.employee_id=e.employee_id
+                AND a.work_date=?
+                AND a.division=e.division
+               WHERE e.status='Active' AND a.id IS NULL """ + missing_clause + """
+               ORDER BY e.division,e.employee_name""",
+            (global_work_date.isoformat(),) + missing_params
+        )
+
+        st.markdown("#### All HR Review / Pending Actions")
+        st.caption(
+            "This single view combines attendance exceptions, employee masters awaiting HR completion, "
+            "and employees with no attendance record for the selected working date."
+        )
+        u1,u2,u3,u4 = st.columns(4)
+        u1.metric("Attendance Reviews", f"{len(reviews):,}")
+        u2.metric("Employee Master Pending", f"{len(master_pending):,}")
+        u3.metric("Missing Attendance", f"{len(missing_attendance):,}")
+        u4.metric("Total HR Actions", f"{len(reviews)+len(master_pending)+len(missing_attendance):,}")
+
+        with st.expander(f"Employee Master Pending ({len(master_pending):,})", expanded=(reviews.empty and not master_pending.empty)):
+            if master_pending.empty:
+                st.success("No temporary employee masters are waiting for HR completion.")
+            else:
+                mp = master_pending.rename(columns={
+                    "division":"Division","employee_id":"Employee ID","employee_name":"Employee Name",
+                    "department":"Department","designation":"Designation","shift":"Shift",
+                    "status":"Status","remarks":"HR Remarks"
+                }).copy()
+                mp["Pending Reason"] = "Employee was created temporarily from biometric attendance and needs HR master confirmation"
+                st.dataframe(
+                    mp[["Division","Employee ID","Employee Name","Department","Designation","Shift","Pending Reason"]],
+                    hide_index=True,use_container_width=True
+                )
+                st.info("Complete these employees in Employees / Employee 360 or Master Centre. Once Department is corrected from HR Review, they disappear from this list automatically.")
+
+        with st.expander(f"Missing Attendance on {global_work_date.strftime('%d %b %Y')} ({len(missing_attendance):,})", expanded=False):
+            if missing_attendance.empty:
+                st.success("Every active employee has an attendance record for this date.")
+            else:
+                ma = missing_attendance.rename(columns={
+                    "division":"Division","employee_id":"Employee ID","employee_name":"Employee Name",
+                    "department":"Department","designation":"Designation","shift":"Shift"
+                }).copy()
+                ma["Date"] = global_work_date.strftime("%d/%m/%Y")
+                ma["Reason"] = "No attendance record"
+                st.dataframe(
+                    ma[["Division","Employee ID","Employee Name","Department","Designation","Shift","Date","Reason"]],
+                    hide_index=True,use_container_width=True
+                )
+
         if reviews.empty:
-            st.success("No attendance records are waiting for HR Review.")
+            if master_pending.empty and missing_attendance.empty:
+                st.success("No HR review or pending HR action is currently open.")
+            else:
+                st.info("No attendance-status rows are waiting for HR Review. Other HR actions are shown above.")
         else:
             reviews = reviews.copy()
             reviews["work_date_dt"] = pd.to_datetime(reviews["work_date"], errors="coerce").dt.date
