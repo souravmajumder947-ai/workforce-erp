@@ -6801,22 +6801,22 @@ def v5_page_header(title, subtitle="", division=None, work_date=None, month_valu
         f'<span class="v8-context-pill">{html.escape(label)} · <strong>{html.escape(value)}</strong></span>'
         for label, value in ctx
     )
-    st.markdown(
-        f"""
-        <div class="v8-topbar">
-          <div class="v8-title-wrap">
-            <div class="v8-eyebrow">Reliable Packaging · HRMS</div>
-            <div class="v8-page-title">{html.escape(title)}</div>
-            <div class="v8-page-sub">{html.escape(subtitle)}</div>
-          </div>
-          <div class="v8-context">
-            {_context_html}
-            <span class="v8-ai-pill">✦ AI-ready · {_role_text}</span>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    # Keep this HTML compact. Markdown interprets an indented inline <span>
+    # as a code block when _context_html is empty (for example, Master Centre).
+    _header_html = (
+        '<div class="v8-topbar">'
+        '<div class="v8-title-wrap">'
+        '<div class="v8-eyebrow">Reliable Packaging · HRMS</div>'
+        f'<div class="v8-page-title">{html.escape(title)}</div>'
+        f'<div class="v8-page-sub">{html.escape(subtitle)}</div>'
+        '</div>'
+        '<div class="v8-context">'
+        f'{_context_html}'
+        f'<span class="v8-ai-pill">✦ AI-ready · {_role_text}</span>'
+        '</div>'
+        '</div>'
     )
+    st.markdown(_header_html, unsafe_allow_html=True)
 
 
 def v5_kpis(items):
