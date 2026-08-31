@@ -11329,7 +11329,7 @@ elif page == "User Management":
             """
             <style>
             .v8-compact-table{
-              max-width:100%;overflow-x:auto;margin:9px 0 2px;
+              width:fit-content;max-width:100%;overflow-x:auto;margin:9px 0 2px;
               border:1px solid rgba(102,155,216,.22);border-radius:11px;
               background:rgba(6,15,26,.72)
             }
@@ -11353,6 +11353,24 @@ elif page == "User Management":
             .v8-table-positive{color:#68e6bd!important;font-weight:750}
             .v8-table-negative{color:#8395aa!important}
             .v8-table-muted{color:#687c94!important}
+            .v8-summary-card{
+              min-height:231px;margin:9px 0 2px;padding:17px 18px;border-radius:12px;
+              background:linear-gradient(145deg,rgba(16,35,58,.94),rgba(8,23,40,.96));
+              border:1px solid rgba(96,158,231,.20);
+              box-shadow:inset 0 1px 0 rgba(255,255,255,.03)
+            }
+            .v8-summary-kicker{
+              color:#55a9ff;font-size:8px;font-weight:900;letter-spacing:1.15px;text-transform:uppercase
+            }
+            .v8-summary-title{color:#f6f9fd;font-size:15px;font-weight:900;margin:5px 0 13px}
+            .v8-summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+            .v8-summary-stat{
+              min-height:63px;padding:10px;border-radius:9px;background:rgba(5,16,29,.62);
+              border:1px solid rgba(99,151,211,.14)
+            }
+            .v8-summary-stat b{display:block;color:#f8fbff;font-size:18px;line-height:1;margin-bottom:5px}
+            .v8-summary-stat span{color:#8096b0;font-size:8px;line-height:1.25}
+            .v8-summary-note{color:#748ba6;font-size:8px;line-height:1.5;margin-top:12px}
             </style>
             """,
             unsafe_allow_html=True,
@@ -11373,14 +11391,30 @@ elif page == "User Management":
                 {"Role":"Manager","Daily HR Work":"As assigned","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
                 {"Role":"Viewer","Daily HR Work":"View only","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
             ])
-            v8_compact_table(
-                ["S.No","Role","Daily HR","Payroll","Master Centre","Delete Access","User Management"],
-                [
-                    [index+1]+[row[column] for column in policy_df.columns]
-                    for index,(_,row) in enumerate(policy_df.iterrows())
-                ],
-                [58,96,150,160,138,136,150],
-            )
+            policy_table_col,policy_summary_col=st.columns([1.8,1],gap="medium")
+            with policy_table_col:
+                v8_compact_table(
+                    ["S.No","Role","Daily HR","Payroll","Master Centre","Delete Access","User Management"],
+                    [
+                        [index+1]+[row[column] for column in policy_df.columns]
+                        for index,(_,row) in enumerate(policy_df.iterrows())
+                    ],
+                    [58,96,150,160,138,136,150],
+                )
+            with policy_summary_col:
+                st.markdown(
+                    '<div class="v8-summary-card">'
+                    '<div class="v8-summary-kicker">Security overview</div>'
+                    '<div class="v8-summary-title">Role Control</div>'
+                    '<div class="v8-summary-grid">'
+                    '<div class="v8-summary-stat"><b>2</b><span>Full-control roles</span></div>'
+                    '<div class="v8-summary-stat"><b>3</b><span>Limited-access roles</span></div>'
+                    '</div>'
+                    '<div class="v8-summary-note">Owner and Admin control master data and users. '
+                    'Operational roles remain protected from destructive access.</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
 
         with st.container(border=True):
             v5_panel("Create User","Create a login and initial role.")
@@ -11437,14 +11471,32 @@ elif page == "User Management":
                     "User Directory",
                     f"{len(user_view):,} login account(s) · Internal database IDs are hidden."
                 )
-                v8_compact_table(
-                    ["S.No","Username","Full Name","Role","Status","Created","Last Login"],
-                    [
-                        [index+1]+row.tolist()
-                        for index,(_,row) in enumerate(user_view.iterrows())
-                    ],
-                    [58,118,188,92,104,205,205],
-                )
+                active_users=int(users["is_active"].astype(bool).sum())
+                control_users=int(users["role"].isin(FULL_CONTROL_ROLES).sum())
+                never_logged=int(users["last_login"].isna().sum())
+                directory_table_col,directory_summary_col=st.columns([1.8,1],gap="medium")
+                with directory_table_col:
+                    v8_compact_table(
+                        ["S.No","Username","Full Name","Role","Status","Created","Last Login"],
+                        [
+                            [index+1]+row.tolist()
+                            for index,(_,row) in enumerate(user_view.iterrows())
+                        ],
+                        [58,118,188,92,104,205,205],
+                    )
+                with directory_summary_col:
+                    st.markdown(
+                        '<div class="v8-summary-card">'
+                        '<div class="v8-summary-kicker">Live account summary</div>'
+                        '<div class="v8-summary-title">User Overview</div>'
+                        '<div class="v8-summary-grid">'
+                        f'<div class="v8-summary-stat"><b>{len(users):,}</b><span>Total users</span></div>'
+                        f'<div class="v8-summary-stat"><b>{active_users:,}</b><span>Active users</span></div>'
+                        f'<div class="v8-summary-stat"><b>{control_users:,}</b><span>Owner / Admin</span></div>'
+                        f'<div class="v8-summary-stat"><b>{never_logged:,}</b><span>Never logged in</span></div>'
+                        '</div></div>',
+                        unsafe_allow_html=True,
+                    )
             st.markdown("### Edit User & Module Access")
             selected_user=st.selectbox(
                 "Edit User",users["username"].astype(str).tolist(),key="v54_edit_user"
