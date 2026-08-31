@@ -1,0 +1,93 @@
+name: Attendance FK Review Hotfix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/attendance-fk-review-hotfix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch attendance import FK handling
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''def _bulk_upsert_attendance(records, source_type):
+    if not records:
+        return 0
+    records = _validate_and_enrich_attendance_records(records)
+    conn = get_pg_conn()
+'''
+          new = '''def _bulk_upsert_attendance(records, source_type):
+    if not records:
+        return 0
+    records = _validate_and_enrich_attendance_records(records)
+
+    # attendance.employee_id has a foreign key to employees.employee_id.
+    # Unknown biometric IDs are valid HR-review exceptions, but PostgreSQL
+    # cannot store them until a placeholder master row exists. Create only
+    # minimal HR-review placeholders here; HR will confirm/correct them later
+    # from Attendance -> HR Review. Existing employees are never overwritten.
+    unknown_records = [
+        rec for rec in records
+        if _clean_text(rec.get("source_issue")) == "Employee ID not found in Employee Master"
+    ]
+    if unknown_records:
+        conn_master = get_pg_conn()
+        try:
+            cur_master = conn_master.cursor()
+            for rec in unknown_records:
+                emp_id = str(rec.get("employee_id", "")).strip()
+                if not emp_id:
+                    continue
+                emp_name = _clean_text(rec.get("source_employee_name")) or _clean_text(rec.get("employee_name")) or emp_id
+                designation = _clean_text(rec.get("designation")) or "Employee"
+                division = _clean_text(rec.get("division")) or "Greater Noida Plant"
+                shift = _clean_text(rec.get("shift"))
+                if shift not in ("A", "B"):
+                    shift = "General"
+                cur_master.execute(
+                    """INSERT INTO employees(
+                           employee_id,employee_name,department,designation,
+                           employee_type,shift,division,status
+                       ) VALUES (%s,%s,'HR Review',%s,'Permanent',%s,%s,'Active')
+                       ON CONFLICT(employee_id) DO NOTHING""",
+                    (emp_id, emp_name, designation, shift, division)
+                )
+            conn_master.commit()
+            cur_master.close()
+        except Exception:
+            conn_master.rollback()
+            raise
+        finally:
+            conn_master.close()
+
+    conn = get_pg_conn()
+'''
+          if old not in text:
+              raise SystemExit('Target _bulk_upsert_attendance block not found; no patch applied.')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+      - name: Verify Python syntax
+        run: python -m py_compile app.py
+      - name: Commit patched app
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          if git diff --cached --quiet; then
+            echo 'No app.py changes to commit.'
+          else
+            git commit -m 'Fix unknown employee attendance FK import'
+            git push origin main
+          fi
