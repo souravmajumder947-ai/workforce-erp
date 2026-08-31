@@ -2,6 +2,7 @@ name: HR Review Multi Select Hotfix
 
 on:
   push:
+    branches: [main]
     paths:
       - '.github/workflows/hr-review-multiselect-hotfix.yml'
   workflow_dispatch:
@@ -16,105 +17,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Patch HR Review filters to multi-select
-        shell: python
-        run: |
-          from pathlib import Path
-          p = Path('app.py')
-          text = p.read_text(encoding='utf-8')
-
-          replacements = [
-              (
-'''            div_options = ["All Divisions"] + sorted(reviews["division"].dropna().astype(str).unique().tolist())
-            review_div_filter = f1.selectbox("Division", div_options, key="v80_review_div_filter")
-''',
-'''            div_options = sorted(reviews["division"].dropna().astype(str).unique().tolist())
-            review_div_filter = f1.multiselect(
-                "Division", div_options, default=[], placeholder="All divisions",
-                key="v81_review_div_filter"
-            )
-'''
-              ),
-              (
-'''            emp_options = ["All Employees"] + sorted(employee_labels.keys(), key=lambda x: employee_labels[x].lower())
-            review_emp_filter = f3.selectbox(
-                "Employee", emp_options,
-                format_func=lambda x: x if x == "All Employees" else employee_labels.get(x,x),
-                key="v80_review_emp_filter"
-            )
-
-            issue_options = ["All Issues","Missing Punch","Unknown Employee","Division Mismatch","Other HR Review"]
-            review_issue_filter = f4.selectbox("Issue Type", issue_options, key="v80_review_issue_filter")
-''',
-'''            emp_options = sorted(employee_labels.keys(), key=lambda x: employee_labels[x].lower())
-            review_emp_filter = f3.multiselect(
-                "Employees", emp_options, default=[],
-                format_func=lambda x: employee_labels.get(x,x),
-                placeholder="All employees", key="v81_review_emp_filter"
-            )
-
-            issue_options = ["Missing Punch","Unknown Employee","Division Mismatch","Other HR Review"]
-            review_issue_filter = f4.multiselect(
-                "Issue Type", issue_options, default=[], placeholder="All issues",
-                key="v81_review_issue_filter"
-            )
-'''
-              ),
-              (
-'''            if review_div_filter != "All Divisions":
-                filtered = filtered[filtered["division"].astype(str) == review_div_filter]
-''',
-'''            if review_div_filter:
-                filtered = filtered[filtered["division"].astype(str).isin(review_div_filter)]
-'''
-              ),
-              (
-'''            if review_emp_filter != "All Employees":
-                filtered = filtered[filtered["employee_id"].astype(str) == str(review_emp_filter)]
-            if review_issue_filter != "All Issues":
-                filtered = filtered[filtered["issue_type"] == review_issue_filter]
-''',
-'''            if review_emp_filter:
-                filtered = filtered[filtered["employee_id"].astype(str).isin([str(x) for x in review_emp_filter])]
-            if review_issue_filter:
-                filtered = filtered[filtered["issue_type"].isin(review_issue_filter)]
-'''
-              ),
-              (
-'''                select_all_filtered = csel.checkbox(
-                    f"Select all filtered ({len(filtered):,})", value=False, key="v80_select_all_filtered"
-                )
-''',
-'''                select_all_filtered = csel.checkbox(
-                    f"Select all filtered ({len(filtered):,})", value=False, key="v81_select_all_filtered",
-                    help="Use the multi-select filters above to choose several employees/issues, then select all matching rows at once."
-                )
-'''
-              ),
-          ]
-
-          for old, new in replacements:
-              if old not in text:
-                  raise SystemExit('Expected HR Review multi-select target not found; patch stopped safely.')
-              text = text.replace(old, new, 1)
-
-          text = text.replace(
-              '"Filter the exceptions, select only the rows HR has checked, then resolve those selected rows. "',
-              '"Use multi-select filters for several divisions, employees or issue types, then select all filtered rows in one click. "',
-              1
-          )
-
-          p.write_text(text, encoding='utf-8')
+      - name: Apply HR Review multi-select patch
+        run: python tools/hr_review_multiselect_patch.py
       - name: Verify Python syntax
         run: python -m py_compile app.py
       - name: Commit live multi-select update
+        shell: bash
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app.py
           if git diff --cached --quiet; then
-            echo 'No app.py changes to commit.'
+            echo "No changes to commit"
           else
-            git commit -m 'Enable multi-select HR review filters'
+            git commit -m "Enable multi-select HR review filters"
             git push origin main
           fi
