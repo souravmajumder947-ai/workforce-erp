@@ -1,0 +1,52 @@
+name: HR Review Hide Database ID
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hr-review-hide-db-id.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Hide internal attendance ID from HR Review
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''                    column_config={
+                        "Select":st.column_config.CheckboxColumn("Select",default=False),
+                        "Division":st.column_config.SelectboxColumn("Division",options=DIVISIONS,required=True),
+'''
+          new = '''                    column_config={
+                        # Keep the attendance database ID in the editor data for safe updates,
+                        # but hide it from HR users. Employee ID is the business-facing identifier.
+                        "ID": None,
+                        "Select":st.column_config.CheckboxColumn("Select",default=False),
+                        "Division":st.column_config.SelectboxColumn("Division",options=DIVISIONS,required=True),
+'''
+          if old not in text:
+              raise SystemExit('HR Review column_config target not found; no patch applied.')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+      - name: Verify Python syntax
+        run: python -m py_compile app.py
+      - name: Commit live UI update
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          if git diff --cached --quiet; then
+            echo 'No app.py changes to commit.'
+          else
+            git commit -m 'Hide internal attendance ID from HR Review'
+            git push origin main
+          fi
