@@ -5669,6 +5669,126 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
     animation-iteration-count:1!important;
   }
 }
+
+/* Live NCR location hub, anchored to Delhi on the India artwork. */
+@keyframes v94MapPing{
+  0%{transform:scale(.35);opacity:.95}
+  72%,100%{transform:scale(2.25);opacity:0}
+}
+@keyframes v94MapGlow{
+  0%,100%{box-shadow:0 0 0 2px rgba(2,9,20,.82),0 0 10px rgba(49,234,188,.72)}
+  50%{box-shadow:0 0 0 2px rgba(2,9,20,.82),0 0 21px rgba(49,234,188,1)}
+}
+@keyframes v94LocationFloat{
+  0%,100%{transform:translateY(-50%)}
+  50%{transform:translateY(calc(-50% - 2px))}
+}
+.v94-map-location{
+  position:absolute;
+  z-index:12;
+  left:61.2%;
+  top:25.5%;
+  width:clamp(8px,.58vw,18px);
+  height:clamp(8px,.58vw,18px);
+  transform:translate(-50%,-50%);
+  cursor:default;
+}
+.v94-map-ping{
+  position:absolute;
+  inset:-55%;
+  border:1px solid rgba(53,237,194,.82);
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(47,226,185,.28),rgba(47,226,185,.04) 55%,transparent 70%);
+  animation:v94MapPing 1.8s cubic-bezier(0,.2,.8,1) infinite;
+}
+.v94-map-ping.two{animation-delay:.9s}
+.v94-map-dot{
+  position:absolute;
+  inset:15%;
+  border-radius:50%;
+  background:#35e6b7;
+  border:1px solid rgba(216,255,246,.95);
+  animation:v94MapGlow 1.8s ease-in-out infinite;
+}
+.v94-map-label{
+  position:absolute;
+  right:calc(100% + clamp(9px,.52vw,18px));
+  top:50%;
+  min-width:clamp(96px,7.4vw,245px);
+  padding:clamp(5px,.36vw,12px) clamp(7px,.5vw,16px);
+  border:1px solid rgba(80,213,255,.24);
+  border-radius:clamp(7px,.5vw,15px);
+  background:linear-gradient(145deg,rgba(3,19,34,.88),rgba(5,28,43,.72));
+  box-shadow:0 12px 30px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter:blur(13px) saturate(140%);
+  animation:v94LocationFloat 3.1s ease-in-out infinite;
+  white-space:nowrap;
+}
+.v94-map-label b{
+  display:block;
+  color:#dffaff;
+  font-size:clamp(6px,.32vw,12px);
+  line-height:1.15;
+  letter-spacing:clamp(.55px,.05vw,1.3px);
+}
+.v94-map-label small{
+  display:flex;
+  align-items:center;
+  gap:clamp(4px,.22vw,8px);
+  margin-top:clamp(2px,.12vw,5px);
+  color:#5fe9c2;
+  font-size:clamp(5px,.25vw,10px);
+  font-weight:800;
+  letter-spacing:clamp(.45px,.04vw,1px);
+}
+.v94-map-label small:before{
+  content:"";
+  width:clamp(4px,.2vw,7px);
+  height:clamp(4px,.2vw,7px);
+  flex:0 0 auto;
+  border-radius:50%;
+  background:#35e6b7;
+  box-shadow:0 0 10px rgba(53,230,183,.9);
+}
+.v94-map-sites{
+  position:absolute;
+  z-index:13;
+  right:calc(100% + clamp(9px,.52vw,18px));
+  top:calc(50% + clamp(26px,1.75vw,58px));
+  min-width:clamp(150px,10.8vw,360px);
+  padding:clamp(7px,.42vw,14px) clamp(8px,.55vw,18px);
+  border:1px solid rgba(80,213,255,.20);
+  border-radius:clamp(8px,.55vw,17px);
+  background:rgba(3,14,28,.91);
+  box-shadow:0 15px 36px rgba(0,0,0,.34);
+  backdrop-filter:blur(15px);
+  opacity:0;
+  transform:translateY(-5px);
+  transition:opacity .2s ease,transform .2s ease;
+  pointer-events:none;
+}
+.v94-map-location:hover .v94-map-sites{
+  opacity:1;
+  transform:translateY(0);
+}
+.v94-map-sites span{
+  display:flex;
+  align-items:center;
+  gap:clamp(5px,.28vw,9px);
+  color:#a9c8dc;
+  font-size:clamp(5px,.27vw,10px);
+  line-height:1.7;
+  white-space:nowrap;
+}
+.v94-map-sites span:before{
+  content:"";
+  width:clamp(3px,.15vw,6px);
+  height:clamp(3px,.15vw,6px);
+  flex:0 0 auto;
+  border-radius:50%;
+  background:#35e6b7;
+  box-shadow:0 0 7px rgba(53,230,183,.75);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -5685,6 +5805,11 @@ if st.session_state.get("auth_user") is None:
                 <div class="v83-cover-top-brand"></div>
                 <div class="v83-hero-live"><span class="v83-live-pill"><span class="v83-live-dot"></span>LIVE HR SYSTEM</span></div>
                 <div class="v90-hero-telemetry"><b>SMART FACTORY NETWORK</b><span class="v90-signal-bars"><i></i><i></i><i></i></span><span class="v92-live-sync" data-v92-live-sync>SYNC {_login_verified_time}</span></div>
+                <div class="v94-map-location" title="Greater Noida Plant · D-2 Sector 63 Head Office · Dhaulana Glass Plant">
+                  <span class="v94-map-ping"></span><span class="v94-map-ping two"></span><span class="v94-map-dot"></span>
+                  <span class="v94-map-label"><b>DELHI NCR NETWORK</b><small>3 LOCATIONS LIVE</small></span>
+                  <span class="v94-map-sites"><span>Greater Noida Plant</span><span>D-2 Sector 63 Head Office</span><span>Dhaulana Glass Plant</span></span>
+                </div>
                 <div class="v83-hero-ai-core"></div>
                 <div class="v90-glass-sheen"></div>
                 <div class="v90-data-rail one"></div>
