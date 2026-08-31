@@ -9600,6 +9600,17 @@ elif page == "Attendance":
                 except Exception:
                     dept_options = []
 
+                # Boiler and Utility VB are separate work areas.
+                # VB means Vendor Boy and must never be treated as Boiler.
+                dept_options = sorted(set(dept_options) | {
+                    "Boiler",
+                    "Utility - VB (Vendor Boy)",
+                })
+                st.caption(
+                    "Department rule: **Boiler** and **Utility - VB (Vendor Boy)** are separate. "
+                    "VB means Vendor Boy and is never mapped to Boiler."
+                )
+
                 m1,m2,m3,m4 = st.columns([1,1.25,1.15,1.0])
                 select_all_master = m1.checkbox(
                     f"Select all pending ({len(mp):,})", value=False, key="v84_select_all_master_pending"
@@ -9672,6 +9683,18 @@ elif page == "Attendance":
                                     division = bulk_master_division
                                 if bulk_master_shift != "Keep Each Row Shift":
                                     shift = bulk_master_shift
+
+                                # Canonicalize only the Utility-VB aliases. Boiler remains separate.
+                                dept_key = " ".join(
+                                    department.lower().replace("_", " ").replace("-", " ").split()
+                                )
+                                if dept_key in {
+                                    "utility vb", "utility vendor boy", "vendor boy", "vb"
+                                }:
+                                    department = "Utility - VB (Vendor Boy)"
+                                elif dept_key == "boiler":
+                                    department = "Boiler"
+
                                 cur.execute(
                                     """UPDATE employees
                                        SET employee_name=%s,department=%s,designation=%s,division=%s,shift=%s,status='Active'
