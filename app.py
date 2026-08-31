@@ -11294,29 +11294,48 @@ elif page == "User Management":
     if _current_role not in FULL_CONTROL_ROLES:
         st.warning("User Management is restricted to Owner / Admin.")
     else:
-        st.markdown("### Access Control Policy")
-        st.caption(
-            "Owner has every application right. Admin also has full operational, master and user-management control. "
-            "HR, Manager and Viewer can never receive Master Centre or destructive-delete rights through module access."
-        )
-        policy_df=pd.DataFrame([
-            {"Role":"Owner","Daily HR Work":"Full","Payroll Work":"Full","Master Centre":"Full","Delete / Deactivate":"Full","User Management":"Full"},
-            {"Role":"Admin","Daily HR Work":"Full","Payroll Work":"Full","Master Centre":"Full","Delete / Deactivate":"Yes","User Management":"Yes"},
-            {"Role":"HR","Daily HR Work":"Yes","Payroll Work":"Yes","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
-            {"Role":"Manager","Daily HR Work":"As assigned","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
-            {"Role":"Viewer","Daily HR Work":"View only","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
-        ])
-        st.dataframe(policy_df,hide_index=True,use_container_width=True)
+        with st.container(border=True):
+            v5_panel(
+                "Access Control Policy",
+                "Clear role boundaries for daily work, payroll and administration."
+            )
+            st.caption(
+                "Owner has every application right. Admin also has full operational, master and user-management control. "
+                "HR, Manager and Viewer can never receive Master Centre or destructive-delete rights through module access."
+            )
+            policy_df=pd.DataFrame([
+                {"Role":"Owner","Daily HR Work":"Full","Payroll Work":"Full","Master Centre":"Full","Delete / Deactivate":"Full","User Management":"Full"},
+                {"Role":"Admin","Daily HR Work":"Full","Payroll Work":"Full","Master Centre":"Full","Delete / Deactivate":"Yes","User Management":"Yes"},
+                {"Role":"HR","Daily HR Work":"Yes","Payroll Work":"Yes","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
+                {"Role":"Manager","Daily HR Work":"As assigned","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
+                {"Role":"Viewer","Daily HR Work":"View only","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
+            ])
+            st.dataframe(
+                policy_df,
+                hide_index=True,
+                use_container_width=True,
+                height=218,
+                column_config={
+                    "S.No":st.column_config.NumberColumn("No.",format="%d",width="small"),
+                    "Role":st.column_config.TextColumn("Role",width="small"),
+                    "Daily HR Work":st.column_config.TextColumn("Daily HR",width="medium"),
+                    "Payroll Work":st.column_config.TextColumn("Payroll",width="medium"),
+                    "Master Centre":st.column_config.TextColumn("Master Centre",width="small"),
+                    "Delete / Deactivate":st.column_config.TextColumn("Delete Access",width="small"),
+                    "User Management":st.column_config.TextColumn("User Management",width="small"),
+                }
+            )
 
         with st.container(border=True):
             v5_panel("Create User","Create a login and initial role.")
             with st.form("v54_create_user",clear_on_submit=True):
-                c1,c2,c3,c4=st.columns(4)
+                c1,c2,c3,c4=st.columns([1.2,1,.75,1],gap="small")
                 full_name=c1.text_input("Full Name")
                 username=c2.text_input("Username")
                 role=c3.selectbox("Role",["Owner","Admin","HR","Manager","Viewer"])
                 password=c4.text_input("Password",type="password")
-                create=st.form_submit_button(
+                button_space,button_col=st.columns([3,1],gap="small")
+                create=button_col.form_submit_button(
                     "Create User",type="primary",use_container_width=True
                 )
             if create:
@@ -11342,7 +11361,41 @@ elif page == "User Management":
         if users.empty:
             st.info("No users found.")
         else:
-            st.dataframe(users,hide_index=True,use_container_width=True)
+            user_view=users.copy()
+            user_view["Full Name"]=user_view["full_name"].astype(str).str.strip().str.title()
+            user_view["Status"]=user_view["is_active"].apply(
+                lambda value: "● Active" if bool(value) else "○ Inactive"
+            )
+            for source,target,empty_text in [
+                ("created_at","Created","—"),
+                ("last_login","Last Login","Never"),
+            ]:
+                parsed=pd.to_datetime(user_view[source],errors="coerce")
+                user_view[target]=parsed.dt.strftime("%d %b %Y · %I:%M %p").fillna(empty_text)
+            user_view=user_view[
+                ["username","Full Name","role","Status","Created","Last Login"]
+            ].rename(columns={"username":"Username","role":"Role"})
+
+            with st.container(border=True):
+                v5_panel(
+                    "User Directory",
+                    f"{len(user_view):,} login account(s) · Internal database IDs are hidden."
+                )
+                st.dataframe(
+                    user_view,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(430,80+(len(user_view)*39)),
+                    column_config={
+                        "S.No":st.column_config.NumberColumn("No.",format="%d",width="small"),
+                        "Username":st.column_config.TextColumn("Username",width="small"),
+                        "Full Name":st.column_config.TextColumn("Full Name",width="medium"),
+                        "Role":st.column_config.TextColumn("Role",width="small"),
+                        "Status":st.column_config.TextColumn("Status",width="small"),
+                        "Created":st.column_config.TextColumn("Created",width="medium"),
+                        "Last Login":st.column_config.TextColumn("Last Login",width="medium"),
+                    }
+                )
             st.markdown("### Edit User & Module Access")
             selected_user=st.selectbox(
                 "Edit User",users["username"].astype(str).tolist(),key="v54_edit_user"
