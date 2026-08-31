@@ -9602,10 +9602,18 @@ elif page == "Attendance":
 
                 # Boiler and Utility VB are separate work areas.
                 # VB means Vendor Boy and must never be treated as Boiler.
-                dept_options = sorted(set(dept_options) | {
-                    "Boiler",
-                    "Utility - VB (Vendor Boy)",
-                })
+                legacy_combined_departments = {
+                    "utilities & boiler", "utility & boiler", "utility boiler", "utilities boiler"
+                }
+                dept_options = sorted(
+                    {
+                        d for d in set(dept_options)
+                        if " ".join(
+                            _clean_text(d).lower().replace("_", " ").replace("-", " ").split()
+                        ) not in legacy_combined_departments
+                    }
+                    | {"Boiler", "Utility - VB (Vendor Boy)"}
+                )
                 st.caption(
                     "Department rule: **Boiler** and **Utility - VB (Vendor Boy)** are separate. "
                     "VB means Vendor Boy and is never mapped to Boiler."
@@ -9692,7 +9700,10 @@ elif page == "Attendance":
                                     "utility vb", "utility vendor boy", "vendor boy", "vb"
                                 }:
                                     department = "Utility - VB (Vendor Boy)"
-                                elif dept_key == "boiler":
+                                elif dept_key in {
+                                    "boiler", "utilities & boiler", "utility & boiler",
+                                    "utility boiler", "utilities boiler"
+                                }:
                                     department = "Boiler"
 
                                 cur.execute(
