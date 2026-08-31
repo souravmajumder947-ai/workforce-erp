@@ -9639,6 +9639,7 @@ elif page == "Attendance":
                     review_show, hide_index=True,use_container_width=True,height=520,
                     disabled=["ID","Issue Type","Date","Employee ID","Shift","Time In","Time Out","Working Hrs","Raw Status","Master Issue"],
                     column_config={
+                        "ID": None,
                         "Select":st.column_config.CheckboxColumn("Select",default=False),
                         "Division":st.column_config.SelectboxColumn("Division",options=DIVISIONS,required=True),
                         "Employee Name":st.column_config.TextColumn("Employee Name"),
