@@ -1,4 +1,4 @@
-name: HR Review UI Hotfix
+name: HR Review Auto Resolve Hotfix
 
 on:
   push:
@@ -17,11 +17,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Hide internal attendance database ID
-        run: python tools/hr_review_hide_db_id_patch.py
+      - name: Add raw biometric auto resolver
+        run: python tools/hr_review_raw_status_resolve_patch.py
       - name: Verify Python syntax
         run: python -m py_compile app.py
-      - name: Commit live HR Review UI update
+      - name: Commit live HR Review resolver update
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -30,6 +30,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Hide internal attendance ID from HR Review"
+            git commit -m "Add raw biometric auto resolve for HR Review"
             git push origin main
           fi
