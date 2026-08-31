@@ -6836,6 +6836,37 @@ def v5_panel(title, subtitle=""):
         unsafe_allow_html=True
     )
 
+def v8_compact_table(headers, rows, widths):
+    """Render a compact, fixed-width responsive table without stretched columns."""
+    safe_headers=[html.escape(str(header)) for header in headers]
+    safe_widths=[max(48,int(width)) for width in widths]
+    table_width=sum(safe_widths)
+    colgroup="".join(f'<col style="width:{width}px">' for width in safe_widths)
+    head="".join(f'<th>{header}</th>' for header in safe_headers)
+    body=[]
+    for row in rows:
+        cells=[]
+        for value in row:
+            text="" if value is None else str(value)
+            cell_class=""
+            if text in {"Full","Yes","● Active"}:
+                cell_class=" v8-table-positive"
+            elif text in {"No","○ Inactive"}:
+                cell_class=" v8-table-negative"
+            elif text in {"Never","—"}:
+                cell_class=" v8-table-muted"
+            safe_text=html.escape(text)
+            cells.append(
+                f'<td class="{cell_class.strip()}" title="{html.escape(text,quote=True)}">{safe_text}</td>'
+            )
+        body.append('<tr>'+''.join(cells)+'</tr>')
+    st.markdown(
+        f'<div class="v8-compact-table"><table style="width:{table_width}px;min-width:{table_width}px">'
+        f'<colgroup>{colgroup}</colgroup><thead><tr>{head}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
+
 
 def v57_business_data_counts():
     """Return current row counts for business data that a fresh-live reset clears."""
@@ -11294,6 +11325,38 @@ elif page == "User Management":
     if _current_role not in FULL_CONTROL_ROLES:
         st.warning("User Management is restricted to Owner / Admin.")
     else:
+        st.markdown(
+            """
+            <style>
+            .v8-compact-table{
+              max-width:100%;overflow-x:auto;margin:9px 0 2px;
+              border:1px solid rgba(102,155,216,.22);border-radius:11px;
+              background:rgba(6,15,26,.72)
+            }
+            .v8-compact-table table{border-collapse:collapse;table-layout:fixed}
+            .v8-compact-table th{
+              height:39px;padding:0 10px;text-align:left;white-space:nowrap;
+              background:#1b202b;color:#aeb8c8;font-size:12px;font-weight:650;
+              border-right:1px solid rgba(93,129,170,.16);
+              border-bottom:1px solid rgba(93,129,170,.22)
+            }
+            .v8-compact-table td{
+              height:38px;padding:0 10px;color:#f4f7fb;font-size:12px;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+              border-right:1px solid rgba(93,129,170,.14);
+              border-bottom:1px solid rgba(93,129,170,.16)
+            }
+            .v8-compact-table th:first-child,.v8-compact-table td:first-child{text-align:center}
+            .v8-compact-table th:last-child,.v8-compact-table td:last-child{border-right:0}
+            .v8-compact-table tbody tr:last-child td{border-bottom:0}
+            .v8-compact-table tbody tr:hover td{background:rgba(52,116,210,.08)}
+            .v8-table-positive{color:#68e6bd!important;font-weight:750}
+            .v8-table-negative{color:#8395aa!important}
+            .v8-table-muted{color:#687c94!important}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         with st.container(border=True):
             v5_panel(
                 "Access Control Policy",
@@ -11310,20 +11373,13 @@ elif page == "User Management":
                 {"Role":"Manager","Daily HR Work":"As assigned","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
                 {"Role":"Viewer","Daily HR Work":"View only","Payroll Work":"View if assigned","Master Centre":"No","Delete / Deactivate":"No","User Management":"No"},
             ])
-            st.dataframe(
-                policy_df,
-                hide_index=True,
-                use_container_width=True,
-                height=218,
-                column_config={
-                    "S.No":st.column_config.NumberColumn("No.",format="%d",width="small"),
-                    "Role":st.column_config.TextColumn("Role",width="small"),
-                    "Daily HR Work":st.column_config.TextColumn("Daily HR",width="medium"),
-                    "Payroll Work":st.column_config.TextColumn("Payroll",width="medium"),
-                    "Master Centre":st.column_config.TextColumn("Master Centre",width="small"),
-                    "Delete / Deactivate":st.column_config.TextColumn("Delete Access",width="small"),
-                    "User Management":st.column_config.TextColumn("User Management",width="small"),
-                }
+            v8_compact_table(
+                ["S.No","Role","Daily HR","Payroll","Master Centre","Delete Access","User Management"],
+                [
+                    [index+1]+[row[column] for column in policy_df.columns]
+                    for index,(_,row) in enumerate(policy_df.iterrows())
+                ],
+                [58,96,150,160,138,136,150],
             )
 
         with st.container(border=True):
@@ -11381,20 +11437,13 @@ elif page == "User Management":
                     "User Directory",
                     f"{len(user_view):,} login account(s) · Internal database IDs are hidden."
                 )
-                st.dataframe(
-                    user_view,
-                    hide_index=True,
-                    use_container_width=True,
-                    height=min(430,80+(len(user_view)*39)),
-                    column_config={
-                        "S.No":st.column_config.NumberColumn("No.",format="%d",width="small"),
-                        "Username":st.column_config.TextColumn("Username",width="small"),
-                        "Full Name":st.column_config.TextColumn("Full Name",width="medium"),
-                        "Role":st.column_config.TextColumn("Role",width="small"),
-                        "Status":st.column_config.TextColumn("Status",width="small"),
-                        "Created":st.column_config.TextColumn("Created",width="medium"),
-                        "Last Login":st.column_config.TextColumn("Last Login",width="medium"),
-                    }
+                v8_compact_table(
+                    ["S.No","Username","Full Name","Role","Status","Created","Last Login"],
+                    [
+                        [index+1]+row.tolist()
+                        for index,(_,row) in enumerate(user_view.iterrows())
+                    ],
+                    [58,118,188,92,104,205,205],
                 )
             st.markdown("### Edit User & Module Access")
             selected_user=st.selectbox(
