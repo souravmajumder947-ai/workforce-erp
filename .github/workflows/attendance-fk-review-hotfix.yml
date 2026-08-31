@@ -33,11 +33,9 @@ jobs:
         return 0
     records = _validate_and_enrich_attendance_records(records)
 
-    # attendance.employee_id has a foreign key to employees.employee_id.
-    # Unknown biometric IDs are valid HR-review exceptions, but PostgreSQL
-    # cannot store them until a placeholder master row exists. Create only
-    # minimal HR-review placeholders here; HR will confirm/correct them later
-    # from Attendance -> HR Review. Existing employees are never overwritten.
+    # PostgreSQL FK requires employee_id to exist before attendance is saved.
+    # For unknown biometric IDs, create only a minimal HR-review placeholder.
+    # Existing Employee Master rows are never overwritten here.
     unknown_records = [
         rec for rec in records
         if _clean_text(rec.get("source_issue")) == "Employee ID not found in Employee Master"
@@ -91,3 +89,4 @@ jobs:
             git commit -m 'Fix unknown employee attendance FK import'
             git push origin main
           fi
+# retrigger 2026-08-31
