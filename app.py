@@ -9544,13 +9544,16 @@ elif page == "Attendance":
 
             st.markdown("#### HR Review Control Centre")
             st.caption(
-                "Filter the exceptions, select only the rows HR has checked, then resolve those selected rows. "
+                "Choose multiple divisions, employees or issue types, then use Select all filtered to pick every matching row at once. "
                 "Employee Master is updated only for selected and resolved master exceptions."
             )
 
             f1,f2,f3,f4 = st.columns([1.05,1.25,1.35,1.15])
-            div_options = ["All Divisions"] + sorted(reviews["division"].dropna().astype(str).unique().tolist())
-            review_div_filter = f1.selectbox("Division", div_options, key="v80_review_div_filter")
+            div_options = sorted(reviews["division"].dropna().astype(str).unique().tolist())
+            review_div_filter = f1.multiselect(
+                "Division", div_options, default=[], placeholder="All divisions",
+                key="v81_review_div_filter"
+            )
 
             valid_dates = [d for d in reviews["work_date_dt"].dropna().tolist()]
             min_review_date = min(valid_dates) if valid_dates else global_work_date
@@ -9563,27 +9566,30 @@ elif page == "Attendance":
             for _,rr in reviews[["employee_id","employee_name"]].drop_duplicates().iterrows():
                 eid = str(rr["employee_id"])
                 employee_labels[eid] = f"{_clean_text(rr['employee_name']) or eid} · {eid}"
-            emp_options = ["All Employees"] + sorted(employee_labels.keys(), key=lambda x: employee_labels[x].lower())
-            review_emp_filter = f3.selectbox(
-                "Employee", emp_options,
-                format_func=lambda x: x if x == "All Employees" else employee_labels.get(x,x),
-                key="v80_review_emp_filter"
+            emp_options = sorted(employee_labels.keys(), key=lambda x: employee_labels[x].lower())
+            review_emp_filter = f3.multiselect(
+                "Employees", emp_options, default=[],
+                format_func=lambda x: employee_labels.get(x,x),
+                placeholder="All employees", key="v81_review_emp_filter"
             )
 
-            issue_options = ["All Issues","Missing Punch","Unknown Employee","Division Mismatch","Other HR Review"]
-            review_issue_filter = f4.selectbox("Issue Type", issue_options, key="v80_review_issue_filter")
+            issue_options = ["Missing Punch","Unknown Employee","Division Mismatch","Other HR Review"]
+            review_issue_filter = f4.multiselect(
+                "Issue Type", issue_options, default=[], placeholder="All issues",
+                key="v81_review_issue_filter"
+            )
 
             filtered = reviews.copy()
-            if review_div_filter != "All Divisions":
-                filtered = filtered[filtered["division"].astype(str) == review_div_filter]
+            if review_div_filter:
+                filtered = filtered[filtered["division"].astype(str).isin(review_div_filter)]
             if isinstance(review_date_filter,(tuple,list)) and len(review_date_filter) == 2:
                 filtered = filtered[
                     filtered["work_date_dt"].apply(lambda d: bool(d and review_date_filter[0] <= d <= review_date_filter[1]))
                 ]
-            if review_emp_filter != "All Employees":
-                filtered = filtered[filtered["employee_id"].astype(str) == str(review_emp_filter)]
-            if review_issue_filter != "All Issues":
-                filtered = filtered[filtered["issue_type"] == review_issue_filter]
+            if review_emp_filter:
+                filtered = filtered[filtered["employee_id"].astype(str).isin([str(x) for x in review_emp_filter])]
+            if review_issue_filter:
+                filtered = filtered[filtered["issue_type"].isin(review_issue_filter)]
 
             k1,k2,k3,k4 = st.columns(4)
             k1.metric("Filtered Reviews", f"{len(filtered):,}")
@@ -9602,7 +9608,8 @@ elif page == "Attendance":
 
                 csel,cstatus,cdiv = st.columns([1,1.25,1.4])
                 select_all_filtered = csel.checkbox(
-                    f"Select all filtered ({len(filtered):,})", value=False, key="v80_select_all_filtered"
+                    f"Select all filtered ({len(filtered):,})", value=False, key="v81_select_all_filtered",
+                    help="Choose multiple filters above, then select every matching row in one click."
                 )
                 bulk_status = cstatus.selectbox(
                     "Bulk Status for Selected",
