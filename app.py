@@ -2731,12 +2731,16 @@ def _map_attendance_status(raw_status, working_hours=0.0, time_in_value=None, ti
         "CL": "CL", "SL": "SL", "EL": "EL", "LWP": "LWP",
         "LEAVE": "Leave", "PA": "HR Review", "AP": "HR Review",
     }
-    if raw in mapping:
-        return mapping[raw]
     tin = _time_text(time_in_value)
     tout = _time_text(time_out_value)
     has_in = bool(tin and tin != "00:00")
     has_out = bool(tout and tout != "00:00")
+    # Biometric PP/P/PRESENT is not final Present unless both punches exist.
+    # Missing In or Out punch must be confirmed by HR.
+    if raw in {"PP", "P", "PRESENT"} and not (has_in and has_out):
+        return "HR Review"
+    if raw in mapping:
+        return mapping[raw]
     if has_in and has_out:
         return "Present"
     if has_in != has_out:
@@ -2976,7 +2980,7 @@ def detect_attendance_workbook_division(uploaded_file):
 
     return None
 
-def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False):
+def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False, start_date=None, end_date=None):
     """
     Accepts Reliable Packaging standard CSV/XLSX as well as the older Employee Code/PayCode exports.
 
@@ -3008,6 +3012,10 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
         if not work_date:
             continue
         if target_date is not None and work_date != target_date.isoformat():
+            continue
+        if start_date is not None and work_date < start_date.isoformat():
+            continue
+        if end_date is not None and work_date > end_date.isoformat():
             continue
 
         row_div_raw = row.get(cmap["division"]) if "division" in cmap else ""
@@ -3113,7 +3121,7 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
     return saved, pd.DataFrame(records)
 
 
-def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=False):
+def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=False, start_date=None, end_date=None):
     wb = load_workbook(uploaded_file, data_only=True, read_only=False)
     ws = wb[wb.sheetnames[0]]
     base_date = ws.cell(1, 1).value
@@ -3146,6 +3154,10 @@ def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=Fa
                 try:
                     work_date = date(base_date.year, base_date.month, day_number)
                 except ValueError:
+                    continue
+                if start_date is not None and work_date < start_date:
+                    continue
+                if end_date is not None and work_date > end_date:
                     continue
                 time_in_value = ws.cell(row_num, col).value
                 time_out_value = ws.cell(row_num + 1, col).value
@@ -9188,17 +9200,25 @@ elif page == "Attendance":
             mode_col, date_col, div_col = st.columns([1.15, 1, 1.2])
             upload_mode = mode_col.radio(
                 "Import Mode",
-                ["Selected Date Only", "All Dates in Workbook"],
+                ["Selected Date Only", "Date Range", "All Dates in Workbook"],
                 horizontal=False,
                 key="v56_att_import_mode"
             )
             attendance_upload_date = None
+            attendance_date_range = None
             if upload_mode == "Selected Date Only":
                 attendance_upload_date = date_col.date_input(
                     "Attendance Date",
                     value=global_work_date,
                     format="DD/MM/YYYY",
                     key="v56_att_upload_date"
+                )
+            elif upload_mode == "Date Range":
+                attendance_date_range = date_col.date_input(
+                    "Attendance Range",
+                    value=(global_work_date.replace(day=1), global_work_date),
+                    format="DD/MM/YYYY",
+                    key="v56_att_upload_range"
                 )
             else:
                 date_col.markdown(
@@ -9219,6 +9239,15 @@ elif page == "Attendance":
                     f"**{attendance_upload_date.strftime('%d %b %Y')}** will be imported. "
                     "If the workbook contains other dates, they will be ignored."
                 )
+            elif upload_mode == "Date Range":
+                if isinstance(attendance_date_range, (tuple, list)) and len(attendance_date_range) == 2:
+                    st.info(
+                        f"📅 **Range upload:** only attendance from "
+                        f"**{attendance_date_range[0].strftime('%d %b %Y')}** to "
+                        f"**{attendance_date_range[1].strftime('%d %b %Y')}** will be imported."
+                    )
+                else:
+                    st.warning("Select both the start and end date for the attendance range.")
             else:
                 st.warning(
                     "Bulk mode imports every valid date contained in the workbook. "
@@ -9250,7 +9279,8 @@ elif page == "Attendance":
 
             st.caption(
                 "Accepted Status codes: PP/P = Present · AA/A = Absent · WO = Weekly Off · "
-                "H/PH = Paid Holiday · PA/AP = HR Review · HD = Half Day · CL/SL/EL/LWP supported."
+                "H/PH = Paid Holiday · PA/AP = HR Review · HD = Half Day · CL/SL/EL/LWP supported. "
+                "Incomplete PP/P punches are automatically sent to HR Review."
             )
 
             attendance_file = st.file_uploader(
@@ -9264,6 +9294,10 @@ elif page == "Attendance":
             precheck = None
             actual = expected
             target_date = attendance_upload_date if upload_mode == "Selected Date Only" else None
+            target_start_date = None
+            target_end_date = None
+            if upload_mode == "Date Range" and isinstance(attendance_date_range, (tuple, list)) and len(attendance_date_range) == 2:
+                target_start_date, target_end_date = attendance_date_range
             use_dhaulana_monthly = False
 
             if attendance_file is not None:
@@ -9305,11 +9339,13 @@ elif page == "Attendance":
                     attendance_file.seek(0)
                     if use_dhaulana_monthly:
                         _, attendance_preview = import_dhaulana_attendance_excel(
-                            attendance_file,target_date=target_date,dry_run=True
+                            attendance_file,target_date=target_date,dry_run=True,
+                            start_date=target_start_date,end_date=target_end_date
                         )
                     else:
                         _, attendance_preview = import_standard_attendance_excel(
-                            attendance_file,actual,target_date=target_date,dry_run=True
+                            attendance_file,actual,target_date=target_date,dry_run=True,
+                            start_date=target_start_date,end_date=target_end_date
                         )
 
                     precheck = attendance_precheck(attendance_preview)
@@ -9378,17 +9414,25 @@ elif page == "Attendance":
                             with st.spinner("Saving attendance..."):
                                 if use_dhaulana_monthly:
                                     saved, preview = import_dhaulana_attendance_excel(
-                                        attendance_file,target_date=target_date,dry_run=False
+                                        attendance_file,target_date=target_date,dry_run=False,
+                                        start_date=target_start_date,end_date=target_end_date
                                     )
                                 else:
                                     saved, preview = import_standard_attendance_excel(
-                                        attendance_file,actual,target_date=target_date,dry_run=False
+                                        attendance_file,actual,target_date=target_date,dry_run=False,
+                                        start_date=target_start_date,end_date=target_end_date
                                     )
 
                             if target_date is not None:
                                 st.success(
                                     f"{saved:,} attendance rows processed for **{actual}** "
                                     f"on **{target_date.strftime('%d %b %Y')}**."
+                                )
+                            elif target_start_date is not None and target_end_date is not None:
+                                st.success(
+                                    f"{saved:,} attendance rows processed for **{actual}** from "
+                                    f"**{target_start_date.strftime('%d %b %Y')}** to "
+                                    f"**{target_end_date.strftime('%d %b %Y')}**."
                                 )
                             else:
                                 st.success(
