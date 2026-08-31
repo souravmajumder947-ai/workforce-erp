@@ -5789,6 +5789,44 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
   background:#35e6b7;
   box-shadow:0 0 7px rgba(53,230,183,.75);
 }
+
+/* Three separate NCR sites. The small visual spread keeps nearby plants readable at India-map scale. */
+@keyframes v95RedPulse{
+  0%{transform:scale(.55);opacity:.95}
+  74%,100%{transform:scale(2.45);opacity:0}
+}
+@keyframes v95RedGlow{
+  0%,100%{box-shadow:0 0 0 2px rgba(4,10,20,.9),0 0 8px rgba(255,54,70,.85)}
+  50%{box-shadow:0 0 0 2px rgba(4,10,20,.9),0 0 17px rgba(255,54,70,1)}
+}
+.v95-map-cluster{
+  width:clamp(20px,1.25vw,42px);
+  height:clamp(20px,1.25vw,42px);
+  pointer-events:none;
+}
+.v95-location-dot{
+  position:absolute;
+  width:clamp(5px,.34vw,11px);
+  height:clamp(5px,.34vw,11px);
+  border-radius:50%;
+  border:1px solid rgba(255,225,228,.98);
+  background:#ff3045;
+  animation:v95RedGlow 1.65s ease-in-out infinite;
+}
+.v95-location-dot:before{
+  content:"";
+  position:absolute;
+  inset:-55%;
+  border:1px solid rgba(255,58,77,.88);
+  border-radius:50%;
+  animation:v95RedPulse 1.65s cubic-bezier(0,.2,.8,1) infinite;
+}
+.v95-location-dot.one{left:2%;top:25%;animation-delay:0s}
+.v95-location-dot.one:before{animation-delay:0s}
+.v95-location-dot.two{right:2%;top:2%;animation-delay:.24s}
+.v95-location-dot.two:before{animation-delay:.24s}
+.v95-location-dot.three{right:9%;bottom:1%;animation-delay:.48s}
+.v95-location-dot.three:before{animation-delay:.48s}
 </style>
 """, unsafe_allow_html=True)
 
@@ -5805,10 +5843,8 @@ if st.session_state.get("auth_user") is None:
                 <div class="v83-cover-top-brand"></div>
                 <div class="v83-hero-live"><span class="v83-live-pill"><span class="v83-live-dot"></span>LIVE HR SYSTEM</span></div>
                 <div class="v90-hero-telemetry"><b>SMART FACTORY NETWORK</b><span class="v90-signal-bars"><i></i><i></i><i></i></span><span class="v92-live-sync" data-v92-live-sync>SYNC {_login_verified_time}</span></div>
-                <div class="v94-map-location" title="Greater Noida Plant · D-2 Sector 63 Head Office · Dhaulana Glass Plant">
-                  <span class="v94-map-ping"></span><span class="v94-map-ping two"></span><span class="v94-map-dot"></span>
-                  <span class="v94-map-label"><b>DELHI NCR NETWORK</b><small>3 LOCATIONS LIVE</small></span>
-                  <span class="v94-map-sites"><span>Greater Noida Plant</span><span>D-2 Sector 63 Head Office</span><span>Dhaulana Glass Plant</span></span>
+                <div class="v94-map-location v95-map-cluster" aria-label="Three live company locations">
+                  <span class="v95-location-dot one"></span><span class="v95-location-dot two"></span><span class="v95-location-dot three"></span>
                 </div>
                 <div class="v83-hero-ai-core"></div>
                 <div class="v90-glass-sheen"></div>
