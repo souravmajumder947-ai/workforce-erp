@@ -5686,8 +5686,8 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
 .v94-map-location{
   position:absolute;
   z-index:12;
-  left:61.2%;
-  top:25.5%;
+  left:55.6%;
+  top:14.9%;
   width:clamp(8px,.58vw,18px);
   height:clamp(8px,.58vw,18px);
   transform:translate(-50%,-50%);
