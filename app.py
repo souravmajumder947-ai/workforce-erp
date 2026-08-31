@@ -7056,6 +7056,65 @@ def v57_business_data_counts():
     return pd.DataFrame(rows)
 
 
+def v96_reset_scope_table(counts):
+    """Render the reset scope with narrow numeric columns and a flexible data-area column."""
+    table_rows = []
+    for serial, record in enumerate(counts.to_dict("records"), start=1):
+        data_area_raw = str(record.get("Data Area", ""))
+        data_area = html.escape(data_area_raw)
+        row_count = int(record.get("Rows", 0) or 0)
+        table_rows.append(
+            '<div class="v96-reset-cell serial">' + str(serial) + '</div>'
+            '<div class="v96-reset-cell area" title="' + html.escape(data_area_raw, quote=True) + '">' + data_area + '</div>'
+            '<div class="v96-reset-cell rows">' + f'{row_count:,}' + '</div>'
+        )
+    st.markdown(
+        """
+        <style>
+        .v96-reset-table{
+          display:grid;
+          grid-template-columns:64px minmax(220px,1fr) 90px;
+          width:100%;
+          margin:2px 0 4px;
+          overflow:hidden;
+          border:1px solid rgba(92,147,207,.24);
+          border-radius:11px;
+          background:rgba(4,13,23,.72);
+        }
+        .v96-reset-head,.v96-reset-cell{
+          min-width:0;
+          height:35px;
+          display:flex;
+          align-items:center;
+          padding:0 10px;
+          border-right:1px solid rgba(87,126,170,.15);
+          border-bottom:1px solid rgba(87,126,170,.16);
+          font-size:12px;
+        }
+        .v96-reset-head{
+          color:#abb8c9;
+          background:#1b202b;
+          font-weight:700;
+        }
+        .v96-reset-cell{color:#f3f7fb}
+        .v96-reset-head:nth-child(3n),.v96-reset-cell:nth-child(3n){border-right:0}
+        .v96-reset-cell:nth-last-child(-n+3){border-bottom:0}
+        .v96-reset-head.serial,.v96-reset-cell.serial{justify-content:center;padding-left:5px;padding-right:5px}
+        .v96-reset-head.rows,.v96-reset-cell.rows{justify-content:flex-end;font-variant-numeric:tabular-nums}
+        .v96-reset-cell.area{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        @media(max-width:700px){
+          .v96-reset-table{grid-template-columns:52px minmax(150px,1fr) 68px}
+          .v96-reset-head,.v96-reset-cell{padding:0 7px;font-size:11px}
+        }
+        </style>
+        <div class="v96-reset-table" role="table" aria-label="Business data reset scope">
+          <div class="v96-reset-head serial">S.No</div>
+          <div class="v96-reset-head area">Data Area</div>
+          <div class="v96-reset-head rows">Rows</div>
+        """ + "".join(table_rows) + "</div>",
+        unsafe_allow_html=True,
+    )
+
 def v57_reset_all_business_data(reset_by):
     """
     Full business-data reset for a clean live start.
@@ -10344,7 +10403,7 @@ elif page == "Master Centre":
             ])
 
             with st.expander("See exactly what will be cleared", expanded=True):
-                st.dataframe(counts, hide_index=True, use_container_width=True)
+                v96_reset_scope_table(counts)
 
             st.markdown("### What will remain")
             st.markdown(
