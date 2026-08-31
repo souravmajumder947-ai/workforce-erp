@@ -16,92 +16,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Patch attendance import rules
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('app.py')
-          text = path.read_text(encoding='utf-8')
-
-          def replace_once(old, new, label):
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
-              text = text.replace(old, new, 1)
-
-          # 1) Incomplete PP/P/PRESENT punches must go to HR Review.
-          old = '''    if raw in mapping:\n        return mapping[raw]\n    tin = _time_text(time_in_value)\n    tout = _time_text(time_out_value)\n    has_in = bool(tin and tin != "00:00")\n    has_out = bool(tout and tout != "00:00")\n'''
-          new = '''    tin = _time_text(time_in_value)\n    tout = _time_text(time_out_value)\n    has_in = bool(tin and tin != "00:00")\n    has_out = bool(tout and tout != "00:00")\n    # Biometric PP/P/PRESENT is not final Present unless both punches exist.\n    # Missing In or Out punch must be confirmed by HR.\n    if raw in {"PP", "P", "PRESENT"} and not (has_in and has_out):\n        return "HR Review"\n    if raw in mapping:\n        return mapping[raw]\n'''
-          replace_once(old, new, 'incomplete PP rule')
-
-          # 2) Add date-range filtering to standard attendance imports.
-          replace_once(
-              'def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False):',
-              'def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False, start_date=None, end_date=None):',
-              'standard importer signature'
-          )
-          old = '''        if target_date is not None and work_date != target_date.isoformat():\n            continue\n\n        row_div_raw = row.get(cmap["division"]) if "division" in cmap else ""\n'''
-          new = '''        if target_date is not None and work_date != target_date.isoformat():\n            continue\n        if start_date is not None and work_date < start_date.isoformat():\n            continue\n        if end_date is not None and work_date > end_date.isoformat():\n            continue\n\n        row_div_raw = row.get(cmap["division"]) if "division" in cmap else ""\n'''
-          replace_once(old, new, 'standard date range filter')
-
-          # 3) Add date-range filtering to Dhaulana monthly imports too.
-          replace_once(
-              'def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=False):',
-              'def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=False, start_date=None, end_date=None):',
-              'Dhaulana importer signature'
-          )
-          old = '''                try:\n                    work_date = date(base_date.year, base_date.month, day_number)\n                except ValueError:\n                    continue\n                time_in_value = ws.cell(row_num, col).value\n'''
-          new = '''                try:\n                    work_date = date(base_date.year, base_date.month, day_number)\n                except ValueError:\n                    continue\n                if start_date is not None and work_date < start_date:\n                    continue\n                if end_date is not None and work_date > end_date:\n                    continue\n                time_in_value = ws.cell(row_num, col).value\n'''
-          replace_once(old, new, 'Dhaulana date range filter')
-
-          # 4) Add Date Range mode in the Attendance Upload UI.
-          replace_once(
-              '["Selected Date Only", "All Dates in Workbook"],',
-              '["Selected Date Only", "Date Range", "All Dates in Workbook"],',
-              'attendance mode choices'
-          )
-          old = '''            attendance_upload_date = None\n            if upload_mode == "Selected Date Only":\n                attendance_upload_date = date_col.date_input(\n                    "Attendance Date",\n                    value=global_work_date,\n                    format="DD/MM/YYYY",\n                    key="v56_att_upload_date"\n                )\n            else:\n                date_col.markdown(\n                    '<div style="font-size:9px;color:#8194ac;margin-top:27px;">'\n                    'Date will be read from the Excel workbook.</div>',\n                    unsafe_allow_html=True\n                )\n'''
-          new = '''            attendance_upload_date = None\n            attendance_date_range = None\n            if upload_mode == "Selected Date Only":\n                attendance_upload_date = date_col.date_input(\n                    "Attendance Date",\n                    value=global_work_date,\n                    format="DD/MM/YYYY",\n                    key="v56_att_upload_date"\n                )\n            elif upload_mode == "Date Range":\n                attendance_date_range = date_col.date_input(\n                    "Attendance Range",\n                    value=(global_work_date.replace(day=1), global_work_date),\n                    format="DD/MM/YYYY",\n                    key="v56_att_upload_range"\n                )\n            else:\n                date_col.markdown(\n                    '<div style="font-size:9px;color:#8194ac;margin-top:27px;">'\n                    'Date will be read from the Excel workbook.</div>',\n                    unsafe_allow_html=True\n                )\n'''
-          replace_once(old, new, 'attendance date range UI')
-
-          old = '''            if upload_mode == "Selected Date Only":\n                st.info(\n                    f"📅 **Date-wise upload:** only attendance for "\n                    f"**{attendance_upload_date.strftime('%d %b %Y')}** will be imported. "\n                    "If the workbook contains other dates, they will be ignored."\n                )\n            else:\n                st.warning(\n                    "Bulk mode imports every valid date contained in the workbook. "\n                    "Use this mainly for historical / first-time data loading."\n                )\n'''
-          new = '''            if upload_mode == "Selected Date Only":\n                st.info(\n                    f"📅 **Date-wise upload:** only attendance for "\n                    f"**{attendance_upload_date.strftime('%d %b %Y')}** will be imported. "\n                    "If the workbook contains other dates, they will be ignored."\n                )\n            elif upload_mode == "Date Range":\n                if isinstance(attendance_date_range, (tuple, list)) and len(attendance_date_range) == 2:\n                    st.info(\n                        f"📅 **Range upload:** only attendance from "\n                        f"**{attendance_date_range[0].strftime('%d %b %Y')}** to "\n                        f"**{attendance_date_range[1].strftime('%d %b %Y')}** will be imported."\n                    )\n                else:\n                    st.warning("Select both the start and end date for the attendance range.")\n            else:\n                st.warning(\n                    "Bulk mode imports every valid date contained in the workbook. "\n                    "Use this mainly for historical / first-time data loading."\n                )\n'''
-          replace_once(old, new, 'attendance mode message')
-
-          replace_once(
-              '"H/PH = Paid Holiday · PA/AP = HR Review · HD = Half Day · CL/SL/EL/LWP supported."',
-              '"H/PH = Paid Holiday · PA/AP = HR Review · HD = Half Day · CL/SL/EL/LWP supported. "\n                "Incomplete PP/P punches are automatically sent to HR Review."',
-              'attendance status caption'
-          )
-
-          old = '''            actual = expected\n            target_date = attendance_upload_date if upload_mode == "Selected Date Only" else None\n            use_dhaulana_monthly = False\n'''
-          new = '''            actual = expected\n            target_date = attendance_upload_date if upload_mode == "Selected Date Only" else None\n            target_start_date = None\n            target_end_date = None\n            if upload_mode == "Date Range" and isinstance(attendance_date_range, (tuple, list)) and len(attendance_date_range) == 2:\n                target_start_date, target_end_date = attendance_date_range\n            use_dhaulana_monthly = False\n'''
-          replace_once(old, new, 'attendance target range variables')
-
-          # 5) Pass range into preview and save import calls.
-          old = '''                        _, attendance_preview = import_dhaulana_attendance_excel(\n                            attendance_file,target_date=target_date,dry_run=True\n                        )\n                    else:\n                        _, attendance_preview = import_standard_attendance_excel(\n                            attendance_file,actual,target_date=target_date,dry_run=True\n                        )\n'''
-          new = '''                        _, attendance_preview = import_dhaulana_attendance_excel(\n                            attendance_file,target_date=target_date,dry_run=True,\n                            start_date=target_start_date,end_date=target_end_date\n                        )\n                    else:\n                        _, attendance_preview = import_standard_attendance_excel(\n                            attendance_file,actual,target_date=target_date,dry_run=True,\n                            start_date=target_start_date,end_date=target_end_date\n                        )\n'''
-          replace_once(old, new, 'preview import call')
-
-          old = '''                                    saved, preview = import_dhaulana_attendance_excel(\n                                        attendance_file,target_date=target_date,dry_run=False\n                                    )\n                                else:\n                                    saved, preview = import_standard_attendance_excel(\n                                        attendance_file,actual,target_date=target_date,dry_run=False\n                                    )\n'''
-          new = '''                                    saved, preview = import_dhaulana_attendance_excel(\n                                        attendance_file,target_date=target_date,dry_run=False,\n                                        start_date=target_start_date,end_date=target_end_date\n                                    )\n                                else:\n                                    saved, preview = import_standard_attendance_excel(\n                                        attendance_file,actual,target_date=target_date,dry_run=False,\n                                        start_date=target_start_date,end_date=target_end_date\n                                    )\n'''
-          replace_once(old, new, 'save import call')
-
-          old = '''                            if target_date is not None:\n                                st.success(\n                                    f"{saved:,} attendance rows processed for **{actual}** "\n                                    f"on **{target_date.strftime('%d %b %Y')}**."\n                                )\n                            else:\n                                st.success(\n                                    f"{saved:,} attendance rows processed for **{actual}** "\n                                    "from all valid dates in the workbook."\n                                )\n'''
-          new = '''                            if target_date is not None:\n                                st.success(\n                                    f"{saved:,} attendance rows processed for **{actual}** "\n                                    f"on **{target_date.strftime('%d %b %Y')}**."\n                                )\n                            elif target_start_date is not None and target_end_date is not None:\n                                st.success(\n                                    f"{saved:,} attendance rows processed for **{actual}** from "\n                                    f"**{target_start_date.strftime('%d %b %Y')}** to "\n                                    f"**{target_end_date.strftime('%d %b %Y')}**."\n                                )\n                            else:\n                                st.success(\n                                    f"{saved:,} attendance rows processed for **{actual}** "\n                                    "from all valid dates in the workbook."\n                                )\n'''
-          replace_once(old, new, 'range success message')
-
-          path.write_text(text, encoding='utf-8')
-          PY
-
+      - name: Apply HR review attendance patch
+        run: python tools/attendance_hr_review_patch.py
       - name: Validate Python syntax
         run: python -m py_compile app.py
-
-      - name: Commit live attendance fix
+      - name: Commit live HR review flow
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -110,6 +29,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Fix incomplete PP review and add attendance date range"
+            git commit -m "Route master exceptions to HR Review"
             git push origin main
           fi
