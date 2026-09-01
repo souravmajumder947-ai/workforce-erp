@@ -9596,7 +9596,8 @@ elif page == "Attendance":
                       a.shift,a.time_in,a.time_out,a.working_hours,a.raw_status,a.status,a.remark,
                       COALESCE(a.source_issue,'') AS source_issue
                FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
-               WHERE (a.status='HR Review' OR a.review_required=TRUE) """ + clause + """
+               WHERE (a.status='HR Review' OR a.review_required=TRUE)
+                 AND COALESCE(UPPER(TRIM(e.status)),'ACTIVE') NOT IN ('INACTIVE','LEFT','RESIGNED','TERMINATED') """ + clause + """
                ORDER BY a.work_date DESC,COALESCE(e.employee_name,a.source_employee_name,a.employee_id)""",
             params
         )
@@ -9625,7 +9626,8 @@ elif page == "Attendance":
         st.markdown("#### All HR Review / Pending Actions")
         st.caption(
             "This single view combines attendance exceptions, employee masters awaiting HR completion, "
-            "and employees with no attendance record for the selected working date."
+            "and employees with no attendance record for the selected working date. "
+            "Employees already marked Inactive / Left / Resigned / Terminated in Employee Master are excluded from HR Review."
         )
         u1,u2,u3,u4 = st.columns(4)
         u1.metric("Attendance Reviews", f"{len(reviews):,}")
