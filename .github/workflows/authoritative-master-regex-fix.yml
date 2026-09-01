@@ -1,0 +1,35 @@
+name: Authoritative Master Regex Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/authoritative-master-regex-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Fix authoritative Employee ID parsing
+        run: python tools/authoritative_master_regex_fix.py
+      - name: Verify Python syntax
+        run: python -m py_compile app.py
+      - name: Commit regex fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Fix authoritative Employee Master ID parsing"
+            git push origin main
+          fi
