@@ -3257,7 +3257,7 @@ def _bulk_upsert_employees_from_attendance(records):
         conn.close()
 
 
-def _bulk_upsert_attendance(records, source_type):
+def _bulk_upsert_attendance(records, source_type, replace_scope=False):
     if not records:
         return 0
     records = _validate_and_enrich_attendance_records(records)
@@ -3308,6 +3308,24 @@ def _bulk_upsert_attendance(records, source_type):
     conn = get_pg_conn()
     try:
         cur = conn.cursor()
+
+        # BTS FULL-REFRESH MODE
+        # When enabled, this validated upload becomes the attendance source of truth
+        # for every division/date present in the parsed records. Deletion and insert
+        # happen in the SAME transaction, so a failed insert rolls the delete back.
+        if replace_scope:
+            scope = {}
+            for rec in records:
+                div = _clean_text(rec.get("division"))
+                work_date = _clean_text(rec.get("work_date"))
+                if div and work_date:
+                    scope.setdefault(div, set()).add(work_date)
+            for div, dates in scope.items():
+                cur.execute(
+                    "DELETE FROM attendance WHERE division=%s AND work_date = ANY(%s)",
+                    (div, sorted(dates))
+                )
+
         payload = []
         for rec in records:
             payload.append((
@@ -3452,7 +3470,7 @@ def detect_attendance_workbook_division(uploaded_file):
 
     return None
 
-def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False, start_date=None, end_date=None):
+def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False, start_date=None, end_date=None, replace_scope=False):
     """
     Accepts Reliable Packaging standard CSV/XLSX as well as the older Employee Code/PayCode exports.
 
@@ -3589,11 +3607,11 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
 
     if dry_run:
         return 0, pd.DataFrame(records)
-    saved = _bulk_upsert_attendance(records, source_label)
+    saved = _bulk_upsert_attendance(records, source_label, replace_scope=replace_scope)
     return saved, pd.DataFrame(records)
 
 
-def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=False, start_date=None, end_date=None):
+def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=False, start_date=None, end_date=None, replace_scope=False):
     wb = load_workbook(uploaded_file, data_only=True, read_only=False)
     ws = wb[wb.sheetnames[0]]
     base_date = ws.cell(1, 1).value
@@ -3671,7 +3689,7 @@ def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=Fa
     source_label = "Dhaulana Daily Import" if target_date is not None else "Dhaulana Monthly Import"
     if dry_run:
         return 0, pd.DataFrame(records)
-    saved = _bulk_upsert_attendance(records, source_label)
+    saved = _bulk_upsert_attendance(records, source_label, replace_scope=replace_scope)
     return saved, pd.DataFrame(records)
 
 
@@ -9934,6 +9952,21 @@ elif page == "Attendance":
                             f"{precheck['hr_review']:,} row(s) will stay in HR Review until HR confirms them."
                             + inactive_note
                         )
+                        replace_existing_scope = st.checkbox(
+                            "Replace existing attendance for the dates in this upload",
+                            value=True,
+                            key="v101_replace_existing_attendance_scope",
+                            help=(
+                                "Recommended for a fresh BTS 1st-to-current-date report. Existing attendance, including earlier HR corrections, "
+                                "for the dates/division in this upload will be rebuilt from this validated file. Employee Master is not changed."
+                            )
+                        )
+                        if replace_existing_scope:
+                            st.warning(
+                                "Fresh BTS refresh is ON: earlier attendance/HR corrections for the dates in this upload will be replaced. "
+                                "The Employee Master, inactive status and historical data outside these dates are not affected."
+                            )
+
                         confirm_att = st.checkbox(
                             "I confirm this attendance preview is correct and can be saved.",
                             key="v69_attendance_confirm"
@@ -9950,12 +9983,14 @@ elif page == "Attendance":
                                 if use_dhaulana_monthly:
                                     saved, preview = import_dhaulana_attendance_excel(
                                         attendance_file,target_date=target_date,dry_run=False,
-                                        start_date=target_start_date,end_date=target_end_date
+                                        start_date=target_start_date,end_date=target_end_date,
+                                        replace_scope=replace_existing_scope
                                     )
                                 else:
                                     saved, preview = import_standard_attendance_excel(
                                         attendance_file,actual,target_date=target_date,dry_run=False,
-                                        start_date=target_start_date,end_date=target_end_date
+                                        start_date=target_start_date,end_date=target_end_date,
+                                        replace_scope=replace_existing_scope
                                     )
 
                             if target_date is not None:
