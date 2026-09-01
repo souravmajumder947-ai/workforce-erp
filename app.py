@@ -2640,9 +2640,22 @@ def _validate_and_enrich_attendance_records(records):
         rec["source_employee_name"] = _clean_text(rec.get("employee_name")) or emp_id
         emp = master_map.get(emp_id)
         issue = ""
-        pending_master = bool(emp) and _clean_text(emp.get("department")).upper() == "HR REVIEW"
+        emp_status = _clean_text(emp.get("status")).upper() if emp else ""
+        inactive_master = bool(emp) and emp_status in {"INACTIVE", "LEFT", "RESIGNED", "TERMINATED"}
+        pending_master = (
+            bool(emp)
+            and not inactive_master
+            and _clean_text(emp.get("department")).upper() == "HR REVIEW"
+        )
         if not emp:
             issue = "Employee ID not found in Employee Master"
+        elif inactive_master:
+            rec["skip_import"] = True
+            rec["source_issue"] = "Inactive Employee in Master"
+            rec["review_required"] = False
+            rec["status"] = "Inactive"
+            rec["ot_hours"] = 0.0
+            continue
         elif pending_master:
             issue = "Employee ID awaiting HR Master confirmation"
         else:
@@ -2815,6 +2828,11 @@ def _bulk_upsert_attendance(records, source_type):
     if not records:
         return 0
     records = _validate_and_enrich_attendance_records(records)
+    # Employees already marked inactive/left/resigned/terminated in Employee Master
+    # must not be recreated, imported, or sent to HR Review from a biometric file.
+    records = [rec for rec in records if not bool(rec.get("skip_import", False))]
+    if not records:
+        return 0
 
     # FK-HR-REVIEW-PLACEHOLDER-V1
     # attendance.employee_id references employees.employee_id. Unknown biometric
@@ -3225,10 +3243,16 @@ def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=Fa
 
 
 def attendance_precheck(preview_df):
-    """Preview attendance and route master exceptions to HR Review."""
+    """Preview attendance and route only genuine master exceptions to HR Review.
+
+    Employees already marked Inactive/Left/Resigned/Terminated are shown separately
+    and skipped from attendance import. They are never recreated as temporary HR
+    Review employees.
+    """
     result = {
         "rows_ready": 0, "employees": 0, "dates": 0, "duplicates": 0,
-        "unknown_ids": [], "division_mismatches": [], "hr_review": 0,
+        "unknown_ids": [], "division_mismatches": [], "inactive_ids": [],
+        "inactive_rows": 0, "hr_review": 0,
         "master_exception_rows": 0, "status_summary": pd.DataFrame()
     }
     if preview_df is None or preview_df.empty:
@@ -3240,39 +3264,63 @@ def attendance_precheck(preview_df):
     dup_mask = df.duplicated(subset=["work_date","shift","employee_id"], keep=False)
     result["duplicates"] = int(dup_mask.sum())
 
-    master = read_df("SELECT employee_id,division,department FROM employees")
+    master = read_df("SELECT employee_id,division,department,status FROM employees")
     master_map = {}
     if not master.empty:
         master_map = {
             str(r["employee_id"]).strip(): {
                 "division": _clean_text(r.get("division")),
                 "department": _clean_text(r.get("department")),
+                "status": _clean_text(r.get("status")),
             }
             for _, r in master.iterrows()
         }
 
-    unknown, mismatch, exception_mask = [], [], []
+    unknown, mismatch, inactive = [], [], []
+    exception_mask, inactive_mask = [], []
     for _, r in df.iterrows():
         eid = str(r.get("employee_id","")).strip()
         div = _clean_text(r.get("division"))
         has_issue = False
+        is_inactive = False
         emp_master = master_map.get(eid)
-        if not emp_master or emp_master.get("department", "").upper() == "HR REVIEW":
-            unknown.append(eid); has_issue = True
+        master_status = _clean_text(emp_master.get("status")) .upper() if emp_master else ""
+
+        if emp_master and master_status in {"INACTIVE", "LEFT", "RESIGNED", "TERMINATED"}:
+            inactive.append(eid)
+            is_inactive = True
+        elif not emp_master or emp_master.get("department", "").upper() == "HR REVIEW":
+            unknown.append(eid)
+            has_issue = True
         elif emp_master.get("division") and div and emp_master.get("division") != div:
-            mismatch.append(f"{eid}: master={emp_master.get('division')}, file={div}"); has_issue = True
+            mismatch.append(f"{eid}: master={emp_master.get('division')}, file={div}")
+            has_issue = True
+
         exception_mask.append(has_issue)
+        inactive_mask.append(is_inactive)
 
     result["unknown_ids"] = sorted(set(x for x in unknown if x))
     result["division_mismatches"] = sorted(set(mismatch))
-    exception_series = pd.Series(exception_mask, index=df.index)
+    result["inactive_ids"] = sorted(set(x for x in inactive if x))
+
+    exception_series = pd.Series(exception_mask, index=df.index, dtype=bool)
+    inactive_series = pd.Series(inactive_mask, index=df.index, dtype=bool)
+    result["inactive_rows"] = int(inactive_series.sum())
     result["master_exception_rows"] = int(exception_series.sum())
-    biometric_review = df["status"].astype(str).eq("HR Review")
+
+    biometric_review = df["status"].astype(str).eq("HR Review") & ~inactive_series
     result["hr_review"] = int((biometric_review | exception_series).sum())
-    result["rows_ready"] = max(0, len(df) - result["duplicates"])
-    display_status = df["status"].astype(str).copy()
-    display_status.loc[exception_series] = "HR Review"
-    result["status_summary"] = display_status.value_counts().rename_axis("Status").reset_index(name="Rows").sort_values("Status")
+    result["rows_ready"] = max(0, len(df) - result["duplicates"] - result["inactive_rows"])
+
+    display_status = df.loc[~inactive_series, "status"].astype(str).copy()
+    display_exceptions = exception_series.loc[display_status.index]
+    display_status.loc[display_exceptions] = "HR Review"
+    result["status_summary"] = (
+        display_status.value_counts()
+        .rename_axis("Status")
+        .reset_index(name="Rows")
+        .sort_values("Status")
+    )
     return result
 
 def import_salary_master_excel(uploaded_file, division):
@@ -9395,7 +9443,7 @@ elif page == "Attendance":
 
                     st.markdown("#### Pre-Import Check")
                     p1,p2,p3,p4,p5,p6 = st.columns(6)
-                    p1.metric("Rows",f"{len(attendance_preview):,}")
+                    p1.metric("Rows to Import",f"{precheck['rows_ready']:,}")
                     p2.metric("Employees",f"{precheck['employees']:,}")
                     p3.metric("Date(s)",f"{precheck['dates']:,}")
                     p4.metric("Duplicates",f"{precheck['duplicates']:,}")
@@ -9420,6 +9468,13 @@ elif page == "Attendance":
                         )
                         st.dataframe(dup.head(50),hide_index=True,use_container_width=True)
 
+                    if precheck.get("inactive_ids"):
+                        st.info(
+                            f"{len(precheck['inactive_ids'])} inactive employee ID(s) are present in the biometric file and "
+                            "will be skipped (not imported and not sent to HR Review): "
+                            + ", ".join(precheck["inactive_ids"][:20])
+                        )
+
                     if precheck["unknown_ids"]:
                         st.warning(
                             f"{len(precheck['unknown_ids'])} Employee ID(s) are not in Employee Master. "
@@ -9436,9 +9491,14 @@ elif page == "Attendance":
                     hard_errors = precheck["duplicates"] > 0
 
                     if not hard_errors:
+                        inactive_note = (
+                            f" {precheck.get('inactive_rows', 0):,} inactive row(s) will be skipped."
+                            if precheck.get('inactive_rows', 0) else ""
+                        )
                         st.success(
-                            f"{len(attendance_preview):,} row(s) can be imported for **{actual}**. "
+                            f"{precheck['rows_ready']:,} row(s) can be imported for **{actual}**. "
                             f"{precheck['hr_review']:,} row(s) will stay in HR Review until HR confirms them."
+                            + inactive_note
                         )
                         confirm_att = st.checkbox(
                             "I confirm this attendance preview is correct and can be saved.",
