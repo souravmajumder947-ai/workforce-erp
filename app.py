@@ -10070,6 +10070,16 @@ elif page == "Attendance":
                ORDER BY a.work_date DESC,COALESCE(e.employee_name,a.source_employee_name,a.employee_id)""",
             params
         )
+
+        # Keep Missing Attendance aligned with the attendance period being reviewed.
+        # If HR Review contains older attendance (for example August while today is September),
+        # use the latest review date instead of today's global working date.
+        if reviews.empty:
+            missing_reference_date = global_work_date
+        else:
+            _review_dates = pd.to_datetime(reviews["work_date"], errors="coerce").dropna()
+            missing_reference_date = (_review_dates.max().date() if not _review_dates.empty else global_work_date)
+
         # Unified HR Action Centre: attendance exceptions + temporary employee masters + missing attendance.
         master_clause, master_params = v5_division_clause(global_division)
         master_pending = read_df(
@@ -10089,19 +10099,19 @@ elif page == "Attendance":
                 AND a.work_date=?
                WHERE e.status='Active' AND a.id IS NULL """ + missing_clause + """
                ORDER BY e.division,e.employee_name""",
-            (global_work_date.isoformat(),) + missing_params
+            (missing_reference_date.isoformat(),) + missing_params
         )
 
         st.markdown("#### All HR Review / Pending Actions")
         st.caption(
             "This single view combines attendance exceptions, employee masters awaiting HR completion, "
-            "and employees with no attendance record for the selected working date. "
+            "and employees with no attendance record for the attendance-review date. "
             "Employees already marked Inactive / Left / Resigned / Terminated in Employee Master are excluded from HR Review."
         )
         u1,u2,u3,u4 = st.columns(4)
         u1.metric("Attendance Reviews", f"{len(reviews):,}")
         u2.metric("Employee Master Pending", f"{len(master_pending):,}")
-        u3.metric("Missing Attendance", f"{len(missing_attendance):,}")
+        u3.metric(f"Missing Attendance · {missing_reference_date.strftime('%d %b %Y')}", f"{len(missing_attendance):,}")
         u4.metric("Total HR Actions", f"{len(reviews)+len(master_pending)+len(missing_attendance):,}")
 
         with st.expander(f"Employee Master Pending ({len(master_pending):,})", expanded=(reviews.empty and not master_pending.empty)):
@@ -10266,7 +10276,7 @@ elif page == "Attendance":
                 else:
                     st.info("Only Admin / HR can update pending employee masters.")
 
-        with st.expander(f"Missing Attendance on {global_work_date.strftime('%d %b %Y')} ({len(missing_attendance):,})", expanded=False):
+        with st.expander(f"Missing Attendance on {missing_reference_date.strftime('%d %b %Y')} ({len(missing_attendance):,})", expanded=False):
             if missing_attendance.empty:
                 st.success("Every active employee has an attendance record for this date.")
             else:
