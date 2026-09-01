@@ -1,4 +1,4 @@
-name: BTS Attendance XLS Import
+name: BTS Refresh Date Cast Fix
 
 on:
   push:
@@ -17,11 +17,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Add BTS attendance XLS support
-        run: python tools/bts_attendance_xls_import_patch.py
+      - name: Fix PostgreSQL date type in BTS fresh refresh
+        run: python tools/bts_full_refresh_patch.py
       - name: Verify Python syntax
         run: python -m py_compile app.py
-      - name: Commit BTS attendance importer
+      - name: Commit BTS refresh fix
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -30,6 +30,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Support direct BTS XLS attendance imports"
+            git commit -m "Fix BTS attendance refresh date cast"
             git push origin main
           fi
