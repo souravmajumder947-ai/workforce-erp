@@ -10105,13 +10105,13 @@ elif page == "Attendance":
         st.markdown("#### All HR Review / Pending Actions")
         st.caption(
             "This single view combines attendance exceptions, employee masters awaiting HR completion, "
-            "and employees with no attendance record for the attendance-review date. "
-            "Employees already marked Inactive / Left / Resigned / Terminated in Employee Master are excluded from HR Review."
+            "and active employees missing from the BTS attendance source for the attendance-review date. "
+            "A missing BTS source record is not automatically an Absence. Employees already marked Inactive / Left / Resigned / Terminated are excluded."
         )
         u1,u2,u3,u4 = st.columns(4)
         u1.metric("Attendance Reviews", f"{len(reviews):,}")
         u2.metric("Employee Master Pending", f"{len(master_pending):,}")
-        u3.metric(f"Missing Attendance · {missing_reference_date.strftime('%d %b %Y')}", f"{len(missing_attendance):,}")
+        u3.metric(f"Missing From BTS · {missing_reference_date.strftime('%d %b %Y')}", f"{len(missing_attendance):,}")
         u4.metric("Total HR Actions", f"{len(reviews)+len(master_pending)+len(missing_attendance):,}")
 
         with st.expander(f"Employee Master Pending ({len(master_pending):,})", expanded=(reviews.empty and not master_pending.empty)):
@@ -10276,10 +10276,22 @@ elif page == "Attendance":
                 else:
                     st.info("Only Admin / HR can update pending employee masters.")
 
-        with st.expander(f"Missing Attendance on {missing_reference_date.strftime('%d %b %Y')} ({len(missing_attendance):,})", expanded=False):
+        with st.expander(f"Active Employees Missing From BTS on {missing_reference_date.strftime('%d %b %Y')} ({len(missing_attendance):,})", expanded=False):
             if missing_attendance.empty:
-                st.success("Every active employee has an attendance record for this date.")
+                st.success("Every active employee has an attendance record from the BTS source for this date.")
             else:
+                missing_division_counts = (
+                    missing_attendance.groupby("division", dropna=False).size().sort_values(ascending=False)
+                )
+                missing_division_text = " | ".join(
+                    f"{(_clean_text(div) or 'Unassigned')}: {int(count):,}"
+                    for div, count in missing_division_counts.items()
+                )
+                st.info(
+                    f"BTS source check for **{missing_reference_date.strftime('%d %b %Y')}** — {missing_division_text}. "
+                    "These employees are active in Employee Master but have no attendance row from the current BTS/imported source for this date. "
+                    "Do not mark them Absent in bulk without HR verification."
+                )
                 ma = missing_attendance.rename(columns={
                     "division":"Division","employee_id":"Employee ID","employee_name":"Employee Name",
                     "department":"Department","designation":"Designation","shift":"Shift"
