@@ -3322,7 +3322,7 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
                     scope.setdefault(div, set()).add(work_date)
             for div, dates in scope.items():
                 cur.execute(
-                    "DELETE FROM attendance WHERE division=%s AND work_date = ANY(%s)",
+                    "DELETE FROM attendance WHERE division=%s AND work_date = ANY(%s::date[])",
                     (div, sorted(dates))
                 )
 
