@@ -8966,7 +8966,7 @@ def _v83_system_online():
 
 def _v83_live_status_html():
     _online = _v83_system_online()
-    _now = datetime.now(IST).strftime("%d %b %Y · %I:%M:%S %p")
+    _now = datetime.now(IST).strftime("%d %b %Y · %H:%M:%S")
     _db_label = "DATABASE LIVE" if _online else "DATABASE CHECK"
     _db_class = "v83-live-pill" if _online else "v83-sync-pill"
     return f"""
@@ -13281,7 +13281,7 @@ elif page == "User Management":
                 ("last_login","Last Login","Never"),
             ]:
                 parsed=pd.to_datetime(user_view[source],errors="coerce")
-                user_view[target]=parsed.dt.strftime("%d %b %Y · %I:%M %p").fillna(empty_text)
+                user_view[target]=parsed.dt.strftime("%d %b %Y · %H:%M").fillna(empty_text)
             user_view=user_view[
                 ["username","Full Name","role","Status","Created","Last Login"]
             ].rename(columns={"username":"Username","role":"Role"})
