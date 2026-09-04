@@ -129,12 +129,8 @@ s = s.replace(old_footer, new_footer, 1)
 
 bt = chr(96)
 dollar = chr(36)
-clock_anchor = (
-    '                  node.textContent = ' + bt + 'SYNC ' + dollar + '{clock.format(now)}' + bt + ';\\n'
-    '                  node.classList.toggle("v92-tick", now.getSeconds() % 2 === 0);'
-)
+clock_anchor = '                  node.textContent = ' + bt + 'SYNC ' + dollar + '{clock.format(now)}' + bt + ';'
 clock_new = '''                  node.textContent = "SYNC " + clock.format(now);
-                  node.classList.toggle("v92-tick", now.getSeconds() % 2 === 0);
                   const loginClock = window.parent.document.querySelector("[data-v102-login-clock]");
                   if (loginClock) loginClock.textContent = clock.format(now);'''
 if clock_anchor not in s:
