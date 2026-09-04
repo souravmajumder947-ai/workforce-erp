@@ -9063,7 +9063,11 @@ if page == "Home":
             - min(12.0, _v10_review_rate * 0.8),
         ),
     )
-    if _v10_health >= 90:
+    if _v94_upload_pending:
+        _v10_health_word, _v10_health_tone = "Awaiting Attendance", "warn"
+        # Keep the ring meaningful as a system-readiness score until daily attendance arrives.
+        _v10_health = max(0.0, min(100.0, (_v10_salary_ready * 0.55) + (_v10_dept_ready * 0.45)))
+    elif _v10_health >= 90:
         _v10_health_word, _v10_health_tone = "Excellent", "good"
     elif _v10_health >= 75:
         _v10_health_word, _v10_health_tone = "Good", "good"
@@ -9222,6 +9226,7 @@ if page == "Home":
         height=0,
     )
 
+    # V10.1 KPI RENDER + LIVE LOGIC FIX
     # Reference-style KPI rail, driven by live selected-date data.
     _v10_kpi_items = [
         ("👥", "Total Employees", f"{active_count:,}", "Active master", "blue"),
@@ -9231,16 +9236,19 @@ if page == "Home":
         ("◷", "On Duty (WO)", f"{weekly_off:,}", f"Half day {half_day:,}", "purple"),
         ("◴", "OT Hours", f"{ot_hours:,.2f}", "Selected working date", "cyan"),
     ]
-    _v10_kpi_html = "".join(
-        f"""
-        <div class="v10-kpi {tone}">
-          <div class="v10-kpi-icon">{icon}</div>
-          <div><small>{html.escape(label)}</small><b>{value}</b><span>{html.escape(sub)}</span></div>
-        </div>
-        """
-        for icon, label, value, sub, tone in _v10_kpi_items
-    )
-    st.markdown(f'<div class="v10-kpi-grid">{_v10_kpi_html}</div>', unsafe_allow_html=True)
+    _v10_kpi_cols = st.columns(6, gap="small")
+    for _v10_i, (icon, label, value, sub, tone) in enumerate(_v10_kpi_items):
+        with _v10_kpi_cols[_v10_i]:
+            st.markdown(
+                (
+                    f'<div class="v10-kpi {tone}">'
+                    f'<div class="v10-kpi-icon">{icon}</div>'
+                    f'<div><small>{html.escape(label)}</small>'
+                    f'<b>{value}</b><span>{html.escape(sub)}</span></div>'
+                    f'</div>'
+                ),
+                unsafe_allow_html=True,
+            )
 
     # 7-day attendance trend.
     _v10_trend_start = global_work_date - timedelta(days=6)
@@ -9276,6 +9284,8 @@ if page == "Home":
             _v10_trend_raw.groupby(["work_date", "Trend"], as_index=False)["employees"].sum()
             if not _v10_trend_raw.empty else pd.DataFrame()
         )
+        if not _v10_trend.empty:
+            _v10_trend["Date Label"] = _v10_trend["work_date"].dt.strftime("%d %b")
     else:
         _v10_trend = pd.DataFrame()
 
@@ -9340,7 +9350,7 @@ if page == "Home":
                     alt.Chart(_v10_trend)
                     .mark_line(point=alt.OverlayMarkDef(size=45), strokeWidth=2.2)
                     .encode(
-                        x=alt.X("work_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=0)),
+                        x=alt.X("Date Label:N", title=None, sort=None, axis=alt.Axis(labelAngle=0)),
                         y=alt.Y("employees:Q", title=None),
                         color=alt.Color(
                             "Trend:N",
@@ -9403,7 +9413,9 @@ if page == "Home":
         _v10_alerts.append(("HR Review Pending", f"{_v94_review:,} attendance review row(s)", "High", "Attendance"))
     if _v94_master_pending:
         _v10_alerts.append(("Employee Master Incomplete", f"{_v94_master_pending:,} record(s) pending", "Medium", "Employees"))
-    if _v94_payroll_pending and "Payroll" in available_modules:
+    _v10_this_month = datetime.now(IST).date().replace(day=1)
+    _v10_payroll_close_due = global_payroll_month < _v10_this_month
+    if _v94_payroll_pending and _v10_payroll_close_due and "Payroll" in available_modules:
         _v10_alerts.append(("Payroll Not Finalized", f"{global_payroll_month.strftime('%b %Y')} is not fully closed", "Medium", "Payroll"))
     if salary_missing:
         _v10_alerts.append(("Salary Master Gap", f"{salary_missing:,} employee(s) have no salary value", "Medium", "Employees"))
@@ -14688,7 +14700,15 @@ body:has(.v10-live-home-marker) [data-testid="stTextInput"] input{
 .v10-kpi-grid{
   display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:8px 0 10px;
 }
+body:has(.v10-live-home-marker) div[data-testid="stHorizontalBlock"]:has(.v10-kpi){
+  gap:.45rem!important;
+  margin:8px 0 10px!important;
+}
+body:has(.v10-live-home-marker) div[data-testid="stColumn"]:has(.v10-kpi){
+  min-width:0!important;
+}
 .v10-kpi{
+  width:100%;
   min-height:78px;display:flex;align-items:center;gap:10px;padding:11px 12px;
   border-radius:13px;border:1px solid rgba(54,132,206,.38);
   background:linear-gradient(145deg,#0c1c2d,#091625);
