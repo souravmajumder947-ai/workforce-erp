@@ -1,0 +1,36 @@
+name: V10.2 Live Login Experience
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/v102_live_login_patch.py"
+      - ".github/workflows/v102-live-login.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply V10.2 login patch
+        run: python tools/v102_live_login_patch.py
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Commit app update
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Upgrade V10 live login experience"
+          git pull --rebase origin main
+          git push origin main
