@@ -1,0 +1,19 @@
+name: Validate Login Right Panel Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-login-right-panel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile app
+        run: python -m py_compile app.py
