@@ -1,0 +1,38 @@
+name: V10.7 Production Go Live
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/v107_production_go_live_patch.py"
+      - ".github/workflows/v107-production-go-live.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply production hardening
+        run: python tools/v107_production_go_live_patch.py
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Audit UI controls
+        run: python tools/v104_button_audit.py
+      - name: Commit production update
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Add production go-live centre audit and backup"
+          git pull --rebase origin main
+          git push origin main
