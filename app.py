@@ -12360,14 +12360,19 @@ elif page == "Contractors":
 # OPERATIONS — GROUPED, NOT THREE SIDEBAR PAGES
 # ============================================================
 elif page == "Operations":
+    # V11.6 PRODUCTION ENTRY FIRST
     v5_page_header(
-        "Plant Operations",
-        "Corrugation is measured against a fixed ton target; conversion machines are measured against 100% material flow.",
+        "Production & Plant Operations",
+        "Enter production first. Corrugation uses a fixed-ton target; downstream machines use material-conversion flow.",
         "Greater Noida Plant",global_work_date
     )
-    tab_prod,tab_mp=st.tabs(["Production Flow","Manpower Allocation"])
+    tab_prod,tab_mp=st.tabs(["Production Entry","Manpower Allocation"])
 
     with tab_prod:
+        st.markdown("### Production Entry")
+        st.caption(
+            "Select Date → Shift → Machine. Existing entries are loaded automatically and can be safely updated."
+        )
         c1,c2,c3=st.columns(3)
         pdate=c1.date_input("Production Date",value=global_work_date,format="DD/MM/YYYY",key="v66_prod_date")
         shift=c2.selectbox("Shift",["A","B"],key="v66_prod_shift")
@@ -12387,6 +12392,22 @@ elif page == "Operations":
             )
             er=existing.iloc[0].to_dict() if not existing.empty else {}
             std,shift_target=get_machine_shift_target(machine,shift)
+
+            _prod_master_row = machine_df[machine_df["machine"].astype(str) == str(machine)]
+            _prod_department = (
+                str(_prod_master_row.iloc[0].get("department") or "—")
+                if not _prod_master_row.empty else "—"
+            )
+            pinfo1,pinfo2,pinfo3,pinfo4 = st.columns(4)
+            pinfo1.metric("Division","Greater Noida Plant")
+            pinfo2.metric("Department",_prod_department)
+            pinfo3.metric("Machine",str(machine))
+            pinfo4.metric("Entry Status","Update Existing" if not existing.empty else "New Entry")
+            if not existing.empty:
+                st.info(
+                    f"An entry already exists for {pdate.strftime('%d/%m/%Y')} · Shift {shift} · {machine}. "
+                    "Saving will update that same production record, not create a duplicate."
+                )
 
             if target_type=="FIXED_TON":
                 daily_target=float(profile.get("daily_target_ton") or 0)
@@ -12411,7 +12432,7 @@ elif page == "Operations":
                         value=float(er.get("breakdown_hours") or 0),step=0.25
                     )
                     remark=st.text_input("Production Remark",value=str(er.get("remark") or ""))
-                    save_prod=st.form_submit_button("Save Corrugation Production",type="primary",use_container_width=True)
+                    save_prod=st.form_submit_button("Save / Update Production Entry",type="primary",use_container_width=True)
 
                 achievement=(good_output/shift_target*100.0) if shift_target>0 else 0.0
                 k1,k2,k3,k4=st.columns(4)
@@ -12441,7 +12462,12 @@ elif page == "Operations":
                             remark
                         )
                     )
-                    st.success("Corrugation production saved.")
+                    record_audit_event(
+                        _current_user["username"], "PRODUCTION_SAVE", "Operations",
+                        "Production", f"{pdate.isoformat()}|{shift}|{machine}",
+                        f"Type=FIXED_TON; Output={good_output:.2f}; Target={shift_target:.2f}; Waste={waste_ton:.2f}; Breakdown={breakdown_hours:.2f}"
+                    )
+                    st.success("Production entry saved successfully.")
                     st.rerun()
 
             else:
@@ -12481,7 +12507,7 @@ elif page == "Operations":
                         value=float(er.get("breakdown_hours") or 0),step=0.25
                     )
                     remark=st.text_input("Production Remark",value=str(er.get("remark") or ""))
-                    save_prod=st.form_submit_button("Save Conversion Production",type="primary",use_container_width=True)
+                    save_prod=st.form_submit_button("Save / Update Production Entry",type="primary",use_container_width=True)
 
                 available=opening_wip+material_received
                 closing=max(available-material_processed,0.0)
@@ -12530,9 +12556,19 @@ elif page == "Operations":
                                 material_processed,good_output,closing,conversion_pct,yield_pct,waste_pct,remark
                             )
                         )
-                        st.success("Conversion production saved.")
+                        record_audit_event(
+                            _current_user["username"], "PRODUCTION_SAVE", "Operations",
+                            "Production", f"{pdate.isoformat()}|{shift}|{machine}",
+                            (
+                                f"Type=MATERIAL_CONVERSION; Available={available:.2f}; Processed={material_processed:.2f}; "
+                                f"Good={good_output:.2f}; Waste={waste_ton:.2f}; Closing={closing:.2f}; "
+                                f"Conversion={conversion_pct:.2f}%; Yield={yield_pct:.2f}%"
+                            )
+                        )
+                        st.success("Production entry saved successfully.")
                         st.rerun()
 
+        # The daily summary follows the Production Date selected above, not the global Working Date.
         prod_day=read_df(
             """SELECT p.work_date,p.shift,p.machine,m.department,m.target_type,
                       p.production_ton,p.target_ton,p.opening_wip_ton,p.material_received_ton,
@@ -12541,9 +12577,45 @@ elif page == "Operations":
                       p.breakdown_hours,p.remark
                FROM production p LEFT JOIN machines m ON m.machine=p.machine
                WHERE p.work_date=? ORDER BY p.shift,p.machine""",
-            (global_work_date.isoformat(),)
+            (pdate.isoformat(),)
         )
         if not prod_day.empty:
+            _pd_good = pd.to_numeric(
+                prod_day["good_output_ton"].where(
+                    pd.to_numeric(prod_day["good_output_ton"], errors="coerce").fillna(0) > 0,
+                    prod_day["production_ton"]
+                ),
+                errors="coerce"
+            ).fillna(0)
+            _pd_waste = pd.to_numeric(prod_day["waste_ton"], errors="coerce").fillna(0)
+            _pd_break = pd.to_numeric(prod_day["breakdown_hours"], errors="coerce").fillna(0)
+            _pd_fixed = prod_day[prod_day["target_type"].astype(str) == "FIXED_TON"].copy()
+            _pd_fixed_output = (
+                pd.to_numeric(_pd_fixed["good_output_ton"], errors="coerce").fillna(0)
+                if not _pd_fixed.empty else pd.Series(dtype=float)
+            )
+            if not _pd_fixed.empty:
+                _pd_fixed_output = _pd_fixed_output.where(
+                    _pd_fixed_output > 0,
+                    pd.to_numeric(_pd_fixed["production_ton"], errors="coerce").fillna(0)
+                )
+            _pd_fixed_target = (
+                pd.to_numeric(_pd_fixed["target_ton"], errors="coerce").fillna(0).sum()
+                if not _pd_fixed.empty else 0.0
+            )
+            _pd_fixed_achievement = (
+                float(_pd_fixed_output.sum()) / float(_pd_fixed_target) * 100.0
+                if float(_pd_fixed_target) > 0 else 0.0
+            )
+
+            st.markdown(f"#### Production Summary · {pdate.strftime('%d %b %Y')}")
+            ds1,ds2,ds3,ds4,ds5 = st.columns(5)
+            ds1.metric("Entries",f"{len(prod_day):,}")
+            ds2.metric("Good Output",f"{float(_pd_good.sum()):.2f} T")
+            ds3.metric("Waste / Rejection",f"{float(_pd_waste.sum()):.2f} T")
+            ds4.metric("Breakdown",f"{float(_pd_break.sum()):.2f} Hrs")
+            ds5.metric("Corrugation Achievement",f"{_pd_fixed_achievement:.2f}%")
+
             display=prod_day.rename(columns={
                 "work_date":"Date","shift":"Shift","machine":"Machine","department":"Department",
                 "target_type":"Target Type","production_ton":"Good Output Ton","target_ton":"Fixed Target Ton",
@@ -12552,8 +12624,10 @@ elif page == "Operations":
                 "closing_wip_ton":"Closing WIP","waste_ton":"Waste Ton","conversion_pct":"Conversion %",
                 "yield_pct":"Yield %","waste_pct":"Waste %","breakdown_hours":"Breakdown Hrs","remark":"Remark"
             })
-            st.markdown("#### Daily Production Flow")
+            st.markdown("#### Saved Production Entries")
             st.dataframe(display,hide_index=True,use_container_width=True)
+        else:
+            st.info(f"No production entry is saved for {pdate.strftime('%d/%m/%Y')} yet.")
 
     with tab_mp:
         c1,c2,c3=st.columns(3)
