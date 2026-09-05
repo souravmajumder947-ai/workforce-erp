@@ -1,0 +1,38 @@
+name: V10.9 Final Production Activation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/v109_final_production_activation_patch.py"
+      - ".github/workflows/v109-final-production-activation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply V10.9 production activation
+        run: python tools/v109_final_production_activation_patch.py
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Audit UI controls
+        run: python tools/v104_button_audit.py
+      - name: Commit update
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Add formal HRMS production activation"
+          git pull --rebase origin main
+          git push origin main
