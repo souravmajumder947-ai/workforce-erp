@@ -63,7 +63,7 @@ new_utils = '''    # V10.5 DIRECT ACTION CARDS + CLEAN LOGIN
                     st.session_state["_v83_nav_request"] = _v10_target
                     st.rerun()
             else:
-                st.button(
+                _v10_disabled_click = st.button(
                     _v10_label,
                     key=f"{_v10_key}_disabled",
                     use_container_width=True,
