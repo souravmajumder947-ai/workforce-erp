@@ -380,7 +380,7 @@ go_live = r'''        with st.container(border=True):
                         use_container_width=True,
                     )
                 else:
-                    st.button(
+                    _v107_disabled_download = st.button(
                         "Download Production Backup",
                         key="v107_download_backup_disabled",
                         use_container_width=True,
