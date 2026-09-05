@@ -1,0 +1,38 @@
+name: V11.4 HR Review Period Filter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/v114_hr_review_period_filter.py"
+      - ".github/workflows/v114-hr-review-period-filter.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply V11.4 HR Review period patch
+        run: python tools/v114_hr_review_period_filter.py
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Audit UI controls
+        run: python tools/v104_button_audit.py
+      - name: Commit update
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Add HR Review date range controls"
+          git pull --rebase origin main
+          git push origin main
