@@ -10803,13 +10803,18 @@ elif page == "Attendance":
                             detected = detect_attendance_workbook_division(attendance_file)
                     attendance_file.seek(0)
 
-                    actual = detected or expected
+                    # V11.1 EXPECTED DIVISION AUTHORITATIVE
+                    # The HR-selected Expected Division is authoritative for the import.
+                    # File-name / workbook detection is advisory only. The Employee Master
+                    # safety guard below independently blocks a genuinely wrong selection.
+                    actual = expected
                     if detected:
-                        st.caption(f"Detected division: **{detected}**")
+                        st.caption(f"File label/detection suggests: **{detected}**")
                         if detected != expected:
-                            st.warning(
-                                f"You selected **{expected}**, but the file indicates **{detected}**. "
-                                "The detected division will be used."
+                            st.info(
+                                f"You selected **{expected}**, while the file label/detection suggests **{detected}**. "
+                                f"The preview will use **{expected}** and verify every Employee ID against Employee Master. "
+                                "If the selected division is wrong, the safety guard will block the import."
                             )
 
                     # Detect Dhaulana's special horizontal monthly layout.
