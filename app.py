@@ -945,6 +945,7 @@ def _postgres_pool():
         keepalives_idle=30,
         keepalives_interval=10,
         keepalives_count=3,
+        sslmode="require",
     )
 
 
@@ -979,6 +980,21 @@ class _PooledConnection:
             finally:
                 self._returned = True
 
+    def discard(self):
+        """Permanently remove a broken connection from the pool."""
+        if self._returned:
+            return
+        try:
+            self._pool.putconn(self._conn, close=True)
+        except Exception:
+            try:
+                if self._conn and not self._conn.closed:
+                    self._conn.close()
+            except Exception:
+                pass
+        finally:
+            self._returned = True
+
     def __enter__(self):
         return self
 
@@ -997,21 +1013,60 @@ def get_conn():
     return get_pg_conn()
 
 
+# V10.6 DATABASE LOGIN RESILIENCE
+_PG_TRANSIENT_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
+def _discard_raw_pg_connection(pool, conn):
+    if conn is None:
+        return
+    try:
+        pool.putconn(conn, close=True)
+    except Exception:
+        try:
+            if not conn.closed:
+                conn.close()
+        except Exception:
+            pass
+
+
 def get_pg_conn():
     pool = _postgres_pool()
+    last_error = None
 
-    # If Neon closed an idle connection, discard it and get a healthy one.
-    for _ in range(2):
-        conn = pool.getconn()
-        if conn is not None and not conn.closed:
-            return _PooledConnection(pool, conn)
-        if conn is not None:
+    # conn.closed is not enough: an idle TCP connection can look open locally
+    # after Neon/server-side idle cleanup. Validate every checkout with SELECT 1.
+    for _attempt in range(3):
+        conn = None
+        try:
+            conn = pool.getconn()
+            if conn is None or conn.closed:
+                _discard_raw_pg_connection(pool, conn)
+                continue
+
+            cur = conn.cursor()
             try:
-                pool.putconn(conn, close=True)
-            except Exception:
-                pass
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            finally:
+                cur.close()
 
-    raise RuntimeError("Unable to obtain a PostgreSQL connection.")
+            # SELECT 1 starts a transaction under psycopg2 default settings.
+            # Roll it back before handing the connection to application code.
+            conn.rollback()
+            return _PooledConnection(pool, conn)
+
+        except _PG_TRANSIENT_ERRORS as exc:
+            last_error = exc
+            _discard_raw_pg_connection(pool, conn)
+            continue
+        except Exception:
+            _discard_raw_pg_connection(pool, conn)
+            raise
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Unable to obtain a healthy PostgreSQL connection.")
 
 
 def test_postgres_connection():
@@ -1883,43 +1938,73 @@ def _normalize_postgres_numbers(df):
 
 def read_df(sql, params=()):
     pg_sql = sql.replace("?", "%s")
+    last_error = None
 
-    conn = get_pg_conn()
+    for _attempt in range(3):
+        conn = None
+        try:
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            try:
+                cur.execute(pg_sql, params)
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+            finally:
+                cur.close()
+            return _normalize_postgres_numbers(pd.DataFrame(rows, columns=columns))
 
-    try:
-        cur = conn.cursor()
-        cur.execute(pg_sql, params)
+        except _PG_TRANSIENT_ERRORS as exc:
+            last_error = exc
+            if conn is not None:
+                conn.discard()
+            if _attempt >= 2:
+                raise
+            continue
+        finally:
+            if conn is not None and not getattr(conn, "_returned", False):
+                conn.close()
 
-        rows = cur.fetchall()
-        columns = [desc[0] for desc in cur.description]
-
-        cur.close()
-
-        return _normalize_postgres_numbers(pd.DataFrame(rows, columns=columns))
-
-    finally:
-        conn.close()
+    if last_error is not None:
+        raise last_error
+    return pd.DataFrame()
 
 
 def upsert(sql, params):
     pg_sql = sql.replace("?", "%s")
+    last_error = None
 
-    conn = get_pg_conn()
+    for _attempt in range(3):
+        conn = None
+        try:
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            try:
+                cur.execute(pg_sql, params)
+                conn.commit()
+            finally:
+                cur.close()
+            return
 
-    try:
-        cur = conn.cursor()
-        cur.execute(pg_sql, params)
+        except _PG_TRANSIENT_ERRORS as exc:
+            last_error = exc
+            if conn is not None:
+                conn.discard()
+            if _attempt >= 2:
+                raise
+            continue
+        except Exception:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+        finally:
+            if conn is not None and not getattr(conn, "_returned", False):
+                conn.close()
 
-        conn.commit()
-
-        cur.close()
-
-    except Exception:
-        conn.rollback()
-        raise
-
-    finally:
-        conn.close()
+    if last_error is not None:
+        raise last_error
 
 
 
@@ -2017,10 +2102,15 @@ def authenticate_app_user(username, password):
         return None
     if not verify_user_password(password, row["password_hash"]):
         return None
-    upsert(
-        "UPDATE app_users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?",
-        (int(row["user_id"]),),
-    )
+    try:
+        upsert(
+            "UPDATE app_users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?",
+            (int(row["user_id"]),),
+        )
+    except _PG_TRANSIENT_ERRORS:
+        # Authentication already succeeded. A telemetry timestamp should not
+        # block access because of a momentary database reconnect.
+        pass
     return {
         "user_id": int(row["user_id"]),
         "username": str(row["username"]),
@@ -6671,15 +6761,41 @@ if st.session_state.get("auth_user") is None:
                 login_submit = st.form_submit_button("Sign In  →", type="primary", use_container_width=True)
 
             if login_submit:
-                user = authenticate_app_user(login_username, login_password)
-                if user is None:
-                    st.error("Invalid username/password or inactive user.")
-                else:
-                    _new_token = create_login_session(user["user_id"])
-                    st.session_state["auth_user"] = user
-                    st.session_state["auth_token"] = _new_token
-                    st.query_params["session"] = _new_token
-                    st.rerun()
+                try:
+                    user = authenticate_app_user(login_username, login_password)
+                    if user is None:
+                        st.error("Invalid username/password or inactive user.")
+                    else:
+                        try:
+                            _new_token = create_login_session(user["user_id"])
+                        except _PG_TRANSIENT_ERRORS:
+                            # The user is authenticated. Allow this browser
+                            # session to continue even if persistent-session
+                            # storage briefly reconnects.
+                            _new_token = None
+
+                        st.session_state["auth_user"] = user
+                        st.session_state["auth_token"] = _new_token
+                        if _new_token:
+                            st.query_params["session"] = _new_token
+                        else:
+                            try:
+                                st.query_params.pop("session", None)
+                            except Exception:
+                                pass
+                        st.rerun()
+
+                except _PG_TRANSIENT_ERRORS:
+                    st.warning(
+                        "Database connection was temporarily interrupted and is reconnecting. "
+                        "Please click Sign In once more if access does not continue automatically."
+                    )
+                except Exception:
+                    # Do not expose database/internal traceback details on the
+                    # public login screen. The full exception remains in server logs.
+                    st.error(
+                        "Unable to complete sign in right now. Please try again in a few seconds."
+                    )
 
             st.markdown(
                 """
