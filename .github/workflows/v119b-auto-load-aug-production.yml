@@ -1,0 +1,28 @@
+name: V11.9B Auto-load August Production
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/v119b_auto_load_aug_production.py"
+      - ".github/workflows/v119b-auto-load-aug-production.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python tools/v119b_auto_load_aug_production.py
+      - run: python -m py_compile app.py
+      - run: python tools/v104_button_audit.py
+      - run: |
+          if git diff --quiet -- app.py; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Auto-load August production history on deploy"
+          git pull --rebase origin main
+          git push origin main
