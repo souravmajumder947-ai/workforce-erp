@@ -2920,113 +2920,44 @@ _FINSYS_AUG2026_CORRUGATION_DAILY = [
 ]
 
 def ensure_finsys_aug2026_corrugation_daily_import():
-    """Idempotently load August 2026 Finsys daily Corrugation totals into live production."""
-    # V11.9B AUTO-LOAD FINSYS AUGUST HISTORY
+    """Deprecated: the previously supplied August 2026 Finsys DPR was confirmed incorrect."""
+    # V12.1 REMOVE WRONG AUGUST FINSYS IMPORT
+    return {"inserted":0,"updated":0,"preserved":0,"source_rows":0,"disabled":True}
+
+def _v121_remove_wrong_august_finsys_rows():
+    """Remove only rows created from the incorrect Finsys DPR import; preserve manual/live entries."""
+    conn=get_pg_conn()
     try:
-        _done = read_df(
-            "SELECT setting_value FROM app_settings WHERE setting_key=? LIMIT 1",
-            ("finsys_corrugation_aug2026_import_v1",)
-        )
-        if not _done.empty and str(_done.iloc[0].get("setting_value") or "").startswith("loaded:"):
-            return {
-                "inserted":0,"updated":0,"preserved":0,
-                "source_rows":len(_FINSYS_AUG2026_CORRUGATION_DAILY),
-                "already_loaded":True
-            }
-    except Exception:
-        pass
-    conn = get_pg_conn()
-    inserted = 0
-    updated = 0
-    preserved = 0
-    try:
-        cur = conn.cursor()
-        for row in _FINSYS_AUG2026_CORRUGATION_DAILY:
-            (
-                work_date,total_minutes,plan_qty,prodn_qty,rejn_qty,net_boxes,
-                prod_mtr,prodn_wt_kg,paper_used_kg,reel_wstg_kg,wstg_pct
-            ) = row
-            prodn_wt_t = float(prodn_wt_kg) / 1000.0
-            paper_used_t = float(paper_used_kg) / 1000.0
-            reel_wstg_t = float(reel_wstg_kg) / 1000.0
-            yield_pct = (prodn_wt_t / paper_used_t * 100.0) if paper_used_t else 0.0
-            source_remark = (
-                "FINSYS DPR IMPORT | Aug 2026 | "
-                f"Total Hrs={float(total_minutes)/60.0:.2f}; Plan Qty={int(plan_qty)}; "
-                f"Prodn Qty={int(prodn_qty)}; Rejn Qty={int(rejn_qty)}; Net Boxes={int(net_boxes)}; "
-                f"Prod.Mtr={int(prod_mtr)}; Prodn Wt={prodn_wt_t:.3f}T; "
-                f"Paper Used={paper_used_t:.3f}T; Reel Wstg={reel_wstg_t:.3f}T; "
-                f"Report Wstg%={float(wstg_pct):.2f}"
-            )
-
-            cur.execute(
-                """SELECT remark FROM production
-                   WHERE work_date=%s AND shift='DAY' AND machine='Corrugation'
-                   LIMIT 1""",
-                (work_date,)
-            )
-            existing = cur.fetchone()
-            if existing and not str(existing[0] or "").startswith("FINSYS DPR IMPORT"):
-                preserved += 1
-                continue
-
-            cur.execute(
-                """INSERT INTO production(
-                       work_date,shift,machine,production_ton,target_ton,waste_ton,breakdown_hours,
-                       paper_cost,ink_cost,glue_cost,other_material_cost,target_type,
-                       opening_wip_ton,material_received_ton,material_available_ton,
-                       material_processed_ton,good_output_ton,closing_wip_ton,
-                       conversion_pct,yield_pct,waste_pct,remark
-                   ) VALUES (
-                       %s,'DAY','Corrugation',%s,110.0,%s,0,
-                       0,0,0,0,'FIXED_TON',
-                       0,0,%s,%s,%s,0,
-                       0,%s,%s,%s
-                   )
-                   ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-                       production_ton=excluded.production_ton,
-                       target_ton=excluded.target_ton,
-                       waste_ton=excluded.waste_ton,
-                       breakdown_hours=excluded.breakdown_hours,
-                       target_type=excluded.target_type,
-                       material_available_ton=excluded.material_available_ton,
-                       material_processed_ton=excluded.material_processed_ton,
-                       good_output_ton=excluded.good_output_ton,
-                       yield_pct=excluded.yield_pct,
-                       waste_pct=excluded.waste_pct,
-                       remark=excluded.remark""",
-                (
-                    work_date,prodn_wt_t,reel_wstg_t,paper_used_t,paper_used_t,
-                    prodn_wt_t,yield_pct,float(wstg_pct),source_remark
-                )
-            )
-            if existing:
-                updated += 1
-            else:
-                inserted += 1
-
+        cur=conn.cursor()
         cur.execute(
-            """INSERT INTO app_settings(setting_key,setting_value)
-               VALUES ('finsys_corrugation_aug2026_import_v1',%s)
-               ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""",
-            (f"loaded:{len(_FINSYS_AUG2026_CORRUGATION_DAILY)}; inserted:{inserted}; updated:{updated}; preserved:{preserved}",)
+            """DELETE FROM production
+               WHERE work_date BETWEEN %s AND %s
+                 AND shift='DAY'
+                 AND machine='Corrugation'
+                 AND COALESCE(remark,'') LIKE 'FINSYS DPR IMPORT%%'""",
+            ("2026-08-01","2026-08-31")
+        )
+        deleted=int(cur.rowcount or 0)
+        cur.execute(
+            "DELETE FROM app_settings WHERE setting_key=%s",
+            ("finsys_corrugation_aug2026_import_v1",)
         )
         conn.commit()
         cur.close()
-        return {"inserted": inserted, "updated": updated, "preserved": preserved, "source_rows": len(_FINSYS_AUG2026_CORRUGATION_DAILY)}
+        return deleted
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
 
-
-# Auto-load the approved August 2026 production history once after deployment.
-# Failure is non-fatal; Operations page retries and shows the error if needed.
 try:
-    _v119_boot_import = ensure_finsys_aug2026_corrugation_daily_import()
+    _v121_removed_wrong_rows=_v121_remove_wrong_august_finsys_rows()
 except Exception:
-    _v119_boot_import = None
+    _v121_removed_wrong_rows=0
+
+def _v121_old_importer_disabled():
+    return True
 
 
 def can_view_salary(role):
@@ -12506,13 +12437,8 @@ elif page == "Contractors":
 # OPERATIONS — GROUPED, NOT THREE SIDEBAR PAGES
 # ============================================================
 elif page == "Operations":
-    # Load the approved historical August 2026 DPR into the live production table.
-    try:
-        _v119_import_result = ensure_finsys_aug2026_corrugation_daily_import()
-    except Exception as _v119_import_exc:
-        _v119_import_result = None
-        st.error(f"August 2026 production history import failed: {_v119_import_exc}")
-
+    # V12.1: incorrect August Finsys DPR import was removed.
+    _v119_import_result = None
     # V11.6 PRODUCTION ENTRY FIRST
     v5_page_header(
         "Production & Plant Operations",
@@ -12524,12 +12450,10 @@ elif page == "Operations":
         "Production Entry","Monthly Production Summary","Manpower Allocation"
     ])
 
-    if _v119_import_result:
-        st.caption(
-            "August 2026 Finsys DPR history is loaded day-wise for Corrugation: "
-            f"{_v119_import_result['source_rows']} production date(s) in source; "
-            "02 Aug and 15 Aug had no DPR date record and were not invented."
-        )
+    st.caption(
+        "The previously imported August 2026 Finsys production report was removed because the source report was confirmed incorrect. "
+        "Manual/live production entries are preserved."
+    )
 
     with tab_prod:
         # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
