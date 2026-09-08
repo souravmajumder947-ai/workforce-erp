@@ -9302,6 +9302,68 @@ if hasattr(st, "fragment"):
 else:
     st.markdown(_v83_live_status_html(), unsafe_allow_html=True)
 
+# V13.8 SAFE CONSUMPTION SUMMARY SCHEMA
+@st.cache_resource(show_spinner=False)
+def _v138_ensure_consumption_summary_schema():
+    """Create the monthly Finsys consumption-summary table safely across concurrent reruns."""
+    conn=get_pg_conn()
+    cur=None
+    try:
+        cur=conn.cursor()
+        # Streamlit reruns / multiple app workers can reach CREATE TABLE together.
+        # Serialize the DDL so PostgreSQL never races while creating the implicit row type.
+        cur.execute("SELECT pg_advisory_lock(%s)", (138136,))
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS production_consumption_summary(
+                id BIGSERIAL PRIMARY KEY,
+                period_month DATE NOT NULL,
+                item_group TEXT,
+                group_code TEXT,
+                cref TEXT,
+                item_name TEXT,
+                source_f3_qty_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                reel_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                reel_return_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                net_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                reel_size TEXT,
+                erp_code TEXT,
+                reel_consumption_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                unit TEXT,
+                source_file TEXT,
+                imported_by TEXT,
+                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(period_month,erp_code,item_name)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_consumption_summary_month "
+            "ON production_consumption_summary(period_month)"
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if cur is not None:
+            try:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (138136,))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            try:
+                cur.close()
+            except Exception:
+                pass
+        conn.close()
+
+
+
 # ============================================================
 # HOME — HR OPERATIONAL WORKSPACE
 # ============================================================
@@ -12436,67 +12498,6 @@ elif page == "Contractors":
                             recent,hide_index=True,use_container_width=True,
                             column_config={"Amount":st.column_config.NumberColumn("Amount",format="₹%.2f")}
                         )
-
-# V13.8 SAFE CONSUMPTION SUMMARY SCHEMA
-@st.cache_resource(show_spinner=False)
-def _v138_ensure_consumption_summary_schema():
-    """Create the monthly Finsys consumption-summary table safely across concurrent reruns."""
-    conn=get_pg_conn()
-    cur=None
-    try:
-        cur=conn.cursor()
-        # Streamlit reruns / multiple app workers can reach CREATE TABLE together.
-        # Serialize the DDL so PostgreSQL never races while creating the implicit row type.
-        cur.execute("SELECT pg_advisory_lock(%s)", (138136,))
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS production_consumption_summary(
-                id BIGSERIAL PRIMARY KEY,
-                period_month DATE NOT NULL,
-                item_group TEXT,
-                group_code TEXT,
-                cref TEXT,
-                item_name TEXT,
-                source_f3_qty_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
-                reel_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
-                reel_return_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
-                net_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
-                reel_size TEXT,
-                erp_code TEXT,
-                reel_consumption_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
-                unit TEXT,
-                source_file TEXT,
-                imported_by TEXT,
-                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(period_month,erp_code,item_name)
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_consumption_summary_month "
-            "ON production_consumption_summary(period_month)"
-        )
-        conn.commit()
-        return True
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        if cur is not None:
-            try:
-                cur.execute("SELECT pg_advisory_unlock(%s)", (138136,))
-                conn.commit()
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            try:
-                cur.close()
-            except Exception:
-                pass
-        conn.close()
-
 
 # ============================================================
 # OPERATIONS — GROUPED, NOT THREE SIDEBAR PAGES
@@ -18020,3 +18021,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V13.7 LEGACY XLS READER FIX
 
 # V13.8 SAFE CONSUMPTION SUMMARY SCHEMA
+
+# V13.8B MOVE CONSUMPTION SCHEMA HELPER BEFORE PAGE ROUTING
