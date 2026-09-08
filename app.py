@@ -12572,10 +12572,11 @@ elif page == "Operations":
                     "Net Issue, expected consumption, value and rate are calculated automatically."
                 )
 
+                # V12.8 SIMPLE PRODUCTION REPORTS
                 _reels_existing = read_df(
                     """SELECT line_no,reel_reference,paper_grade,
-                              opening_wip_ton,reel_issue_ton,reel_return_ton,net_issue_ton,
-                              closing_wip_ton,consumption_ton,quantity_ton,value_amount,remark
+                              reel_issue_ton,reel_return_ton,consumption_ton,
+                              quantity_ton,value_amount,remark
                        FROM production_reel_consumption
                        WHERE work_date=? AND machine=?
                        ORDER BY line_no""",
@@ -12585,30 +12586,15 @@ elif page == "Operations":
                 if _reels_existing.empty:
                     _legacy_qty=float(er.get("material_processed_ton") or 0)
                     _legacy_value=float(er.get("paper_cost") or 0)
-                    if _legacy_qty>0 or _legacy_value>0:
-                        _reel_seed=pd.DataFrame([{
-                            "Reel / Reference":"Legacy Daily Total",
-                            "Paper Grade":"",
-                            "Opening WIP Ton":0.0,
-                            "Reel Issue Ton":0.0,
-                            "Reel Return Ton":0.0,
-                            "Closing WIP Ton":0.0,
-                            "Actual Consumption Ton":_legacy_qty,
-                            "Value ₹":_legacy_value,
-                            "Remark":"Existing consumption retained; issue/return history not available"
-                        }])
-                    else:
-                        _reel_seed=pd.DataFrame([{
-                            "Reel / Reference":"",
-                            "Paper Grade":"",
-                            "Opening WIP Ton":0.0,
-                            "Reel Issue Ton":0.0,
-                            "Reel Return Ton":0.0,
-                            "Closing WIP Ton":0.0,
-                            "Actual Consumption Ton":0.0,
-                            "Value ₹":0.0,
-                            "Remark":""
-                        }])
+                    _reel_seed=pd.DataFrame([{
+                        "Reel / ERP Code":"",
+                        "Paper Description / GSM":"",
+                        "Reel Issue Ton":0.0,
+                        "Reel Return Ton":0.0,
+                        "Actual Consumption Ton":_legacy_qty,
+                        "Consumption Value ₹":_legacy_value,
+                        "Remark":""
+                    }])
                 else:
                     _reel_seed=_reels_existing.copy()
                     _reel_seed["consumption_ton"]=pd.to_numeric(
@@ -12621,860 +12607,41 @@ elif page == "Operations":
                         _reel_seed["consumption_ton"]>0,_reel_seed["quantity_ton"]
                     )
                     _reel_seed=_reel_seed.rename(columns={
-                        "reel_reference":"Reel / Reference",
-                        "paper_grade":"Paper Grade",
-                        "opening_wip_ton":"Opening WIP Ton",
+                        "reel_reference":"Reel / ERP Code",
+                        "paper_grade":"Paper Description / GSM",
                         "reel_issue_ton":"Reel Issue Ton",
                         "reel_return_ton":"Reel Return Ton",
-                        "closing_wip_ton":"Closing WIP Ton",
                         "consumption_ton":"Actual Consumption Ton",
-                        "value_amount":"Value ₹",
+                        "value_amount":"Consumption Value ₹",
                         "remark":"Remark"
                     })[[
-                        "Reel / Reference","Paper Grade","Opening WIP Ton",
-                        "Reel Issue Ton","Reel Return Ton","Closing WIP Ton",
-                        "Actual Consumption Ton","Value ₹","Remark"
+                        "Reel / ERP Code","Paper Description / GSM",
+                        "Reel Issue Ton","Reel Return Ton",
+                        "Actual Consumption Ton","Consumption Value ₹","Remark"
                     ]].copy()
-
-                # V12.5 FINSYS PAIRED REEL ISSUE RETURN IMPORT
-                try:
-                    _v125_conn=get_pg_conn()
-                    _v125_cur=_v125_conn.cursor()
-                    _v125_cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS production_reel_transactions(
-                            id BIGSERIAL PRIMARY KEY,
-                            movement_type TEXT NOT NULL,
-                            work_date DATE NOT NULL,
-                            vch_no TEXT,
-                            supplier TEXT,
-                            acode TEXT,
-                            item TEXT,
-                            quantity_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
-                            quantity_ton NUMERIC(14,6) NOT NULL DEFAULT 0,
-                            reel_no TEXT,
-                            co_reel TEXT,
-                            reel_mill TEXT,
-                            irate NUMERIC(14,4) NOT NULL DEFAULT 0,
-                            movement_value NUMERIC(16,2) NOT NULL DEFAULT 0,
-                            job_no TEXT,
-                            job_date DATE,
-                            reel_size NUMERIC(14,3) NOT NULL DEFAULT 0,
-                            gsm NUMERIC(14,3) NOT NULL DEFAULT 0,
-                            icode TEXT,
-                            cpartno TEXT,
-                            source_file TEXT,
-                            source_row INTEGER,
-                            entered_by TEXT,
-                            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            UNIQUE(movement_type,work_date,source_file,source_row)
-                        )
-                        """
-                    )
-                    _v125_conn.commit()
-                    _v125_cur.close()
-                    _v125_conn.close()
-                except Exception as _v125_schema_exc:
-                    try:
-                        _v125_conn.rollback()
-                        _v125_conn.close()
-                    except Exception:
-                        pass
-                    st.error(f"Unable to prepare detailed reel movement storage: {_v125_schema_exc}")
-                    st.stop()
-
-                with st.expander("📥 Finsys Reel Issue + Reel Return Upload (Recommended)", expanded=False):
-                    st.caption(
-                        "Upload the two original Finsys files separately. These files are treated as KG-based "
-                        "transaction data. Issue − Return is shown as Net Issue; it is NOT treated as consumption."
-                    )
-                    u1,u2=st.columns(2)
-                    _v125_issue_file=u1.file_uploader(
-                        "1. Upload Reel Issue File",
-                        type=["csv","xlsx"],
-                        key="v125_issue_file",
-                        help="Expected Finsys columns include VCH_DT, ITEM, QTY_OUT, REEL_NO, IRATE, JOB_NO, REEL_SIZE, GSM, ICODE."
-                    )
-                    _v125_return_file=u2.file_uploader(
-                        "2. Upload Reel Return File",
-                        type=["csv","xlsx"],
-                        key="v125_return_file",
-                        help="Expected Finsys columns include VCH_DT, ITEM, QTY_RETURN, REEL_NO, IRATE, JOB_NO, REEL_SIZE, GSM, ICODE."
-                    )
-                    _v125_replace=st.checkbox(
-                        "Replace previously imported Finsys Issue/Return transactions for the uploaded dates",
-                        value=False,
-                        key="v125_replace",
-                        help="This replaces only detailed Issue/Return transaction rows. Production, manpower and consumption data are preserved."
-                    )
-
-                    def _v125_read_upload(_file):
-                        _file.seek(0)
-                        _name=str(getattr(_file,"name","")).lower()
-                        if _name.endswith(".csv"):
-                            _df=pd.read_csv(_file)
-                        else:
-                            _df=pd.read_excel(_file,engine="openpyxl")
-                        _df.columns=[str(c).strip() for c in _df.columns]
-                        return _df
-
-                    def _v125_text(_value):
-                        try:
-                            if pd.isna(_value):
-                                return ""
-                        except Exception:
-                            pass
-                        if _value is None:
-                            return ""
-                        _t=str(_value).strip()
-                        if _t.endswith(".0"):
-                            try:
-                                return str(int(float(_t)))
-                            except Exception:
-                                pass
-                        return _t
-
-                    def _v125_num(_value):
-                        try:
-                            if pd.isna(_value) or str(_value).strip()=="":
-                                return 0.0
-                        except Exception:
-                            pass
-                        try:
-                            return float(str(_value).replace(",","").replace("₹","").strip())
-                        except Exception:
-                            return 0.0
-
-                    def _v125_parse(_file,_movement):
-                        _df=_v125_read_upload(_file)
-                        _required=["VCH_DT","ITEM","REEL_NO","IRATE","ICODE"]
-                        _qty_col="QTY_OUT" if _movement=="ISSUE" else "QTY_RETURN"
-                        _required.append(_qty_col)
-                        _missing=[c for c in _required if c not in _df.columns]
-                        if _missing:
-                            raise ValueError(
-                                f"{_movement.title()} file is missing required column(s): {', '.join(_missing)}"
-                            )
-                        _rows=[]
-                        for _idx,_r in _df.iterrows():
-                            _dt=pd.to_datetime(_r.get("VCH_DT"),errors="coerce",dayfirst=True)
-                            _qty=_v125_num(_r.get(_qty_col))
-                            if pd.isna(_dt) or _qty<=0:
-                                continue
-                            _rate=_v125_num(_r.get("IRATE"))
-                            _job_dt=pd.to_datetime(_r.get("JOB_DT"),errors="coerce",dayfirst=True)
-                            _rows.append({
-                                "Movement":_movement,
-                                "Date":_dt.date(),
-                                "Voucher No":_v125_text(_r.get("VCH_NO")),
-                                "Supplier":_v125_text(_r.get("SUPPLIER")),
-                                "ACODE":_v125_text(_r.get("ACODE")),
-                                "Item":_v125_text(_r.get("ITEM")),
-                                "Qty Kg":_qty,
-                                "Qty Ton":_qty/1000.0,
-                                "Reel No":_v125_text(_r.get("REEL_NO")),
-                                "Company Reel":_v125_text(_r.get("CO_REEL")),
-                                "Reel Mill":_v125_text(_r.get("REEL_MILL")),
-                                "Rate ₹/Kg":_rate,
-                                "Movement Value ₹":_qty*_rate,
-                                "Job No":_v125_text(_r.get("JOB_NO")),
-                                "Job Date":(
-                                    _job_dt.date() if not pd.isna(_job_dt) else None
-                                ),
-                                "Reel Size":_v125_num(_r.get("REEL_SIZE")),
-                                "GSM":_v125_num(_r.get("GSM")),
-                                "ICODE":_v125_text(_r.get("ICODE")),
-                                "Customer Part No":_v125_text(_r.get("CPARTNO")),
-                                "Source Row":int(_idx)+2,
-                                "Source File":str(getattr(_file,"name","")).strip(),
-                            })
-                        return pd.DataFrame(_rows)
-
-                    _v125_issue_df=None
-                    _v125_return_df=None
-                    _v125_errors=[]
-                    if _v125_issue_file is not None:
-                        try:
-                            _v125_issue_df=_v125_parse(_v125_issue_file,"ISSUE")
-                        except Exception as _exc:
-                            _v125_errors.append(str(_exc))
-                    if _v125_return_file is not None:
-                        try:
-                            _v125_return_df=_v125_parse(_v125_return_file,"RETURN")
-                        except Exception as _exc:
-                            _v125_errors.append(str(_exc))
-
-                    for _err in _v125_errors:
-                        st.error(_err)
-
-                    if (
-                        not _v125_errors
-                        and _v125_issue_df is not None
-                        and _v125_return_df is not None
-                    ):
-                        if _v125_issue_df.empty or _v125_return_df.empty:
-                            st.error("One of the two uploaded files contains no valid movement rows.")
-                        else:
-                            _v125_all=pd.concat(
-                                [_v125_issue_df,_v125_return_df],
-                                ignore_index=True
-                            )
-                            _v125_dates=sorted(_v125_all["Date"].unique().tolist())
-                            _v125_issue_t=float(_v125_issue_df["Qty Ton"].sum())
-                            _v125_return_t=float(_v125_return_df["Qty Ton"].sum())
-                            _v125_net_t=_v125_issue_t-_v125_return_t
-                            _v125_issue_value=float(_v125_issue_df["Movement Value ₹"].sum())
-                            _v125_return_value=float(_v125_return_df["Movement Value ₹"].sum())
-                            _v125_net_value=_v125_issue_value-_v125_return_value
-
-                            p1,p2,p3,p4,p5=st.columns(5)
-                            p1.metric("Issue Rows",f"{len(_v125_issue_df):,}")
-                            p2.metric("Return Rows",f"{len(_v125_return_df):,}")
-                            p3.metric("Reel Issue",f"{_v125_issue_t:,.3f} T")
-                            p4.metric("Reel Return",f"{_v125_return_t:,.3f} T")
-                            p5.metric("Net Issue",f"{_v125_net_t:,.3f} T")
-
-                            p1,p2,p3,p4=st.columns(4)
-                            p1.metric("Movement Dates",f"{len(_v125_dates):,}")
-                            p2.metric("Issue Value",v5_money(_v125_issue_value))
-                            p3.metric("Return Value",v5_money(_v125_return_value))
-                            p4.metric("Net Issue Value",v5_money(_v125_net_value))
-
-                            st.caption(
-                                f"Date range: {min(_v125_dates).strftime('%d/%m/%Y')} to "
-                                f"{max(_v125_dates).strftime('%d/%m/%Y')}. "
-                                "Values are movement values from QTY × IRATE, not consumption value."
-                            )
-
-                            _v125_preview=_v125_all[[
-                                "Movement","Date","Voucher No","Reel No","Company Reel",
-                                "ICODE","Item","GSM","Reel Size","Qty Kg","Qty Ton",
-                                "Rate ₹/Kg","Movement Value ₹","Job No"
-                            ]].head(100)
-                            st.dataframe(
-                                _v125_preview,
-                                hide_index=True,use_container_width=True,
-                                column_config={
-                                    "Qty Kg":st.column_config.NumberColumn(format="%.0f"),
-                                    "Qty Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                    "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
-                                    "Movement Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
-                                }
-                            )
-                            if len(_v125_all)>100:
-                                st.caption(f"Preview shows first 100 of {len(_v125_all):,} transaction rows.")
-
-                            _v125_existing=read_df(
-                                """SELECT COUNT(*) AS rows
-                                   FROM production_reel_transactions
-                                   WHERE work_date BETWEEN ? AND ?
-                                     AND movement_type IN ('ISSUE','RETURN')""",
-                                (
-                                    min(_v125_dates).isoformat(),
-                                    max(_v125_dates).isoformat()
-                                )
-                            )
-                            _v125_existing_count=(
-                                int(_v125_existing.iloc[0]["rows"] or 0)
-                                if not _v125_existing.empty else 0
-                            )
-                            if _v125_existing_count and not _v125_replace:
-                                st.warning(
-                                    f"{_v125_existing_count:,} Finsys Issue/Return transaction row(s) "
-                                    "already exist in this date range. Tick Replace to import again safely."
-                                )
-
-                            if st.button(
-                                "Import Finsys Reel Issue + Return",
-                                type="primary",
-                                use_container_width=True,
-                                disabled=bool(_v125_existing_count and not _v125_replace),
-                                key="v125_import_pair"
-                            ):
-                                _conn=get_pg_conn()
-                                try:
-                                    _cur=_conn.cursor()
-                                    if _v125_replace:
-                                        _cur.execute(
-                                            """DELETE FROM production_reel_transactions
-                                               WHERE work_date BETWEEN %s AND %s
-                                                 AND movement_type IN ('ISSUE','RETURN')""",
-                                            (
-                                                min(_v125_dates).isoformat(),
-                                                max(_v125_dates).isoformat()
-                                            )
-                                        )
-                                    for _,_rr in _v125_all.iterrows():
-                                        _cur.execute(
-                                            """INSERT INTO production_reel_transactions(
-                                               movement_type,work_date,vch_no,supplier,acode,item,
-                                               quantity_kg,quantity_ton,reel_no,co_reel,reel_mill,
-                                               irate,movement_value,job_no,job_date,reel_size,gsm,
-                                               icode,cpartno,source_file,source_row,entered_by,updated_at
-                                               ) VALUES (
-                                               %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                                               %s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP
-                                               )
-                                               ON CONFLICT(movement_type,work_date,source_file,source_row)
-                                               DO UPDATE SET
-                                               vch_no=excluded.vch_no,supplier=excluded.supplier,
-                                               acode=excluded.acode,item=excluded.item,
-                                               quantity_kg=excluded.quantity_kg,
-                                               quantity_ton=excluded.quantity_ton,
-                                               reel_no=excluded.reel_no,co_reel=excluded.co_reel,
-                                               reel_mill=excluded.reel_mill,irate=excluded.irate,
-                                               movement_value=excluded.movement_value,
-                                               job_no=excluded.job_no,job_date=excluded.job_date,
-                                               reel_size=excluded.reel_size,gsm=excluded.gsm,
-                                               icode=excluded.icode,cpartno=excluded.cpartno,
-                                               entered_by=excluded.entered_by,
-                                               updated_at=CURRENT_TIMESTAMP""",
-                                            (
-                                                str(_rr["Movement"]),
-                                                _rr["Date"].isoformat(),
-                                                str(_rr["Voucher No"]),
-                                                str(_rr["Supplier"]),
-                                                str(_rr["ACODE"]),
-                                                str(_rr["Item"]),
-                                                float(_rr["Qty Kg"]),
-                                                float(_rr["Qty Ton"]),
-                                                str(_rr["Reel No"]),
-                                                str(_rr["Company Reel"]),
-                                                str(_rr["Reel Mill"]),
-                                                float(_rr["Rate ₹/Kg"]),
-                                                float(_rr["Movement Value ₹"]),
-                                                str(_rr["Job No"]),
-                                                _rr["Job Date"].isoformat() if _rr["Job Date"] else None,
-                                                float(_rr["Reel Size"]),
-                                                float(_rr["GSM"]),
-                                                str(_rr["ICODE"]),
-                                                str(_rr["Customer Part No"]),
-                                                str(_rr["Source File"]),
-                                                int(_rr["Source Row"]),
-                                                _current_user["username"]
-                                            )
-                                        )
-                                    _conn.commit()
-                                    _cur.close()
-                                except Exception:
-                                    _conn.rollback()
-                                    raise
-                                finally:
-                                    _conn.close()
-
-                                record_audit_event(
-                                    _current_user["username"],
-                                    "FINSYS_REEL_ISSUE_RETURN_IMPORT",
-                                    "Operations",
-                                    "Production Reel Transactions",
-                                    f"{min(_v125_dates).isoformat()}|{max(_v125_dates).isoformat()}",
-                                    (
-                                        f"IssueRows={len(_v125_issue_df)}; ReturnRows={len(_v125_return_df)}; "
-                                        f"IssueTon={_v125_issue_t:.3f}; ReturnTon={_v125_return_t:.3f}; "
-                                        f"NetIssueTon={_v125_net_t:.3f}; IssueValue={_v125_issue_value:.2f}; "
-                                        f"ReturnValue={_v125_return_value:.2f}; Replace={bool(_v125_replace)}"
-                                    )
-                                )
-                                st.success(
-                                    f"Imported {len(_v125_issue_df):,} issue rows and "
-                                    f"{len(_v125_return_df):,} return rows successfully."
-                                )
-                                st.rerun()
-
-                # V12.4 BULK REEL ISSUE RETURN UPLOAD
-                with st.expander("📥 Bulk Upload Reel Issue / Return", expanded=False):
-                    st.caption(
-                        "Upload the complete day or month in one CSV/XLSX file. "
-                        "A Date column is mandatory because Daily and Monthly MD reports are date-wise."
-                    )
-
-                    _v124_template=pd.DataFrame([{
-                        "Date":"01/09/2026",
-                        "Reel / ERP Code":"ERP001",
-                        "Paper Description / GSM":"Kraft 150 GSM",
-                        "Opening WIP Ton":0.000,
-                        "Reel Issue Ton":15.000,
-                        "Reel Return Ton":1.500,
-                        "Closing WIP Ton":0.700,
-                        "Actual Consumption Ton":12.800,
-                        "Consumption Value ₹":710000.00,
-                        "Remark":""
-                    }])
-                    st.download_button(
-                        "Download Bulk Upload Template",
-                        data=_v124_template.to_csv(index=False).encode("utf-8-sig"),
-                        file_name="Reel_Issue_Return_Consumption_Template.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        key="v124_reel_template_download"
-                    )
-
-                    _v124_file=st.file_uploader(
-                        "Upload Reel Issue / Return File",
-                        type=["csv","xlsx"],
-                        key="v124_reel_bulk_file",
-                        help=(
-                            "Supported source headings include Date, ERP_CODE, INAME, REEL_ISS, "
-                            "REEL_RET, NET_ISSUE, REEL_CONS, FLOOR_WIP, UNIT and Value/Amount."
-                        )
-                    )
-                    _v124_unit_mode=st.selectbox(
-                        "Quantity Unit",
-                        ["Auto from UNIT column","Kg","Ton"],
-                        key="v124_reel_unit_mode",
-                        help=(
-                            "Choose Auto when your source has a UNIT column. "
-                            "If the source is in KG, the app converts it to Ton automatically."
-                        )
-                    )
-                    _v124_replace=st.checkbox(
-                        "Replace existing reel movement lines for dates contained in this upload",
-                        value=False,
-                        key="v124_reel_replace",
-                        help=(
-                            "This replaces only reel movement detail for uploaded dates. "
-                            "Saved production output, waste, breakdown and manpower are preserved."
-                        )
-                    )
-
-                    _v124_parsed=None
-                    _v124_parse_errors=[]
-                    _v124_existing_dates=[]
-                    if _v124_file is not None:
-                        try:
-                            _v124_file.seek(0)
-                            _v124_name=str(getattr(_v124_file,"name","")).lower()
-                            if _v124_name.endswith(".csv"):
-                                _v124_raw=pd.read_csv(_v124_file)
-                            else:
-                                _v124_raw=pd.read_excel(_v124_file,engine="openpyxl")
-
-                            _v124_raw.columns=[str(c).strip() for c in _v124_raw.columns]
-                            _v124_norm={
-                                "".join(ch for ch in str(c).lower() if ch.isalnum()):c
-                                for c in _v124_raw.columns
-                            }
-
-                            def _v124_pick(*aliases):
-                                for _a in aliases:
-                                    _k="".join(ch for ch in str(_a).lower() if ch.isalnum())
-                                    if _k in _v124_norm:
-                                        return _v124_norm[_k]
-                                return None
-
-                            _v124_cols={
-                                "date":_v124_pick("Date","Work Date","Production Date","Issue Date","Entry Date"),
-                                "erp":_v124_pick("Reel / ERP Code","ERP_CODE","ERP Code","Reel Code","Reel Reference","Item Code","Code"),
-                                "desc":_v124_pick("Paper Description / GSM","INAME","Item Name","Paper Description","Paper Grade","Paper GSM","Description"),
-                                "opening":_v124_pick("Opening WIP Ton","Opening WIP","Opening Floor WIP","Opening Stock"),
-                                "issue":_v124_pick("Reel Issue Ton","REEL_ISS","Reel Issue","Issue Qty","Issue"),
-                                "return":_v124_pick("Reel Return Ton","REEL_RET","Reel Return","Return Qty","Return"),
-                                "net":_v124_pick("Net Issue Ton","NET_ISSUE","Net Issue"),
-                                "closing":_v124_pick("Closing WIP Ton","FLOOR_WIP","Floor WIP","Closing WIP","Closing Stock"),
-                                "cons":_v124_pick("Actual Consumption Ton","REEL_CONS","Reel Cons","Consumption Ton","Consumption","Consumption Qty"),
-                                "value":_v124_pick("Consumption Value ₹","Consumption Value","VALUE","Value","Amount","Value Amount","Consumption Amount"),
-                                "unit":_v124_pick("UNIT","Unit","UOM"),
-                                "remark":_v124_pick("Remark","Remarks"),
-                            }
-
-                            if _v124_cols["date"] is None:
-                                _v124_parse_errors.append(
-                                    "Date column is missing. A monthly summary without dates cannot be imported "
-                                    "into the day-wise production report."
-                                )
-                            if _v124_cols["issue"] is None and _v124_cols["cons"] is None:
-                                _v124_parse_errors.append(
-                                    "Reel Issue / REEL_ISS or Actual Consumption / REEL_CONS column is required."
-                                )
-                            if _v124_cols["erp"] is None and _v124_cols["desc"] is None:
-                                _v124_parse_errors.append(
-                                    "ERP Code or Paper Description column is required."
-                                )
-                            if (
-                                _v124_unit_mode=="Auto from UNIT column"
-                                and _v124_cols["unit"] is None
-                            ):
-                                _v124_parse_errors.append(
-                                    "UNIT column is not present. Select Kg or Ton manually in Quantity Unit."
-                                )
-
-                            _v124_rows=[]
-                            if not _v124_parse_errors:
-                                for _idx,_row in _v124_raw.iterrows():
-                                    _date_raw=_row.get(_v124_cols["date"])
-                                    if pd.isna(_date_raw) or str(_date_raw).strip()=="":
-                                        continue
-
-                                    if isinstance(_date_raw,(datetime,date)):
-                                        _work_date=_date_raw.date() if isinstance(_date_raw,datetime) else _date_raw
-                                    else:
-                                        _date_text=str(_date_raw).strip()
-                                        _date_parsed=pd.to_datetime(
-                                            _date_text,errors="coerce",dayfirst=True
-                                        )
-                                        if pd.isna(_date_parsed):
-                                            _v124_parse_errors.append(
-                                                f"Invalid Date at source row {_idx+2}: {_date_text}"
-                                            )
-                                            continue
-                                        _work_date=_date_parsed.date()
-
-                                    _unit_text=(
-                                        str(_row.get(_v124_cols["unit"]) or "").strip().upper()
-                                        if _v124_cols["unit"] else ""
-                                    )
-                                    if _v124_unit_mode=="Kg":
-                                        _factor=0.001
-                                    elif _v124_unit_mode=="Ton":
-                                        _factor=1.0
-                                    else:
-                                        if "KG" in _unit_text:
-                                            _factor=0.001
-                                        elif (
-                                            "TON" in _unit_text
-                                            or "MT" in _unit_text
-                                            or _unit_text in {"T","TONNE","TONNES"}
-                                        ):
-                                            _factor=1.0
-                                        else:
-                                            _v124_parse_errors.append(
-                                                f"Unknown UNIT '{_unit_text}' at source row {_idx+2}. "
-                                                "Select Kg or Ton manually."
-                                            )
-                                            continue
-
-                                    def _v124_num(col):
-                                        if col is None:
-                                            return 0.0
-                                        try:
-                                            _val=_row.get(col)
-                                            if pd.isna(_val) or str(_val).strip()=="":
-                                                return 0.0
-                                            return float(str(_val).replace(",","").replace("₹","").strip())
-                                        except Exception:
-                                            return 0.0
-
-                                    _opening=max(_v124_num(_v124_cols["opening"])*_factor,0.0)
-                                    _issue=max(_v124_num(_v124_cols["issue"])*_factor,0.0)
-                                    _return=max(_v124_num(_v124_cols["return"])*_factor,0.0)
-                                    _closing=max(_v124_num(_v124_cols["closing"])*_factor,0.0)
-                                    _actual=max(_v124_num(_v124_cols["cons"])*_factor,0.0)
-                                    _value=max(_v124_num(_v124_cols["value"]),0.0)
-                                    _net=_issue-_return
-                                    _expected=_opening+_net-_closing
-                                    if _expected < -0.0005 and _actual<=0:
-                                        _v124_parse_errors.append(
-                                            f"Negative expected consumption at source row {_idx+2}. "
-                                            "Check Issue, Return and WIP values."
-                                        )
-                                        continue
-                                    _effective=_actual if _actual>0 else max(_expected,0.0)
-
-                                    _source_net=(
-                                        _v124_num(_v124_cols["net"])*_factor
-                                        if _v124_cols["net"] else None
-                                    )
-                                    _net_variance=(
-                                        (_source_net-_net)
-                                        if _source_net is not None else 0.0
-                                    )
-
-                                    _v124_rows.append({
-                                        "Date":_work_date,
-                                        "Reel / ERP Code":(
-                                            str(_row.get(_v124_cols["erp"]) or "").strip()
-                                            if _v124_cols["erp"] else ""
-                                        ),
-                                        "Paper Description / GSM":(
-                                            str(_row.get(_v124_cols["desc"]) or "").strip()
-                                            if _v124_cols["desc"] else ""
-                                        ),
-                                        "Opening WIP Ton":_opening,
-                                        "Reel Issue Ton":_issue,
-                                        "Reel Return Ton":_return,
-                                        "Net Issue Ton":_net,
-                                        "Closing WIP Ton":_closing,
-                                        "Actual Consumption Ton":_actual,
-                                        "Consumption Ton":_effective,
-                                        "Consumption Value ₹":_value,
-                                        "Flow Variance Ton":_expected-_effective,
-                                        "Source Net Variance Ton":_net_variance,
-                                        "Remark":(
-                                            str(_row.get(_v124_cols["remark"]) or "").strip()
-                                            if _v124_cols["remark"] else ""
-                                        ),
-                                    })
-
-                                _v124_parsed=pd.DataFrame(_v124_rows)
-                                if _v124_parsed.empty and not _v124_parse_errors:
-                                    _v124_parse_errors.append("No valid movement rows were found in the uploaded file.")
-
-                            if _v124_parse_errors:
-                                for _err in _v124_parse_errors[:20]:
-                                    st.error(_err)
-                            elif _v124_parsed is not None and not _v124_parsed.empty:
-                                _v124_dates=sorted(_v124_parsed["Date"].unique().tolist())
-                                _v124_date_iso=[d.isoformat() for d in _v124_dates]
-                                _v124_existing=read_df(
-                                    """SELECT work_date,COUNT(*) AS lines
-                                       FROM production_reel_consumption
-                                       WHERE machine='Corrugation'
-                                         AND work_date = ANY(?::date[])
-                                       GROUP BY work_date ORDER BY work_date""",
-                                    (_v124_date_iso,)
-                                )
-                                _v124_existing_dates=(
-                                    _v124_existing["work_date"].astype(str).tolist()
-                                    if not _v124_existing.empty else []
-                                )
-
-                                st.markdown("##### Upload Preview")
-                                p1,p2,p3,p4,p5=st.columns(5)
-                                p1.metric("Rows",f"{len(_v124_parsed):,}")
-                                p2.metric("Dates",f"{len(_v124_dates):,}")
-                                p3.metric(
-                                    "Reel Issue",
-                                    f"{float(_v124_parsed['Reel Issue Ton'].sum()):,.3f} T"
-                                )
-                                p4.metric(
-                                    "Reel Return",
-                                    f"{float(_v124_parsed['Reel Return Ton'].sum()):,.3f} T"
-                                )
-                                p5.metric(
-                                    "Consumption",
-                                    f"{float(_v124_parsed['Consumption Ton'].sum()):,.3f} T"
-                                )
-                                st.dataframe(
-                                    _v124_parsed.head(100),
-                                    hide_index=True,use_container_width=True,
-                                    column_config={
-                                        "Opening WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Closing WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Actual Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Consumption Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
-                                        "Flow Variance Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                        "Source Net Variance Ton":st.column_config.NumberColumn(format="%.3f T"),
-                                    }
-                                )
-                                if len(_v124_parsed)>100:
-                                    st.caption(f"Preview shows first 100 of {len(_v124_parsed):,} rows.")
-
-                                if _v124_existing_dates and not _v124_replace:
-                                    st.warning(
-                                        f"Existing reel movement data is already present for "
-                                        f"{len(_v124_existing_dates)} uploaded date(s). "
-                                        "Tick Replace existing reel movement lines to continue safely."
-                                    )
-
-                                _v124_can_import=not (
-                                    _v124_existing_dates and not _v124_replace
-                                )
-                                if st.button(
-                                    "Import Reel Issue / Return Data",
-                                    type="primary",
-                                    use_container_width=True,
-                                    disabled=not _v124_can_import,
-                                    key="v124_import_reel_movements"
-                                ):
-                                    _conn=get_pg_conn()
-                                    try:
-                                        _cur=_conn.cursor()
-                                        _dates_iso=sorted({
-                                            d.isoformat() for d in _v124_parsed["Date"].tolist()
-                                        })
-                                        if _v124_replace:
-                                            _cur.execute(
-                                                """DELETE FROM production_reel_consumption
-                                                   WHERE machine='Corrugation'
-                                                     AND work_date = ANY(%s::date[])""",
-                                                (_dates_iso,)
-                                            )
-
-                                        # If there was no prior data, delete is unnecessary; start line numbers at 1.
-                                        # When existing data is present, import is allowed only in explicit replace mode.
-                                        for _day in sorted(_v124_parsed["Date"].unique().tolist()):
-                                            _day_rows=_v124_parsed[
-                                                _v124_parsed["Date"]==_day
-                                            ].reset_index(drop=True)
-                                            for _line_no,(_, _rr) in enumerate(
-                                                _day_rows.iterrows(),start=1
-                                            ):
-                                                _cur.execute(
-                                                    """INSERT INTO production_reel_consumption(
-                                                       work_date,machine,line_no,reel_reference,paper_grade,
-                                                       opening_wip_ton,reel_issue_ton,reel_return_ton,net_issue_ton,
-                                                       closing_wip_ton,consumption_ton,quantity_ton,
-                                                       value_amount,remark,entered_by,updated_at
-                                                       ) VALUES (
-                                                       %s,'Corrugation',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP
-                                                       )
-                                                       ON CONFLICT(work_date,machine,line_no) DO UPDATE SET
-                                                       reel_reference=excluded.reel_reference,
-                                                       paper_grade=excluded.paper_grade,
-                                                       opening_wip_ton=excluded.opening_wip_ton,
-                                                       reel_issue_ton=excluded.reel_issue_ton,
-                                                       reel_return_ton=excluded.reel_return_ton,
-                                                       net_issue_ton=excluded.net_issue_ton,
-                                                       closing_wip_ton=excluded.closing_wip_ton,
-                                                       consumption_ton=excluded.consumption_ton,
-                                                       quantity_ton=excluded.quantity_ton,
-                                                       value_amount=excluded.value_amount,
-                                                       remark=excluded.remark,
-                                                       entered_by=excluded.entered_by,
-                                                       updated_at=CURRENT_TIMESTAMP""",
-                                                    (
-                                                        _day.isoformat(),_line_no,
-                                                        str(_rr["Reel / ERP Code"] or "").strip(),
-                                                        str(_rr["Paper Description / GSM"] or "").strip(),
-                                                        float(_rr["Opening WIP Ton"]),
-                                                        float(_rr["Reel Issue Ton"]),
-                                                        float(_rr["Reel Return Ton"]),
-                                                        float(_rr["Net Issue Ton"]),
-                                                        float(_rr["Closing WIP Ton"]),
-                                                        float(_rr["Consumption Ton"]),
-                                                        float(_rr["Consumption Ton"]),
-                                                        float(_rr["Consumption Value ₹"]),
-                                                        str(_rr["Remark"] or "").strip(),
-                                                        _current_user["username"]
-                                                    )
-                                                )
-
-                                            _day_consumption=float(
-                                                _day_rows["Consumption Ton"].sum()
-                                            )
-                                            _day_value=float(
-                                                _day_rows["Consumption Value ₹"].sum()
-                                            )
-
-                                            _cur.execute(
-                                                """SELECT production_ton,good_output_ton,waste_ton,
-                                                          target_ton,breakdown_hours,remark
-                                                   FROM production
-                                                   WHERE work_date=%s AND shift='DAY'
-                                                     AND machine='Corrugation'
-                                                   LIMIT 1""",
-                                                (_day.isoformat(),)
-                                            )
-                                            _ep=_cur.fetchone()
-                                            _good=0.0
-                                            _waste=0.0
-                                            _existing_target=0.0
-                                            if _ep:
-                                                _good=float(_ep[1] or _ep[0] or 0)
-                                                _waste=float(_ep[2] or 0)
-                                                _existing_target=float(_ep[3] or 0)
-                                            _yield=(
-                                                _good/_day_consumption*100.0
-                                                if _day_consumption>0 else 0.0
-                                            )
-                                            _waste_pct=(
-                                                _waste/_day_consumption*100.0
-                                                if _day_consumption>0 else 0.0
-                                            )
-                                            _target=(
-                                                _existing_target
-                                                if _existing_target>0 else float(daily_target)
-                                            )
-
-                                            _cur.execute(
-                                                """INSERT INTO production(
-                                                   work_date,shift,machine,production_ton,target_ton,
-                                                   waste_ton,breakdown_hours,paper_cost,ink_cost,glue_cost,
-                                                   other_material_cost,target_type,opening_wip_ton,
-                                                   material_received_ton,material_available_ton,
-                                                   material_processed_ton,good_output_ton,closing_wip_ton,
-                                                   conversion_pct,yield_pct,waste_pct,remark
-                                                   ) VALUES (
-                                                   %s,'DAY','Corrugation',0,%s,0,0,%s,0,0,0,'FIXED_TON',
-                                                   0,0,%s,%s,0,0,0,0,0,
-                                                   'Reel movement bulk upload · production pending'
-                                                   )
-                                                   ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-                                                   paper_cost=excluded.paper_cost,
-                                                   target_ton=CASE
-                                                       WHEN COALESCE(production.target_ton,0)>0
-                                                       THEN production.target_ton
-                                                       ELSE excluded.target_ton
-                                                   END,
-                                                   target_type='FIXED_TON',
-                                                   material_available_ton=excluded.material_available_ton,
-                                                   material_processed_ton=excluded.material_processed_ton,
-                                                   yield_pct=%s,
-                                                   waste_pct=%s""",
-                                                (
-                                                    _day.isoformat(),_target,_day_value,
-                                                    _day_consumption,_day_consumption,
-                                                    _yield,_waste_pct
-                                                )
-                                            )
-
-                                        _conn.commit()
-                                        _cur.close()
-                                    except Exception:
-                                        _conn.rollback()
-                                        raise
-                                    finally:
-                                        _conn.close()
-
-                                    record_audit_event(
-                                        _current_user["username"],
-                                        "REEL_MOVEMENT_BULK_IMPORT",
-                                        "Operations",
-                                        "Production Reel Movement",
-                                        f"{min(_v124_dates).isoformat()}|{max(_v124_dates).isoformat()}",
-                                        (
-                                            f"Rows={len(_v124_parsed)}; Dates={len(_v124_dates)}; "
-                                            f"Issue={float(_v124_parsed['Reel Issue Ton'].sum()):.3f}; "
-                                            f"Return={float(_v124_parsed['Reel Return Ton'].sum()):.3f}; "
-                                            f"Consumption={float(_v124_parsed['Consumption Ton'].sum()):.3f}; "
-                                            f"Value={float(_v124_parsed['Consumption Value ₹'].sum()):.2f}; "
-                                            f"ReplaceExisting={bool(_v124_replace)}"
-                                        )
-                                    )
-                                    st.success(
-                                        f"Imported {len(_v124_parsed):,} reel movement rows across "
-                                        f"{len(_v124_dates):,} date(s)."
-                                    )
-                                    st.rerun()
-                        except Exception as _v124_exc:
-                            st.error(f"Unable to read/import reel movement file: {_v124_exc}")
 
                 st.markdown("#### Reel Issue / Return / Consumption")
                 st.caption(
-                    "Formula: Net Issue = Reel Issue − Reel Return. "
-                    "Expected Consumption = Opening WIP + Net Issue − Closing WIP. "
-                    "If you already have actual consumption from stores/ERP, enter it in Actual Consumption Ton."
+                    "Keep it simple: enter Issue, Return and actual Consumption. "
+                    "Net Issue = Issue − Return. Consumption is never assumed from Net Issue."
                 )
                 reel_editor=st.data_editor(
                     _reel_seed,
-                    hide_index=True,
-                    use_container_width=True,
-                    num_rows="dynamic",
-                    key=f"v123_reel_flow_editor_{pdate.isoformat()}_{machine}",
+                    hide_index=True,use_container_width=True,num_rows="dynamic",
+                    key=f"v128_reel_editor_{pdate.isoformat()}_{machine}",
                     column_config={
-                        "Reel / Reference":st.column_config.TextColumn("Reel / ERP Code"),
-                        "Paper Grade":st.column_config.TextColumn("Paper Description / GSM"),
-                        "Opening WIP Ton":st.column_config.NumberColumn(
-                            "Opening WIP Ton",min_value=0.0,step=0.001,format="%.3f"
-                        ),
+                        "Reel / ERP Code":st.column_config.TextColumn("Reel / ERP Code"),
+                        "Paper Description / GSM":st.column_config.TextColumn("Paper Description / GSM"),
                         "Reel Issue Ton":st.column_config.NumberColumn(
                             "Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"
                         ),
                         "Reel Return Ton":st.column_config.NumberColumn(
                             "Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"
                         ),
-                        "Closing WIP Ton":st.column_config.NumberColumn(
-                            "Closing WIP Ton",min_value=0.0,step=0.001,format="%.3f"
-                        ),
                         "Actual Consumption Ton":st.column_config.NumberColumn(
-                            "Actual Consumption Ton",min_value=0.0,step=0.001,format="%.3f",
-                            help="Enter actual consumption if available. Leave 0 to use the material-flow calculation."
+                            "Actual Consumption Ton",min_value=0.0,step=0.001,format="%.3f"
                         ),
-                        "Value ₹":st.column_config.NumberColumn(
+                        "Consumption Value ₹":st.column_config.NumberColumn(
                             "Consumption Value ₹",min_value=0.0,step=1.0,format="₹%.2f"
                         ),
                         "Remark":st.column_config.TextColumn("Remark"),
@@ -13482,79 +12649,53 @@ elif page == "Operations":
                 )
 
                 _reel_work=reel_editor.copy()
-                for _v123_col in [
-                    "Opening WIP Ton","Reel Issue Ton","Reel Return Ton",
-                    "Closing WIP Ton","Actual Consumption Ton","Value ₹"
+                for _c in [
+                    "Reel Issue Ton","Reel Return Ton",
+                    "Actual Consumption Ton","Consumption Value ₹"
                 ]:
-                    _reel_work[_v123_col]=pd.to_numeric(
-                        _reel_work[_v123_col],errors="coerce"
-                    ).fillna(0.0)
+                    _reel_work[_c]=pd.to_numeric(_reel_work[_c],errors="coerce").fillna(0.0)
 
                 _reel_work=_reel_work[
-                    (_reel_work["Opening WIP Ton"]>0)
-                    | (_reel_work["Reel Issue Ton"]>0)
+                    (_reel_work["Reel Issue Ton"]>0)
                     | (_reel_work["Reel Return Ton"]>0)
-                    | (_reel_work["Closing WIP Ton"]>0)
                     | (_reel_work["Actual Consumption Ton"]>0)
-                    | (_reel_work["Value ₹"]>0)
-                    | (_reel_work["Reel / Reference"].fillna("").astype(str).str.strip()!="")
-                    | (_reel_work["Paper Grade"].fillna("").astype(str).str.strip()!="")
+                    | (_reel_work["Consumption Value ₹"]>0)
+                    | (_reel_work["Reel / ERP Code"].fillna("").astype(str).str.strip()!="")
+                    | (_reel_work["Paper Description / GSM"].fillna("").astype(str).str.strip()!="")
                 ].copy()
 
                 if not _reel_work.empty:
                     _reel_work["Net Issue Ton"]=(
                         _reel_work["Reel Issue Ton"]-_reel_work["Reel Return Ton"]
                     )
-                    _reel_work["Expected Consumption Ton"]=(
-                        _reel_work["Opening WIP Ton"]
-                        +_reel_work["Net Issue Ton"]
-                        -_reel_work["Closing WIP Ton"]
-                    )
-                    _reel_work["Effective Consumption Ton"]=_reel_work.apply(
-                        lambda r:(
-                            float(r["Actual Consumption Ton"])
-                            if float(r["Actual Consumption Ton"])>0
-                            else max(float(r["Expected Consumption Ton"]),0.0)
-                        ),
-                        axis=1
-                    )
-                    _reel_work["Flow Variance Ton"]=(
-                        _reel_work["Expected Consumption Ton"]
-                        -_reel_work["Effective Consumption Ton"]
-                    )
+                    _reel_work["Effective Consumption Ton"]=_reel_work["Actual Consumption Ton"]
+                    _reel_work["Value ₹"]=_reel_work["Consumption Value ₹"]
                     _reel_work["Rate ₹/Kg"]=_reel_work.apply(
                         lambda r:(
-                            float(r["Value ₹"])/(float(r["Effective Consumption Ton"])*1000.0)
-                            if float(r["Effective Consumption Ton"])>0 else 0.0
-                        ),
-                        axis=1
+                            float(r["Consumption Value ₹"])/
+                            (float(r["Actual Consumption Ton"])*1000.0)
+                            if float(r["Actual Consumption Ton"])>0 else 0.0
+                        ),axis=1
                     )
                 else:
-                    for _v123_col in [
-                        "Net Issue Ton","Expected Consumption Ton","Effective Consumption Ton",
-                        "Flow Variance Ton","Rate ₹/Kg"
+                    for _c in [
+                        "Net Issue Ton","Effective Consumption Ton","Value ₹","Rate ₹/Kg"
                     ]:
-                        _reel_work[_v123_col]=pd.Series(dtype=float)
+                        _reel_work[_c]=pd.Series(dtype=float)
 
-                _reel_flow_errors=[]
-                if not _reel_work.empty:
-                    _v123_negative_expected=_reel_work[
-                        _reel_work["Expected Consumption Ton"] < -0.0005
-                    ]
-                    if not _v123_negative_expected.empty:
-                        _reel_flow_errors.append(
-                            "One or more reel lines have negative expected consumption. "
-                            "Check Opening WIP, Issue, Return and Closing WIP."
-                        )
+                # Compatibility columns for existing save logic; no WIP is used.
+                _reel_work["Reel / Reference"]=_reel_work.get("Reel / ERP Code","")
+                _reel_work["Paper Grade"]=_reel_work.get("Paper Description / GSM","")
+                _reel_work["Opening WIP Ton"]=0.0
+                _reel_work["Closing WIP Ton"]=0.0
+                _reel_work["Expected Consumption Ton"]=0.0
+                _reel_work["Flow Variance Ton"]=0.0
 
                 paper_consumed=float(
-                    _reel_work["Effective Consumption Ton"].sum()
+                    _reel_work["Actual Consumption Ton"].sum()
                 ) if not _reel_work.empty else 0.0
                 paper_value=float(
-                    _reel_work["Value ₹"].sum()
-                ) if not _reel_work.empty else 0.0
-                total_opening_wip=float(
-                    _reel_work["Opening WIP Ton"].sum()
+                    _reel_work["Consumption Value ₹"].sum()
                 ) if not _reel_work.empty else 0.0
                 total_reel_issue=float(
                     _reel_work["Reel Issue Ton"].sum()
@@ -13563,56 +12704,41 @@ elif page == "Operations":
                     _reel_work["Reel Return Ton"].sum()
                 ) if not _reel_work.empty else 0.0
                 total_net_issue=total_reel_issue-total_reel_return
-                total_closing_wip=float(
-                    _reel_work["Closing WIP Ton"].sum()
-                ) if not _reel_work.empty else 0.0
-                total_expected_consumption=(
-                    total_opening_wip+total_net_issue-total_closing_wip
-                )
-                total_flow_variance=total_expected_consumption-paper_consumed
+                total_opening_wip=0.0
+                total_closing_wip=0.0
+                total_expected_consumption=0.0
+                total_flow_variance=0.0
                 avg_paper_rate=(
                     paper_value/(paper_consumed*1000.0)
                     if paper_consumed>0 else 0.0
                 )
+                _reel_flow_errors=[]
 
-                f1,f2,f3,f4,f5=st.columns(5)
-                f1.metric("Opening WIP",f"{total_opening_wip:.3f} T")
-                f2.metric("Reel Issue",f"{total_reel_issue:.3f} T")
-                f3.metric("Reel Return",f"{total_reel_return:.3f} T")
-                f4.metric("Net Issue",f"{total_net_issue:.3f} T")
-                f5.metric("Closing WIP",f"{total_closing_wip:.3f} T")
+                k1,k2,k3,k4=st.columns(4)
+                k1.metric("Reel Issue",f"{total_reel_issue:.3f} T")
+                k2.metric("Reel Return",f"{total_reel_return:.3f} T")
+                k3.metric("Net Issue",f"{total_net_issue:.3f} T")
+                k4.metric(
+                    "Actual Consumption",
+                    f"{paper_consumed:.3f} T" if paper_consumed>0 else "PENDING"
+                )
 
                 if not _reel_work.empty:
-                    st.caption(
-                        "Live material-flow check. Flow Variance = Expected Consumption − Actual/Effective Consumption."
-                    )
                     st.dataframe(
                         _reel_work[[
-                            "Reel / Reference","Paper Grade","Opening WIP Ton",
+                            "Reel / ERP Code","Paper Description / GSM",
                             "Reel Issue Ton","Reel Return Ton","Net Issue Ton",
-                            "Closing WIP Ton","Expected Consumption Ton",
-                            "Effective Consumption Ton","Value ₹","Rate ₹/Kg","Flow Variance Ton","Remark"
+                            "Actual Consumption Ton","Consumption Value ₹","Rate ₹/Kg","Remark"
                         ]],
                         hide_index=True,use_container_width=True,
                         column_config={
-                            "Reel / Reference":st.column_config.TextColumn("Reel / ERP Code"),
-                            "Paper Grade":st.column_config.TextColumn("Paper Description / GSM"),
-                            "Opening WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
                             "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
                             "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
                             "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Closing WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Expected Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Effective Consumption Ton":st.column_config.NumberColumn("Consumption Ton",format="%.3f T"),
-                            "Value ₹":st.column_config.NumberColumn("Consumption Value ₹",format="₹%.2f"),
+                            "Actual Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
+                            "Consumption Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
                             "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
-                            "Flow Variance Ton":st.column_config.NumberColumn(format="%.3f T"),
                         }
-                    )
-                if abs(total_flow_variance)>0.01:
-                    st.warning(
-                        f"Reel flow variance is {total_flow_variance:.3f} T. "
-                        "This is allowed when actual consumption differs from stock-flow calculation, but should be reviewed."
                     )
 
                 _existing_good=float(er.get("good_output_ton") or er.get("production_ton") or 0)
@@ -13686,17 +12812,17 @@ elif page == "Operations":
 
                 if save_prod:
                     _fixed_errors=[]
-                    if (good_output>0 or waste_ton>0) and paper_consumed<=0:
-                        _fixed_errors.append(
-                            "Add reel / paper consumption before saving production output."
-                        )
                     if waste_ton < 0 and not _is_finsys_history:
                         _fixed_errors.append(
                             "Negative wastage is allowed only for historical Finsys DPR records."
                         )
-                    if (not _is_finsys_history) and good_output+waste_ton > paper_consumed + 0.01:
+                    if (
+                        paper_consumed>0
+                        and (not _is_finsys_history)
+                        and good_output+waste_ton > paper_consumed + 0.01
+                    ):
                         _fixed_errors.append(
-                            "Good Output + Waste/Rejection cannot be greater than total Reel Consumption."
+                            "Good Output + Waste/Rejection cannot be greater than Actual Consumption."
                         )
                     if breakdown_hours>0 and not str(breakdown_reason or "").strip():
                         _fixed_errors.append(
@@ -13973,610 +13099,287 @@ elif page == "Operations":
             st.info(f"No production entry is saved for {pdate.strftime('%d/%m/%Y')} yet.")
 
     with tab_daily_report:
-        st.markdown("### Daily Corrugation Production Report")
-        st.caption(
-            "Daily report only. Date format is DD/MM/YYYY and follows the sidebar Working Date. ""Material flow: Opening WIP → Reel Issue → Reel Return → Net Issue → Consumption → Closing WIP → Production → Ton/Person."
-        )
+        st.markdown("### Daily Corrugation Report")
+        _v128_day=global_work_date
+        st.caption(f"Date: {_v128_day.strftime('%d/%m/%Y')} · controlled by sidebar Working Date")
 
-        # V12.7 CORRECT PRODUCTION DATE MONTH CONTEXT
-        # Daily production reporting has one date source only: sidebar Working Date.
-        _v123_day=global_work_date
-        st.info(
-            f"📅 Daily Report Date: **{_v123_day.strftime('%d/%m/%Y')}** "
-            "· controlled by the sidebar Working Date"
-        )
-        _v123_prod=read_df(
-            """SELECT work_date,production_ton,target_ton,waste_ton,breakdown_hours,
-                      paper_cost,material_processed_ton,good_output_ton,remark
-               FROM production
-               WHERE work_date=? AND shift='DAY' AND machine='Corrugation'
-               LIMIT 1""",
-            (_v123_day.isoformat(),)
-        )
-        _v123_reels=read_df(
-            """SELECT line_no,reel_reference,paper_grade,
-                      opening_wip_ton,reel_issue_ton,reel_return_ton,net_issue_ton,
-                      closing_wip_ton,consumption_ton,quantity_ton,value_amount,remark
-               FROM production_reel_consumption
-               WHERE work_date=? AND machine='Corrugation'
-               ORDER BY line_no""",
-            (_v123_day.isoformat(),)
-        )
-        _v125_move_day=read_df(
+        _v128_move=read_df(
             """SELECT movement_type,
                       SUM(quantity_ton) AS qty_ton,
                       SUM(movement_value) AS movement_value
                FROM production_reel_transactions
                WHERE work_date=?
                GROUP BY movement_type""",
-            (_v123_day.isoformat(),)
+            (_v128_day.isoformat(),)
         )
-        _v123_mp=read_df(
+        _v128_prod=read_df(
+            """SELECT production_ton,target_ton,waste_ton,breakdown_hours,
+                      paper_cost,material_processed_ton,good_output_ton
+               FROM production
+               WHERE work_date=? AND shift='DAY' AND machine='Corrugation'
+               LIMIT 1""",
+            (_v128_day.isoformat(),)
+        )
+        _v128_mp=read_df(
             """SELECT shift,COUNT(DISTINCT employee_id) AS people
                FROM manpower_allocation
                WHERE work_date=? AND machine='Corrugation'
-               GROUP BY shift ORDER BY shift""",
-            (_v123_day.isoformat(),)
+               GROUP BY shift""",
+            (_v128_day.isoformat(),)
         )
 
-        if _v123_prod.empty and _v123_reels.empty and _v125_move_day.empty:
-            st.info(f"No Corrugation data is saved for {_v123_day.strftime('%d/%m/%Y')}.")
+        _issue=_return=_issue_value=_return_value=0.0
+        if not _v128_move.empty:
+            for _,_r in _v128_move.iterrows():
+                if str(_r["movement_type"])=="ISSUE":
+                    _issue=float(_r["qty_ton"] or 0)
+                    _issue_value=float(_r["movement_value"] or 0)
+                elif str(_r["movement_type"])=="RETURN":
+                    _return=float(_r["qty_ton"] or 0)
+                    _return_value=float(_r["movement_value"] or 0)
+        _net=_issue-_return
+        _net_value=_issue_value-_return_value
+
+        _pr=_v128_prod.iloc[0].to_dict() if not _v128_prod.empty else {}
+        _cons=float(_pr.get("material_processed_ton") or 0)
+        _cons_value=float(_pr.get("paper_cost") or 0)
+        _output=float(_pr.get("good_output_ton") or _pr.get("production_ton") or 0)
+        _target=float(_pr.get("target_ton") or 0)
+        _waste=float(_pr.get("waste_ton") or 0)
+        _break=float(_pr.get("breakdown_hours") or 0)
+        _achievement=(_output/_target*100.0) if _target>0 else 0.0
+        _yield=(_output/_cons*100.0) if _cons>0 else 0.0
+        _waste_pct=(_waste/_cons*100.0) if _cons>0 else 0.0
+        _avg_rate=(_cons_value/(_cons*1000.0)) if _cons>0 else 0.0
+
+        _a=_b=0
+        if not _v128_mp.empty:
+            for _,_r in _v128_mp.iterrows():
+                if str(_r["shift"])=="A": _a=int(_r["people"] or 0)
+                elif str(_r["shift"])=="B": _b=int(_r["people"] or 0)
+        _people=_a+_b
+        _tpp=(_output/_people) if _people>0 else 0.0
+
+        if _issue<=0 and _return<=0 and _output<=0 and _cons<=0:
+            st.info(f"No Corrugation data is saved for {_v128_day.strftime('%d/%m/%Y')}.")
         else:
-            _v123_pr=_v123_prod.iloc[0].to_dict() if not _v123_prod.empty else {}
-            if not _v123_reels.empty:
-                for _c in [
-                    "opening_wip_ton","reel_issue_ton","reel_return_ton","net_issue_ton",
-                    "closing_wip_ton","consumption_ton","quantity_ton","value_amount"
-                ]:
-                    _v123_reels[_c]=pd.to_numeric(_v123_reels[_c],errors="coerce").fillna(0.0)
-                _v123_reels["effective_consumption"]=_v123_reels["consumption_ton"].where(
-                    _v123_reels["consumption_ton"]>0,_v123_reels["quantity_ton"]
-                )
-                _v123_opening=float(_v123_reels["opening_wip_ton"].sum())
-                _v123_issue=float(_v123_reels["reel_issue_ton"].sum())
-                _v123_return=float(_v123_reels["reel_return_ton"].sum())
-                _v123_net=_v123_issue-_v123_return
-                _v123_consumption=float(_v123_reels["effective_consumption"].sum())
-                _v123_closing=float(_v123_reels["closing_wip_ton"].sum())
-                _v123_value=float(_v123_reels["value_amount"].sum())
-            else:
-                _v123_opening=_v123_issue=_v123_return=_v123_net=_v123_closing=0.0
-                _v123_consumption=float(_v123_pr.get("material_processed_ton") or 0)
-                _v123_value=float(_v123_pr.get("paper_cost") or 0)
-
-            _v125_issue_value=0.0
-            _v125_return_value=0.0
-            if not _v125_move_day.empty:
-                for _,_mv in _v125_move_day.iterrows():
-                    if str(_mv["movement_type"])=="ISSUE":
-                        _v123_issue=float(_mv["qty_ton"] or 0)
-                        _v125_issue_value=float(_mv["movement_value"] or 0)
-                    elif str(_mv["movement_type"])=="RETURN":
-                        _v123_return=float(_mv["qty_ton"] or 0)
-                        _v125_return_value=float(_mv["movement_value"] or 0)
-                _v123_net=_v123_issue-_v123_return
-            _v125_net_issue_value=_v125_issue_value-_v125_return_value
-
-            _v123_expected=_v123_opening+_v123_net-_v123_closing
-            _v123_flow_variance=(
-                _v123_expected-_v123_consumption
-                if _v123_consumption>0 or _v123_opening>0 or _v123_closing>0
-                else 0.0
-            )
-            _v123_avg_rate=(
-                _v123_value/(_v123_consumption*1000.0) if _v123_consumption>0 else 0.0
-            )
-            _v123_output=float(
-                _v123_pr.get("good_output_ton") or _v123_pr.get("production_ton") or 0
-            )
-            _v123_target=float(_v123_pr.get("target_ton") or 0)
-            _v123_waste=float(_v123_pr.get("waste_ton") or 0)
-            _v123_break=float(_v123_pr.get("breakdown_hours") or 0)
-            _v123_achievement=(
-                _v123_output/_v123_target*100.0 if _v123_target>0 else 0.0
-            )
-            _v123_yield=(
-                _v123_output/_v123_consumption*100.0 if _v123_consumption>0 else 0.0
-            )
-            _v123_waste_pct=(
-                _v123_waste/_v123_consumption*100.0 if _v123_consumption>0 else 0.0
-            )
-            _v123_paper_cost_ton=(
-                _v123_value/_v123_output if _v123_output>0 else 0.0
-            )
-
-            _v123_a=_v123_b=0
-            if not _v123_mp.empty:
-                for _,_mr in _v123_mp.iterrows():
-                    if str(_mr["shift"])=="A":
-                        _v123_a=int(_mr["people"] or 0)
-                    elif str(_mr["shift"])=="B":
-                        _v123_b=int(_mr["people"] or 0)
-            _v123_people=_v123_a+_v123_b
-            _v123_tpp=(
-                _v123_output/_v123_people if _v123_people>0 else 0.0
-            )
-
-            st.markdown(f"#### {_v123_day.strftime('%d %B %Y')} · Material Flow")
-            c1,c2,c3,c4,c5=st.columns(5)
-            c1.metric("Opening WIP",f"{_v123_opening:,.3f} T")
-            c2.metric("Reel Issue",f"{_v123_issue:,.3f} T")
-            c3.metric("Reel Return",f"{_v123_return:,.3f} T")
-            c4.metric("Net Issue",f"{_v123_net:,.3f} T")
-            c5.metric("Closing WIP",f"{_v123_closing:,.3f} T")
-
-            c1,c2,c3,c4=st.columns(4)
-            c1.metric("Issue Value",v5_money(_v125_issue_value))
-            c2.metric("Return Value",v5_money(_v125_return_value))
-            c3.metric("Net Issue Value",v5_money(_v125_net_issue_value))
-            c4.metric(
-                "Actual Consumption",
-                f"{_v123_consumption:,.3f} T" if _v123_consumption>0 else "PENDING"
-            )
+            st.markdown("#### 1. Reel Movement")
+            c1,c2,c3=st.columns(3)
+            c1.metric("Reel Issue",f"{_issue:,.3f} T")
+            c2.metric("Reel Return",f"{_return:,.3f} T")
+            c3.metric("Net Issue",f"{_net:,.3f} T")
 
             c1,c2,c3=st.columns(3)
-            c1.metric("Consumption Value",v5_money(_v123_value))
-            c2.metric("Avg Paper Rate",f"₹{_v123_avg_rate:,.2f}/Kg")
-            c3.metric("Flow Variance",f"{_v123_flow_variance:,.3f} T")
-            if _v123_consumption<=0 and (_v123_issue>0 or _v123_return>0):
-                st.info(
-                    "Issue and Return are loaded. Actual Consumption is still pending and is not being assumed from Net Issue."
-                )
+            c1.metric("Issue Value",v5_money(_issue_value))
+            c2.metric("Return Value",v5_money(_return_value))
+            c3.metric("Net Issue Value",v5_money(_net_value))
 
-            c1,c2,c3,c4=st.columns(4)
-            c1.metric("Good Production",f"{_v123_output:,.2f} T")
-            c2.metric("Daily Target",f"{_v123_target:,.2f} T")
-            c3.metric("Achievement",f"{_v123_achievement:,.2f}%")
-            c4.metric("Paper Cost / Output Ton",v5_money(_v123_paper_cost_ton))
+            if _cons>0:
+                st.markdown("#### 2. Consumption")
+                c1,c2,c3=st.columns(3)
+                c1.metric("Actual Consumption",f"{_cons:,.3f} T")
+                c2.metric("Consumption Value",v5_money(_cons_value))
+                c3.metric("Avg Paper Rate",f"₹{_avg_rate:,.2f}/Kg")
+            else:
+                st.info("Actual Consumption has not been entered yet.")
 
-            c1,c2,c3,c4=st.columns(4)
-            c1.metric("Waste / Rejection",f"{_v123_waste:,.2f} T")
-            c2.metric("Waste %",f"{_v123_waste_pct:,.2f}%")
-            c3.metric("Yield",f"{_v123_yield:,.2f}%")
-            c4.metric("Breakdown",f"{_v123_break:,.2f} Hrs")
+            if _output>0 or _target>0 or _waste>0 or _break>0:
+                st.markdown("#### 3. Production")
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Good Production",f"{_output:,.2f} T")
+                c2.metric("Target",f"{_target:,.2f} T")
+                c3.metric("Achievement",f"{_achievement:,.2f}%")
+                c4.metric("Breakdown",f"{_break:,.2f} Hrs")
 
-            c1,c2,c3,c4=st.columns(4)
-            c1.metric("Shift A Manpower",f"{_v123_a:,}")
-            c2.metric("Shift B Manpower",f"{_v123_b:,}")
-            c3.metric("Total Person-Shifts",f"{_v123_people:,}")
-            c4.metric(
-                "Corrugation Ton / Person",
-                f"{_v123_tpp:,.2f} T" if _v123_people>0 else "MANPOWER PENDING"
-            )
+                c1,c2,c3=st.columns(3)
+                c1.metric("Waste / Rejection",f"{_waste:,.2f} T")
+                c2.metric("Waste %",f"{_waste_pct:,.2f}%" if _cons>0 else "PENDING")
+                c3.metric("Yield",f"{_yield:,.2f}%" if _cons>0 else "PENDING")
+            else:
+                st.info("Production data has not been entered for this date.")
 
-            if abs(_v123_flow_variance)>0.01:
-                st.warning(
-                    f"Material flow variance is {_v123_flow_variance:.3f} T. "
-                    "Review WIP or actual consumption before final management reporting."
-                )
-            if _v123_people==0:
-                st.info("Ton / Person will appear after Corrugation manpower allocation is saved.")
-
-            if not _v123_reels.empty:
-                _v123_detail=_v123_reels.rename(columns={
-                    "line_no":"Line","reel_reference":"Reel / ERP Code",
-                    "paper_grade":"Paper Description / GSM",
-                    "opening_wip_ton":"Opening WIP Ton",
-                    "reel_issue_ton":"Reel Issue Ton",
-                    "reel_return_ton":"Reel Return Ton",
-                    "closing_wip_ton":"Closing WIP Ton",
-                    "value_amount":"Value ₹","remark":"Remark"
-                }).copy()
-                _v123_detail["Net Issue Ton"]=(
-                    _v123_detail["Reel Issue Ton"]-_v123_detail["Reel Return Ton"]
-                )
-                _v123_detail["Consumption Ton"]=_v123_reels["effective_consumption"].values
-                _v123_detail["Expected Consumption Ton"]=(
-                    _v123_detail["Opening WIP Ton"]
-                    +_v123_detail["Net Issue Ton"]
-                    -_v123_detail["Closing WIP Ton"]
-                )
-                _v123_detail["Flow Variance Ton"]=(
-                    _v123_detail["Expected Consumption Ton"]-_v123_detail["Consumption Ton"]
-                )
-                _v123_detail["Rate ₹/Kg"]=_v123_detail.apply(
-                    lambda r:(
-                        float(r["Value ₹"])/(float(r["Consumption Ton"])*1000.0)
-                        if float(r["Consumption Ton"])>0 else 0.0
-                    ),axis=1
-                )
-                st.markdown("#### Reel-wise Material Flow")
-                st.dataframe(
-                    _v123_detail[[
-                        "Line","Reel / ERP Code","Paper Description / GSM",
-                        "Opening WIP Ton","Reel Issue Ton","Reel Return Ton","Net Issue Ton",
-                        "Consumption Ton","Closing WIP Ton","Value ₹","Rate ₹/Kg",
-                        "Flow Variance Ton","Remark"
-                    ]],
-                    hide_index=True,use_container_width=True,
-                    column_config={
-                        "Opening WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        "Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        "Closing WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        "Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
-                        "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
-                        "Flow Variance Ton":st.column_config.NumberColumn(format="%.3f T"),
-                    }
-                )
+            if _people>0:
+                st.markdown("#### 4. Manpower Productivity")
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Shift A",f"{_a:,}")
+                c2.metric("Shift B",f"{_b:,}")
+                c3.metric("Total Person-Shifts",f"{_people:,}")
+                c4.metric("Corrugation Ton / Person",f"{_tpp:,.2f} T")
+            else:
+                st.info("Corrugation manpower allocation has not been entered for this date.")
 
     with tab_monthly:
-        st.markdown("### Monthly MD Corrugation Report")
-        st.caption(
-            "Monthly report only. Select the Production Month in MMM YYYY format. "
-            "Issue, Return, Consumption, WIP, Production, Waste and Ton/Person are summarized for that production month."
+        st.markdown("### Monthly Corrugation Report")
+        _v128_default_month=date(global_work_date.year,global_work_date.month,1)
+        _v128_default_month=(
+            _v128_default_month if _v128_default_month in _month_opts else _month_opts[-1]
         )
-
-        _v127_working_month=date(global_work_date.year,global_work_date.month,1)
-        _v127_month_default=(
-            _v127_working_month
-            if _v127_working_month in _month_opts
-            else _month_opts[-1]
-        )
-        _v123_month=st.selectbox(
-            "Production Month",
-            _month_opts,
-            index=_month_opts.index(_v127_month_default),
+        _v128_month=st.selectbox(
+            "Production Month",_month_opts,
+            index=_month_opts.index(_v128_default_month),
             format_func=lambda d:d.strftime("%b %Y"),
-            key="v127_monthly_report_month",
-            help="This is the Production Month. It is independent from Payroll Month."
+            key="v128_month"
         )
-        st.caption(
-            f"Monthly production period: {_v123_month.strftime('%B %Y')} "
-            "· Payroll Month does not control this report."
-        )
-        _v123_first,_v123_last=_month_range(_v123_month)
+        _v128_first,_v128_last=_month_range(_v128_month)
+        st.caption(f"Reporting period: {_v128_month.strftime('%B %Y')}")
 
-        _v123_prod_month=read_df(
+        _mov=read_df(
+            """SELECT work_date,
+                      SUM(CASE WHEN movement_type='ISSUE' THEN quantity_ton ELSE 0 END) AS issue_ton,
+                      SUM(CASE WHEN movement_type='RETURN' THEN quantity_ton ELSE 0 END) AS return_ton,
+                      SUM(CASE WHEN movement_type='ISSUE' THEN movement_value ELSE 0 END) AS issue_value,
+                      SUM(CASE WHEN movement_type='RETURN' THEN movement_value ELSE 0 END) AS return_value
+               FROM production_reel_transactions
+               WHERE work_date BETWEEN ? AND ?
+               GROUP BY work_date ORDER BY work_date""",
+            (_v128_first.isoformat(),_v128_last.isoformat())
+        )
+        _prod=read_df(
             """SELECT work_date,production_ton,target_ton,waste_ton,breakdown_hours,
                       paper_cost,material_processed_ton,good_output_ton
                FROM production
                WHERE shift='DAY' AND machine='Corrugation'
                  AND work_date BETWEEN ? AND ?
                ORDER BY work_date""",
-            (_v123_first.isoformat(),_v123_last.isoformat())
+            (_v128_first.isoformat(),_v128_last.isoformat())
         )
-        _v123_reel_rows=read_df(
-            """SELECT work_date,line_no,reel_reference,paper_grade,
-                      opening_wip_ton,reel_issue_ton,reel_return_ton,net_issue_ton,
-                      closing_wip_ton,consumption_ton,quantity_ton,value_amount,remark
-               FROM production_reel_consumption
-               WHERE machine='Corrugation'
-                 AND work_date BETWEEN ? AND ?
-               ORDER BY work_date,line_no""",
-            (_v123_first.isoformat(),_v123_last.isoformat())
-        )
-        _v125_move_month=read_df(
-            """SELECT work_date,
-                      SUM(CASE WHEN movement_type='ISSUE' THEN quantity_ton ELSE 0 END) AS raw_issue_ton,
-                      SUM(CASE WHEN movement_type='RETURN' THEN quantity_ton ELSE 0 END) AS raw_return_ton,
-                      SUM(CASE WHEN movement_type='ISSUE' THEN movement_value ELSE 0 END) AS raw_issue_value,
-                      SUM(CASE WHEN movement_type='RETURN' THEN movement_value ELSE 0 END) AS raw_return_value
-               FROM production_reel_transactions
-               WHERE work_date BETWEEN ? AND ?
-               GROUP BY work_date
-               ORDER BY work_date""",
-            (_v123_first.isoformat(),_v123_last.isoformat())
-        )
-        _v123_mp_month=read_df(
+        _mp=read_df(
             """SELECT work_date,shift,COUNT(DISTINCT employee_id) AS people
                FROM manpower_allocation
                WHERE machine='Corrugation'
                  AND work_date BETWEEN ? AND ?
-               GROUP BY work_date,shift
-               ORDER BY work_date,shift""",
-            (_v123_first.isoformat(),_v123_last.isoformat())
+               GROUP BY work_date,shift""",
+            (_v128_first.isoformat(),_v128_last.isoformat())
         )
 
-        if _v123_prod_month.empty and _v123_reel_rows.empty and _v125_move_month.empty:
-            st.info(f"No Corrugation data is saved for {_v123_month.strftime('%B %Y')}.")
+        _dates=set()
+        if not _mov.empty:
+            _mov["work_date"]=_mov["work_date"].astype(str); _dates.update(_mov["work_date"].tolist())
+        if not _prod.empty:
+            _prod["work_date"]=_prod["work_date"].astype(str); _dates.update(_prod["work_date"].tolist())
+        if not _mp.empty:
+            _mp["work_date"]=_mp["work_date"].astype(str); _dates.update(_mp["work_date"].tolist())
+
+        if not _dates:
+            st.info(f"No Corrugation data is available for {_v128_month.strftime('%B %Y')}.")
         else:
-            # Build day-wise reel material flow.
-            if not _v123_reel_rows.empty:
-                for _c in [
-                    "opening_wip_ton","reel_issue_ton","reel_return_ton","net_issue_ton",
-                    "closing_wip_ton","consumption_ton","quantity_ton","value_amount"
-                ]:
-                    _v123_reel_rows[_c]=pd.to_numeric(
-                        _v123_reel_rows[_c],errors="coerce"
-                    ).fillna(0.0)
-                _v123_reel_rows["effective_consumption"]=_v123_reel_rows["consumption_ton"].where(
-                    _v123_reel_rows["consumption_ton"]>0,_v123_reel_rows["quantity_ton"]
-                )
-                _v123_reel_rows["work_date"]=_v123_reel_rows["work_date"].astype(str)
-                _v123_reel_day=_v123_reel_rows.groupby("work_date",as_index=False).agg({
-                    "opening_wip_ton":"sum",
-                    "reel_issue_ton":"sum",
-                    "reel_return_ton":"sum",
-                    "closing_wip_ton":"sum",
-                    "effective_consumption":"sum",
-                    "value_amount":"sum",
-                })
-            else:
-                _v123_reel_day=pd.DataFrame(columns=[
-                    "work_date","opening_wip_ton","reel_issue_ton","reel_return_ton",
-                    "closing_wip_ton","effective_consumption","value_amount"
-                ])
-
-            _v123_dates=set()
-            if not _v123_prod_month.empty:
-                _v123_prod_month["work_date"]=_v123_prod_month["work_date"].astype(str)
-                _v123_dates.update(_v123_prod_month["work_date"].tolist())
-            if not _v123_reel_day.empty:
-                _v123_dates.update(_v123_reel_day["work_date"].tolist())
-            if not _v125_move_month.empty:
-                _v125_move_month["work_date"]=_v125_move_month["work_date"].astype(str)
-                _v123_dates.update(_v125_move_month["work_date"].tolist())
-            _v123_daily=pd.DataFrame({"work_date":sorted(_v123_dates)})
-
-            if not _v123_prod_month.empty:
-                _v123_daily=_v123_daily.merge(_v123_prod_month,on="work_date",how="left")
-            else:
-                for _c in [
-                    "production_ton","target_ton","waste_ton","breakdown_hours",
-                    "paper_cost","material_processed_ton","good_output_ton"
-                ]:
-                    _v123_daily[_c]=0.0
-
-            if not _v123_reel_day.empty:
-                _v123_daily=_v123_daily.merge(_v123_reel_day,on="work_date",how="left")
-            else:
-                for _c in [
-                    "opening_wip_ton","reel_issue_ton","reel_return_ton",
-                    "closing_wip_ton","effective_consumption","value_amount"
-                ]:
-                    _v123_daily[_c]=0.0
-
-            if not _v125_move_month.empty:
-                _v123_daily=_v123_daily.merge(
-                    _v125_move_month,on="work_date",how="left"
-                )
-            else:
-                for _c in [
-                    "raw_issue_ton","raw_return_ton","raw_issue_value","raw_return_value"
-                ]:
-                    _v123_daily[_c]=0.0
-
+            _d=pd.DataFrame({"work_date":sorted(_dates)})
+            if not _mov.empty: _d=_d.merge(_mov,on="work_date",how="left")
+            if not _prod.empty: _d=_d.merge(_prod,on="work_date",how="left")
             for _c in [
+                "issue_ton","return_ton","issue_value","return_value",
                 "production_ton","target_ton","waste_ton","breakdown_hours",
-                "paper_cost","material_processed_ton","good_output_ton",
-                "opening_wip_ton","reel_issue_ton","reel_return_ton",
-                "closing_wip_ton","effective_consumption","value_amount"
+                "paper_cost","material_processed_ton","good_output_ton"
             ]:
-                if _c not in _v123_daily.columns:
-                    _v123_daily[_c]=0.0
-                _v123_daily[_c]=pd.to_numeric(_v123_daily[_c],errors="coerce").fillna(0.0)
+                if _c not in _d.columns: _d[_c]=0.0
+                _d[_c]=pd.to_numeric(_d[_c],errors="coerce").fillna(0.0)
 
-            for _c in [
-                "raw_issue_ton","raw_return_ton","raw_issue_value","raw_return_value"
-            ]:
-                if _c not in _v123_daily.columns:
-                    _v123_daily[_c]=0.0
-                _v123_daily[_c]=pd.to_numeric(
-                    _v123_daily[_c],errors="coerce"
-                ).fillna(0.0)
-
-            _v123_daily["Opening WIP Ton"]=_v123_daily["opening_wip_ton"]
-            _v123_daily["Reel Issue Ton"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["raw_issue_ton"])
-                    if float(r["raw_issue_ton"])>0
-                    else float(r["reel_issue_ton"])
-                ),axis=1
-            )
-            _v123_daily["Reel Return Ton"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["raw_return_ton"])
-                    if float(r["raw_return_ton"])>0
-                    else float(r["reel_return_ton"])
-                ),axis=1
-            )
-            _v123_daily["Issue Value"]=_v123_daily["raw_issue_value"]
-            _v123_daily["Return Value"]=_v123_daily["raw_return_value"]
-            _v123_daily["Net Issue Value"]=(
-                _v123_daily["Issue Value"]-_v123_daily["Return Value"]
-            )
-            _v123_daily["Net Issue Ton"]=(
-                _v123_daily["Reel Issue Ton"]-_v123_daily["Reel Return Ton"]
-            )
-            _v123_daily["Closing WIP Ton"]=_v123_daily["closing_wip_ton"]
-            _v123_daily["Consumption Ton"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["effective_consumption"])
-                    if float(r["effective_consumption"])>0
-                    else float(r["material_processed_ton"])
-                ),axis=1
-            )
-            _v123_daily["Consumption Value"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["value_amount"])
-                    if float(r["value_amount"])>0 else float(r["paper_cost"])
-                ),axis=1
-            )
-            _v123_daily["Expected Consumption Ton"]=(
-                _v123_daily["Opening WIP Ton"]
-                +_v123_daily["Net Issue Ton"]
-                -_v123_daily["Closing WIP Ton"]
-            )
-            _v123_daily["Flow Variance Ton"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["Expected Consumption Ton"])-float(r["Consumption Ton"])
-                    if (
-                        float(r["Consumption Ton"])>0
-                        or float(r["Opening WIP Ton"])>0
-                        or float(r["Closing WIP Ton"])>0
-                    ) else 0.0
-                ),
+            _d["Reel Issue Ton"]=_d["issue_ton"]
+            _d["Reel Return Ton"]=_d["return_ton"]
+            _d["Net Issue Ton"]=_d["Reel Issue Ton"]-_d["Reel Return Ton"]
+            _d["Issue Value"]=_d["issue_value"]
+            _d["Return Value"]=_d["return_value"]
+            _d["Net Issue Value"]=_d["Issue Value"]-_d["Return Value"]
+            _d["Consumption Ton"]=_d["material_processed_ton"]
+            _d["Consumption Value"]=_d["paper_cost"]
+            _d["Production Ton"]=_d.apply(
+                lambda r:float(r["good_output_ton"]) if float(r["good_output_ton"])>0 else float(r["production_ton"]),
                 axis=1
             )
-            _v123_daily["Production Ton"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["good_output_ton"])
-                    if float(r["good_output_ton"])>0 else float(r["production_ton"])
-                ),axis=1
+            _d["Target Ton"]=_d["target_ton"]
+            _d["Waste Ton"]=_d["waste_ton"]
+            _d["Breakdown Hrs"]=_d["breakdown_hours"]
+            _d["Achievement %"]=_d.apply(
+                lambda r:(float(r["Production Ton"])/float(r["Target Ton"])*100.0) if float(r["Target Ton"])>0 else 0.0,
+                axis=1
             )
-            _v123_daily["Target Ton"]=_v123_daily["target_ton"]
-            _v123_daily["Waste Ton"]=_v123_daily["waste_ton"]
-            _v123_daily["Breakdown Hrs"]=_v123_daily["breakdown_hours"]
-            _v123_daily["Avg Rate ₹/Kg"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["Consumption Value"])/(float(r["Consumption Ton"])*1000.0)
-                    if float(r["Consumption Ton"])>0 else 0.0
-                ),axis=1
+            _d["Yield %"]=_d.apply(
+                lambda r:(float(r["Production Ton"])/float(r["Consumption Ton"])*100.0) if float(r["Consumption Ton"])>0 else 0.0,
+                axis=1
             )
-            _v123_daily["Achievement %"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["Production Ton"])/float(r["Target Ton"])*100.0
-                    if float(r["Target Ton"])>0 else 0.0
-                ),axis=1
+            _d["Waste %"]=_d.apply(
+                lambda r:(float(r["Waste Ton"])/float(r["Consumption Ton"])*100.0) if float(r["Consumption Ton"])>0 else 0.0,
+                axis=1
             )
-            _v123_daily["Yield %"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["Production Ton"])/float(r["Consumption Ton"])*100.0
-                    if float(r["Consumption Ton"])>0 else 0.0
-                ),axis=1
+            _d["Shift A"]=0; _d["Shift B"]=0
+            if not _mp.empty:
+                for _,_r in _mp.iterrows():
+                    _mask=_d["work_date"]==str(_r["work_date"])
+                    if str(_r["shift"])=="A": _d.loc[_mask,"Shift A"]=int(_r["people"] or 0)
+                    elif str(_r["shift"])=="B": _d.loc[_mask,"Shift B"]=int(_r["people"] or 0)
+            _d["Total Manpower"]=_d["Shift A"]+_d["Shift B"]
+            _d["Ton / Person"]=_d.apply(
+                lambda r:(float(r["Production Ton"])/float(r["Total Manpower"])) if float(r["Total Manpower"])>0 else 0.0,
+                axis=1
             )
-            _v123_daily["Waste %"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["Waste Ton"])/float(r["Consumption Ton"])*100.0
-                    if float(r["Consumption Ton"])>0 else 0.0
-                ),axis=1
-            )
+            _d["Date"]=pd.to_datetime(_d["work_date"],errors="coerce").dt.date
 
-            _v123_daily["Shift A Manpower"]=0
-            _v123_daily["Shift B Manpower"]=0
-            if not _v123_mp_month.empty:
-                _v123_mp_month["work_date"]=_v123_mp_month["work_date"].astype(str)
-                for _,_mr in _v123_mp_month.iterrows():
-                    _mask=_v123_daily["work_date"]==str(_mr["work_date"])
-                    if str(_mr["shift"])=="A":
-                        _v123_daily.loc[_mask,"Shift A Manpower"]=int(_mr["people"] or 0)
-                    elif str(_mr["shift"])=="B":
-                        _v123_daily.loc[_mask,"Shift B Manpower"]=int(_mr["people"] or 0)
-            _v123_daily["Total Person-Shifts"]=(
-                _v123_daily["Shift A Manpower"]+_v123_daily["Shift B Manpower"]
-            )
-            _v123_daily["Corrugation Ton / Person"]=_v123_daily.apply(
-                lambda r:(
-                    float(r["Production Ton"])/float(r["Total Person-Shifts"])
-                    if float(r["Total Person-Shifts"])>0 else 0.0
-                ),axis=1
-            )
-            _v123_daily["Date"]=pd.to_datetime(
-                _v123_daily["work_date"],errors="coerce"
-            ).dt.date
+            _issue=float(_d["Reel Issue Ton"].sum())
+            _return=float(_d["Reel Return Ton"].sum())
+            _net=_issue-_return
+            _issue_val=float(_d["Issue Value"].sum())
+            _return_val=float(_d["Return Value"].sum())
+            _net_val=_issue_val-_return_val
+            _cons=float(_d["Consumption Ton"].sum())
+            _cons_val=float(_d["Consumption Value"].sum())
+            _output=float(_d["Production Ton"].sum())
+            _target=float(_d["Target Ton"].sum())
+            _waste=float(_d["Waste Ton"].sum())
+            _break=float(_d["Breakdown Hrs"].sum())
+            _people=int(_d["Total Manpower"].sum())
+            _ach=(_output/_target*100.0) if _target>0 else 0.0
+            _yield=(_output/_cons*100.0) if _cons>0 else 0.0
+            _waste_pct=(_waste/_cons*100.0) if _cons>0 else 0.0
+            _avg_rate=(_cons_val/(_cons*1000.0)) if _cons>0 else 0.0
+            _tpp=(_output/_people) if _people>0 else 0.0
 
-            _v123_days=int((_v123_daily["Production Ton"]>0).sum())
-            _v123_issue_total=float(_v123_daily["Reel Issue Ton"].sum())
-            _v123_return_total=float(_v123_daily["Reel Return Ton"].sum())
-            _v123_net_total=_v123_issue_total-_v123_return_total
-            _v125_issue_value_total=float(_v123_daily["Issue Value"].sum())
-            _v125_return_value_total=float(_v123_daily["Return Value"].sum())
-            _v125_net_issue_value_total=_v125_issue_value_total-_v125_return_value_total
-            _v123_consumption_total=float(_v123_daily["Consumption Ton"].sum())
-            _v123_value_total=float(_v123_daily["Consumption Value"].sum())
-            _v123_output_total=float(_v123_daily["Production Ton"].sum())
-            _v123_target_total=float(_v123_daily["Target Ton"].sum())
-            _v123_waste_total=float(_v123_daily["Waste Ton"].sum())
-            _v123_break_total=float(_v123_daily["Breakdown Hrs"].sum())
-            _v123_people_total=int(_v123_daily["Total Person-Shifts"].sum())
-            _v123_avg_rate=(
-                _v123_value_total/(_v123_consumption_total*1000.0)
-                if _v123_consumption_total>0 else 0.0
-            )
-            _v123_achievement=(
-                _v123_output_total/_v123_target_total*100.0
-                if _v123_target_total>0 else 0.0
-            )
-            _v123_yield=(
-                _v123_output_total/_v123_consumption_total*100.0
-                if _v123_consumption_total>0 else 0.0
-            )
-            _v123_waste_pct=(
-                _v123_waste_total/_v123_consumption_total*100.0
-                if _v123_consumption_total>0 else 0.0
-            )
-            _v123_tpp=(
-                _v123_output_total/_v123_people_total
-                if _v123_people_total>0 else 0.0
-            )
-            _v123_paper_cost_ton=(
-                _v123_value_total/_v123_output_total
-                if _v123_output_total>0 else 0.0
-            )
-
-            # Opening/closing WIP for the month: first/last recorded balance per paper/reel key,
-            # not a sum of every day's WIP (which would double-count stock).
-            _v123_month_opening=0.0
-            _v123_month_closing=0.0
-            if not _v123_reel_rows.empty:
-                _v123_stock=_v123_reel_rows.copy()
-                _v123_stock["stock_key"]=(
-                    _v123_stock["reel_reference"].fillna("").astype(str).str.strip()
-                    +"|"+_v123_stock["paper_grade"].fillna("").astype(str).str.strip()
-                )
-                _v123_stock=_v123_stock.sort_values(["stock_key","work_date","line_no"])
-                _v123_first_rows=_v123_stock.groupby("stock_key",as_index=False).first()
-                _v123_last_rows=_v123_stock.groupby("stock_key",as_index=False).last()
-                _v123_month_opening=float(_v123_first_rows["opening_wip_ton"].sum())
-                _v123_month_closing=float(_v123_last_rows["closing_wip_ton"].sum())
-
-            c1,c2,c3,c4,c5=st.columns(5)
-            c1.metric("Opening WIP",f"{_v123_month_opening:,.2f} T")
-            c2.metric("Reel Issue",f"{_v123_issue_total:,.2f} T")
-            c3.metric("Reel Return",f"{_v123_return_total:,.2f} T")
-            c4.metric("Net Issue",f"{_v123_net_total:,.2f} T")
-            c5.metric("Closing WIP",f"{_v123_month_closing:,.2f} T")
-
+            st.markdown("#### Reel Movement")
             c1,c2,c3=st.columns(3)
-            c1.metric("Issue Value",v5_money(_v125_issue_value_total))
-            c2.metric("Return Value",v5_money(_v125_return_value_total))
-            c3.metric("Net Issue Value",v5_money(_v125_net_issue_value_total))
+            c1.metric("Total Reel Issue",f"{_issue:,.3f} T")
+            c2.metric("Total Reel Return",f"{_return:,.3f} T")
+            c3.metric("Net Issue",f"{_net:,.3f} T")
+            c1,c2,c3=st.columns(3)
+            c1.metric("Issue Value",v5_money(_issue_val))
+            c2.metric("Return Value",v5_money(_return_val))
+            c3.metric("Net Issue Value",v5_money(_net_val))
 
-            c1,c2,c3,c4,c5=st.columns(5)
-            c1.metric(
-                "Consumption",
-                f"{_v123_consumption_total:,.2f} T" if _v123_consumption_total>0 else "PENDING"
-            )
-            c2.metric("Consumption Value",v5_money(_v123_value_total))
-            c3.metric("Avg Paper Rate",f"₹{_v123_avg_rate:,.2f}/Kg")
-            c4.metric("Production",f"{_v123_output_total:,.2f} T")
-            c5.metric("Paper Cost / Output Ton",v5_money(_v123_paper_cost_ton))
+            if _cons>0:
+                st.markdown("#### Consumption")
+                c1,c2,c3=st.columns(3)
+                c1.metric("Actual Consumption",f"{_cons:,.3f} T")
+                c2.metric("Consumption Value",v5_money(_cons_val))
+                c3.metric("Avg Paper Rate",f"₹{_avg_rate:,.2f}/Kg")
 
-            c1,c2,c3,c4,c5=st.columns(5)
-            c1.metric("Production Days",f"{_v123_days:,}")
-            c2.metric("Target",f"{_v123_target_total:,.2f} T")
-            c3.metric("Achievement",f"{_v123_achievement:,.2f}%")
-            c4.metric("Waste %",f"{_v123_waste_pct:,.2f}%")
-            c5.metric("Yield",f"{_v123_yield:,.2f}%")
+            if _output>0 or _target>0:
+                st.markdown("#### Production")
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Production",f"{_output:,.2f} T")
+                c2.metric("Target",f"{_target:,.2f} T")
+                c3.metric("Achievement",f"{_ach:,.2f}%")
+                c4.metric("Breakdown",f"{_break:,.2f} Hrs")
+                c1,c2,c3=st.columns(3)
+                c1.metric("Waste",f"{_waste:,.2f} T")
+                c2.metric("Waste %",f"{_waste_pct:,.2f}%" if _cons>0 else "PENDING")
+                c3.metric("Yield",f"{_yield:,.2f}%" if _cons>0 else "PENDING")
 
-            c1,c2,c3,c4=st.columns(4)
-            c1.metric("Waste / Rejection",f"{_v123_waste_total:,.2f} T")
-            c2.metric("Breakdown",f"{_v123_break_total:,.2f} Hrs")
-            c3.metric("Person-Shifts",f"{_v123_people_total:,}")
-            c4.metric(
-                "Corrugation Ton / Person",
-                f"{_v123_tpp:,.2f} T" if _v123_people_total>0 else "MANPOWER PENDING"
-            )
-            st.caption(
-                "Monthly Ton / Person = Total Corrugation Production ÷ Total Corrugation person-shifts."
-            )
+            if _people>0:
+                st.markdown("#### Manpower Productivity")
+                c1,c2=st.columns(2)
+                c1.metric("Total Person-Shifts",f"{_people:,}")
+                c2.metric("Corrugation Ton / Person",f"{_tpp:,.2f} T")
 
-            st.markdown("#### Date-wise MD Report")
-            _v123_display=_v123_daily[[
-                "Date","Opening WIP Ton","Reel Issue Ton","Reel Return Ton","Net Issue Ton",
-                "Issue Value","Return Value","Net Issue Value",
-                "Consumption Ton","Closing WIP Ton","Consumption Value","Avg Rate ₹/Kg",
-                "Production Ton","Target Ton","Achievement %","Waste Ton","Waste %",
-                "Yield %","Breakdown Hrs","Shift A Manpower","Shift B Manpower",
-                "Total Person-Shifts","Corrugation Ton / Person","Flow Variance Ton"
-            ]].copy()
+            st.markdown("#### Date-wise Summary")
+            _cols=[
+                "Date","Reel Issue Ton","Reel Return Ton","Net Issue Ton",
+                "Issue Value","Return Value","Net Issue Value"
+            ]
+            if _cons>0: _cols+=["Consumption Ton","Consumption Value"]
+            if _output>0 or _target>0: _cols+=["Production Ton","Target Ton","Achievement %","Waste Ton"]
+            if _people>0: _cols+=["Total Manpower","Ton / Person"]
+            _display=_d[_cols].copy()
             st.dataframe(
-                _v123_display,hide_index=True,use_container_width=True,height=500,
+                _display,hide_index=True,use_container_width=True,height=500,
                 column_config={
-                    "Opening WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
                     "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
                     "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
                     "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
@@ -14584,135 +13387,28 @@ elif page == "Operations":
                     "Return Value":st.column_config.NumberColumn(format="₹%.2f"),
                     "Net Issue Value":st.column_config.NumberColumn(format="₹%.2f"),
                     "Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
-                    "Closing WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
                     "Consumption Value":st.column_config.NumberColumn(format="₹%.2f"),
-                    "Avg Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
                     "Production Ton":st.column_config.NumberColumn(format="%.2f T"),
                     "Target Ton":st.column_config.NumberColumn(format="%.2f T"),
                     "Achievement %":st.column_config.NumberColumn(format="%.2f%%"),
                     "Waste Ton":st.column_config.NumberColumn(format="%.2f T"),
-                    "Waste %":st.column_config.NumberColumn(format="%.2f%%"),
-                    "Yield %":st.column_config.NumberColumn(format="%.2f%%"),
-                    "Breakdown Hrs":st.column_config.NumberColumn(format="%.2f"),
-                    "Corrugation Ton / Person":st.column_config.NumberColumn(format="%.2f T"),
-                    "Flow Variance Ton":st.column_config.NumberColumn(format="%.3f T"),
+                    "Ton / Person":st.column_config.NumberColumn(format="%.2f T"),
                 }
             )
 
-            st.markdown("#### MD Trends")
-            c1,c2=st.columns(2,gap="small")
-            with c1:
-                _v123_flow_chart=_v123_daily[[
-                    "Date","Reel Issue Ton","Reel Return Ton","Consumption Ton"
-                ]].melt("Date",var_name="Series",value_name="Ton")
-                chart=alt.Chart(_v123_flow_chart).mark_line(point=True).encode(
-                    x=alt.X("Date:T",title="Date"),
-                    y=alt.Y("Ton:Q",title="Ton"),
-                    color=alt.Color("Series:N",title=""),
-                    tooltip=["Date:T","Series:N",alt.Tooltip("Ton:Q",format=".2f")]
-                ).properties(height=280,title="Issue / Return / Consumption")
-                st.altair_chart(chart,use_container_width=True)
-            with c2:
-                _v123_prod_chart=_v123_daily[["Date","Production Ton","Target Ton"]].melt(
-                    "Date",var_name="Series",value_name="Ton"
-                )
-                chart=alt.Chart(_v123_prod_chart).mark_line(point=True).encode(
-                    x=alt.X("Date:T",title="Date"),
-                    y=alt.Y("Ton:Q",title="Ton"),
-                    color=alt.Color("Series:N",title=""),
-                    tooltip=["Date:T","Series:N",alt.Tooltip("Ton:Q",format=".2f")]
-                ).properties(height=280,title="Production vs Target")
-                st.altair_chart(chart,use_container_width=True)
-
-            c1,c2=st.columns(2,gap="small")
-            with c1:
-                chart=alt.Chart(_v123_daily).mark_line(point=True).encode(
-                    x=alt.X("Date:T",title="Date"),
-                    y=alt.Y("Yield %:Q",title="Yield %"),
-                    tooltip=["Date:T",alt.Tooltip("Yield %:Q",format=".2f")]
-                ).properties(height=280,title="Yield Trend")
-                st.altair_chart(chart,use_container_width=True)
-            with c2:
-                _v123_tpp_chart=_v123_daily[_v123_daily["Total Person-Shifts"]>0]
-                if _v123_tpp_chart.empty:
-                    st.info("Ton / Person trend will appear after manpower allocation.")
-                else:
-                    chart=alt.Chart(_v123_tpp_chart).mark_line(point=True).encode(
-                        x=alt.X("Date:T",title="Date"),
-                        y=alt.Y("Corrugation Ton / Person:Q",title="Ton / Person"),
-                        tooltip=["Date:T",alt.Tooltip("Corrugation Ton / Person:Q",format=".2f")]
-                    ).properties(height=280,title="Corrugation Ton / Person")
-                    st.altair_chart(chart,use_container_width=True)
-
-            _v123_report_bytes=make_excel_report(
-                _v123_display,
-                "Corrugation Monthly MD Report",
-                f"Greater Noida Plant | {_v123_month.strftime('%b %Y')}"
+            _bytes=make_excel_report(
+                _display,
+                "Corrugation Monthly Report",
+                f"Greater Noida Plant | {_v128_month.strftime('%b %Y')}"
             )
             st.download_button(
                 "Download Monthly Corrugation Report",
-                data=_v123_report_bytes,
-                file_name=f"Corrugation_MD_Report_{_v123_month.strftime('%Y_%m')}.xlsx",
+                data=_bytes,
+                file_name=f"Corrugation_Report_{_v128_month.strftime('%Y_%m')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",use_container_width=True,
-                key="v123_download_monthly_corrugation"
+                key="v128_download_monthly"
             )
-
-            with st.expander("View Reel-wise Monthly Material Flow"):
-                if _v123_reel_rows.empty:
-                    st.info("No reel-level rows are saved for this month.")
-                else:
-                    _v123_detail=_v123_reel_rows.copy()
-                    _v123_detail["Date"]=pd.to_datetime(
-                        _v123_detail["work_date"],errors="coerce"
-                    ).dt.date
-                    _v123_detail["Net Issue Ton"]=(
-                        _v123_detail["reel_issue_ton"]-_v123_detail["reel_return_ton"]
-                    )
-                    _v123_detail["Consumption Ton"]=_v123_detail["effective_consumption"]
-                    _v123_detail["Expected Consumption Ton"]=(
-                        _v123_detail["opening_wip_ton"]
-                        +_v123_detail["Net Issue Ton"]
-                        -_v123_detail["closing_wip_ton"]
-                    )
-                    _v123_detail["Flow Variance Ton"]=(
-                        _v123_detail["Expected Consumption Ton"]-_v123_detail["Consumption Ton"]
-                    )
-                    _v123_detail["Rate ₹/Kg"]=_v123_detail.apply(
-                        lambda r:(
-                            float(r["value_amount"])/(float(r["Consumption Ton"])*1000.0)
-                            if float(r["Consumption Ton"])>0 else 0.0
-                        ),axis=1
-                    )
-                    _v123_detail=_v123_detail.rename(columns={
-                        "line_no":"Line","reel_reference":"Reel / ERP Code",
-                        "paper_grade":"Paper Description / GSM",
-                        "opening_wip_ton":"Opening WIP Ton",
-                        "reel_issue_ton":"Reel Issue Ton",
-                        "reel_return_ton":"Reel Return Ton",
-                        "closing_wip_ton":"Closing WIP Ton",
-                        "value_amount":"Value ₹","remark":"Remark"
-                    })
-                    st.dataframe(
-                        _v123_detail[[
-                            "Date","Line","Reel / ERP Code","Paper Description / GSM",
-                            "Opening WIP Ton","Reel Issue Ton","Reel Return Ton","Net Issue Ton",
-                            "Consumption Ton","Closing WIP Ton","Value ₹","Rate ₹/Kg",
-                            "Flow Variance Ton","Remark"
-                        ]],
-                        hide_index=True,use_container_width=True,
-                        column_config={
-                            "Opening WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Closing WIP Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
-                            "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
-                            "Flow Variance Ton":st.column_config.NumberColumn(format="%.3f T"),
-                        }
-                    )
 
     with tab_mp:
         c1,c2,c3=st.columns(3)
