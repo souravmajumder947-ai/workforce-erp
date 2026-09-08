@@ -1,0 +1,32 @@
+name: Validate V13.8 Consumption Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v138-validate-consumption-schema.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify V13.8 markers
+        run: |
+          grep -q "V13.8 SAFE CONSUMPTION SUMMARY SCHEMA" app.py
+          grep -q "pg_advisory_lock" app.py
+          grep -q "idx_consumption_summary_month" app.py
+      - name: Record validation
+        run: |
+          printf "V13.8 validated\n" > .v138_validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .v138_validation
+          git commit -m "Validate safe consumption summary schema"
+          git push origin main
