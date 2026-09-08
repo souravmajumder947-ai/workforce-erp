@@ -1,0 +1,38 @@
+name: V14.0 Performance Fast Path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/v140_performance_fast_path.py"
+      - ".github/workflows/v140-performance-fast-path.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply V14.0 performance patch
+        run: python tools/v140_performance_fast_path.py
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Audit UI controls
+        run: python tools/v104_button_audit.py
+      - name: Commit update
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Speed up app database and page rendering"
+          git pull --rebase origin main
+          git push origin main
