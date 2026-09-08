@@ -12715,12 +12715,12 @@ elif page == "Operations":
                 _reel_flow_errors=[]
 
                 k1,k2,k3,k4=st.columns(4)
-                k1.metric("Reel Issue",f"{total_reel_issue:.3f} T")
-                k2.metric("Reel Return",f"{total_reel_return:.3f} T")
-                k3.metric("Net Issue",f"{total_net_issue:.3f} T")
+                k1.metric("Reel Issue",f"{total_reel_issue:.2f} T")
+                k2.metric("Reel Return",f"{total_reel_return:.2f} T")
+                k3.metric("Net Issue",f"{total_net_issue:.2f} T")
                 k4.metric(
                     "Actual Consumption",
-                    f"{paper_consumed:.3f} T" if paper_consumed>0 else "PENDING"
+                    f"{paper_consumed:.2f} T" if paper_consumed>0 else "PENDING"
                 )
 
                 if not _reel_work.empty:
@@ -12732,10 +12732,10 @@ elif page == "Operations":
                         ]],
                         hide_index=True,use_container_width=True,
                         column_config={
-                            "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                            "Actual Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
+                            "Reel Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
+                            "Reel Return Ton":st.column_config.NumberColumn(format="%.2f T"),
+                            "Net Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
+                            "Actual Consumption Ton":st.column_config.NumberColumn(format="%.2f T"),
                             "Consumption Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
                             "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
                         }
@@ -12792,7 +12792,7 @@ elif page == "Operations":
                 paper_cost_per_output=paper_value/good_output if good_output>0 else 0.0
 
                 r1,r2,r3,r4=st.columns(4)
-                r1.metric("Paper Consumed",f"{paper_consumed:.3f} T")
+                r1.metric("Paper Consumed",f"{paper_consumed:.2f} T")
                 r2.metric("Paper Value",v5_money(paper_value))
                 r3.metric("Avg Paper Rate",f"₹{avg_paper_rate:.2f} / Kg")
                 r4.metric("Paper Cost / Output Ton",v5_money(paper_cost_per_output))
@@ -12802,7 +12802,7 @@ elif page == "Operations":
                 k2.metric("Achievement",f"{achievement:.2f}%")
                 k3.metric("Yield",f"{yield_pct:.2f}%")
                 k4.metric("Waste",f"{waste_pct:.2f}%")
-                k5.metric("Material Variance",f"{material_variance:.3f} T")
+                k5.metric("Material Variance",f"{material_variance:.2f} T")
 
                 if paper_consumed>0 and abs(material_variance)>0.01:
                     st.warning(
@@ -13165,9 +13165,9 @@ elif page == "Operations":
         else:
             st.markdown("#### 1. Reel Movement")
             c1,c2,c3=st.columns(3)
-            c1.metric("Reel Issue",f"{_issue:,.3f} T")
-            c2.metric("Reel Return",f"{_return:,.3f} T")
-            c3.metric("Net Issue",f"{_net:,.3f} T")
+            c1.metric("Reel Issue",f"{_issue:,.2f} T")
+            c2.metric("Reel Return",f"{_return:,.2f} T")
+            c3.metric("Net Issue",f"{_net:,.2f} T")
 
             c1,c2,c3=st.columns(3)
             c1.metric("Issue Value",v5_money(_issue_value))
@@ -13177,7 +13177,7 @@ elif page == "Operations":
             if _cons>0:
                 st.markdown("#### 2. Consumption")
                 c1,c2,c3=st.columns(3)
-                c1.metric("Actual Consumption",f"{_cons:,.3f} T")
+                c1.metric("Actual Consumption",f"{_cons:,.2f} T")
                 c2.metric("Consumption Value",v5_money(_cons_value))
                 c3.metric("Avg Paper Rate",f"₹{_avg_rate:,.2f}/Kg")
             else:
@@ -13335,9 +13335,9 @@ elif page == "Operations":
 
             st.markdown("#### Reel Movement")
             c1,c2,c3=st.columns(3)
-            c1.metric("Total Reel Issue",f"{_issue:,.3f} T")
-            c2.metric("Total Reel Return",f"{_return:,.3f} T")
-            c3.metric("Net Issue",f"{_net:,.3f} T")
+            c1.metric("Total Reel Issue",f"{_issue:,.2f} T")
+            c2.metric("Total Reel Return",f"{_return:,.2f} T")
+            c3.metric("Net Issue",f"{_net:,.2f} T")
             c1,c2,c3=st.columns(3)
             c1.metric("Issue Value",v5_money(_issue_val))
             c2.metric("Return Value",v5_money(_return_val))
@@ -13346,7 +13346,7 @@ elif page == "Operations":
             if _cons>0:
                 st.markdown("#### Consumption")
                 c1,c2,c3=st.columns(3)
-                c1.metric("Actual Consumption",f"{_cons:,.3f} T")
+                c1.metric("Actual Consumption",f"{_cons:,.2f} T")
                 c2.metric("Consumption Value",v5_money(_cons_val))
                 c3.metric("Avg Paper Rate",f"₹{_avg_rate:,.2f}/Kg")
 
@@ -13380,13 +13380,13 @@ elif page == "Operations":
             st.dataframe(
                 _display,hide_index=True,use_container_width=True,height=500,
                 column_config={
-                    "Reel Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
-                    "Reel Return Ton":st.column_config.NumberColumn(format="%.3f T"),
-                    "Net Issue Ton":st.column_config.NumberColumn(format="%.3f T"),
+                    "Reel Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
+                    "Reel Return Ton":st.column_config.NumberColumn(format="%.2f T"),
+                    "Net Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
                     "Issue Value":st.column_config.NumberColumn(format="₹%.2f"),
                     "Return Value":st.column_config.NumberColumn(format="₹%.2f"),
                     "Net Issue Value":st.column_config.NumberColumn(format="₹%.2f"),
-                    "Consumption Ton":st.column_config.NumberColumn(format="%.3f T"),
+                    "Consumption Ton":st.column_config.NumberColumn(format="%.2f T"),
                     "Consumption Value":st.column_config.NumberColumn(format="₹%.2f"),
                     "Production Ton":st.column_config.NumberColumn(format="%.2f T"),
                     "Target Ton":st.column_config.NumberColumn(format="%.2f T"),
@@ -17191,3 +17191,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 }
 </style>
 """, unsafe_allow_html=True)
+
+# V12.9 TWO DECIMAL PRODUCTION DISPLAY
