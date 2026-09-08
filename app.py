@@ -13126,7 +13126,7 @@ elif page == "Operations":
         </style>
         <div class="v132-report-head">
           <h3>Report Centre</h3>
-          <p>Finsys-style workflow: choose report → select period → show report → search / sort → export.</p>
+          <p>Finsys-style workflow: choose report → select period → show report → search / sort → export. Reel reports use Kg; production reports use Ton.</p>
         </div>
         """,unsafe_allow_html=True)
 
@@ -13315,7 +13315,7 @@ elif page == "Operations":
                             ]
                             _default_cols=[
                                 "VCH_DT","ERP_CODE","ITEM",
-                                "QTY_CONS","QTY_TON","RATE","VALUE"
+                                "QTY_CONS","RATE","VALUE"
                             ]
                             _all_cols=[c for c in _all_cols if c in _df.columns]
                             _default_cols=[c for c in _default_cols if c in _df.columns]
@@ -13336,12 +13336,11 @@ elif page == "Operations":
                             _value=float(pd.to_numeric(_df["VALUE"],errors="coerce").fillna(0).sum())
                             _avg_rate=(_value/_kg) if _kg>0 else 0.0
 
-                            m1,m2,m3,m4,m5=st.columns(5)
+                            m1,m2,m3,m4=st.columns(4)
                             m1.metric("Records",f"{_records:,}")
                             m2.metric("Consumption Qty",f"{_kg:,.0f} Kg")
-                            m3.metric("Consumption Ton",f"{_ton:,.2f} T")
-                            m4.metric("Consumption Value",v5_money(_value))
-                            m5.metric("Avg Rate",f"₹{_avg_rate:,.2f}/Kg")
+                            m3.metric("Consumption Value",v5_money(_value))
+                            m4.metric("Avg Rate",f"₹{_avg_rate:,.2f}/Kg")
 
                             st.success("Actual consumption data is available for this period.")
                             _sheet=_df[_show_cols].copy()
@@ -13466,7 +13465,7 @@ elif page == "Operations":
                                 _default_cols=[
                                     "ISSUE_DATE","RETURN_DATE","REEL_NO","CO_REEL",
                                     "ITEM","ISSUE_QTY","RETURN_QTY","NET_ISSUE_QTY",
-                                    "NET_ISSUE_TON","RATE","NET_VALUE","ACTUAL_CONSUMPTION"
+                                    "RATE","NET_VALUE","ACTUAL_CONSUMPTION"
                                 ]
                                 _all_cols=[c for c in _all_cols if c in _df.columns]
                                 _default_cols=[c for c in _default_cols if c in _df.columns]
@@ -13484,13 +13483,11 @@ elif page == "Operations":
                                 _issue_kg=float(_df["ISSUE_QTY"].sum())
                                 _return_kg=float(_df["RETURN_QTY"].sum())
                                 _net_kg=float(_df["NET_ISSUE_QTY"].sum())
-                                _net_ton=_net_kg/1000.0
-
                                 m1,m2,m3,m4,m5=st.columns(5)
                                 m1.metric("Reels / Rows",f"{len(_df):,}")
-                                m2.metric("Reel Issue",f"{_issue_kg/1000.0:,.2f} T")
-                                m3.metric("Reel Return",f"{_return_kg/1000.0:,.2f} T")
-                                m4.metric("Net Issue",f"{_net_ton:,.2f} T")
+                                m2.metric("Reel Issue",f"{_issue_kg:,.0f} Kg")
+                                m3.metric("Reel Return",f"{_return_kg:,.0f} Kg")
+                                m4.metric("Net Issue",f"{_net_kg:,.0f} Kg")
                                 m5.metric("Actual Consumption","PENDING")
 
                                 st.warning(
@@ -13613,11 +13610,10 @@ elif page == "Operations":
                             _ton=float(pd.to_numeric(_df["QTY_TON"],errors="coerce").fillna(0).sum())
                             _value=float(pd.to_numeric(_df["VALUE"],errors="coerce").fillna(0).sum())
 
-                            m1,m2,m3,m4=st.columns(4)
+                            m1,m2,m3=st.columns(3)
                             m1.metric("Records",f"{_records:,}")
                             m2.metric("Total Qty",f"{_kg:,.0f} Kg")
-                            m3.metric("Total Ton",f"{_ton:,.2f} T")
-                            m4.metric("Total Value",v5_money(_value))
+                            m3.metric("Total Value",v5_money(_value))
 
                             st.caption(
                                 "Click a column header to sort. Horizontal scroll shows the complete ERP sheet."
@@ -17744,3 +17740,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V12.9 TWO DECIMAL PRODUCTION DISPLAY
 
 # V14.1 DIRECT PERFORMANCE OPTIMIZATION
+
+# V13.5 REEL REPORTS USE KG
