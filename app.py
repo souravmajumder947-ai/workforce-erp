@@ -13978,6 +13978,11 @@ elif page == "Operations":
             "MD material flow: Opening WIP → Reel Issue → Reel Return → Net Issue → Consumption → Closing WIP → Production → Ton/Person."
         )
 
+        # V12.6 SHOW IMPORTED FINSYS MOVEMENTS IN REPORTS
+        _v126_working_date_key=global_work_date.isoformat()
+        if st.session_state.get("v126_last_working_date") != _v126_working_date_key:
+            st.session_state["v123_daily_report_date"]=global_work_date
+            st.session_state["v126_last_working_date"]=_v126_working_date_key
         _v123_day=st.date_input(
             "Report Date",value=global_work_date,format="DD/MM/YYYY",key="v123_daily_report_date"
         )
@@ -14015,7 +14020,7 @@ elif page == "Operations":
             (_v123_day.isoformat(),)
         )
 
-        if _v123_prod.empty and _v123_reels.empty:
+        if _v123_prod.empty and _v123_reels.empty and _v125_move_day.empty:
             st.info(f"No Corrugation data is saved for {_v123_day.strftime('%d/%m/%Y')}.")
         else:
             _v123_pr=_v123_prod.iloc[0].to_dict() if not _v123_prod.empty else {}
@@ -14054,7 +14059,11 @@ elif page == "Operations":
             _v125_net_issue_value=_v125_issue_value-_v125_return_value
 
             _v123_expected=_v123_opening+_v123_net-_v123_closing
-            _v123_flow_variance=_v123_expected-_v123_consumption
+            _v123_flow_variance=(
+                _v123_expected-_v123_consumption
+                if _v123_consumption>0 or _v123_opening>0 or _v123_closing>0
+                else 0.0
+            )
             _v123_avg_rate=(
                 _v123_value/(_v123_consumption*1000.0) if _v123_consumption>0 else 0.0
             )
@@ -14250,7 +14259,7 @@ elif page == "Operations":
             (_v123_first.isoformat(),_v123_last.isoformat())
         )
 
-        if _v123_prod_month.empty and _v123_reel_rows.empty:
+        if _v123_prod_month.empty and _v123_reel_rows.empty and _v125_move_month.empty:
             st.info(f"No Corrugation data is saved for {_v123_month.strftime('%B %Y')}.")
         else:
             # Build day-wise reel material flow.
@@ -14380,8 +14389,16 @@ elif page == "Operations":
                 +_v123_daily["Net Issue Ton"]
                 -_v123_daily["Closing WIP Ton"]
             )
-            _v123_daily["Flow Variance Ton"]=(
-                _v123_daily["Expected Consumption Ton"]-_v123_daily["Consumption Ton"]
+            _v123_daily["Flow Variance Ton"]=_v123_daily.apply(
+                lambda r:(
+                    float(r["Expected Consumption Ton"])-float(r["Consumption Ton"])
+                    if (
+                        float(r["Consumption Ton"])>0
+                        or float(r["Opening WIP Ton"])>0
+                        or float(r["Closing WIP Ton"])>0
+                    ) else 0.0
+                ),
+                axis=1
             )
             _v123_daily["Production Ton"]=_v123_daily.apply(
                 lambda r:(
