@@ -1031,11 +1031,10 @@ def _discard_raw_pg_connection(pool, conn):
 
 
 def get_pg_conn():
+    """Return a pooled PostgreSQL connection; real queries handle stale-connection retry."""
     pool = _postgres_pool()
     last_error = None
 
-    # conn.closed is not enough: an idle TCP connection can look open locally
-    # after Neon/server-side idle cleanup. Validate every checkout with SELECT 1.
     for _attempt in range(3):
         conn = None
         try:
@@ -1043,17 +1042,6 @@ def get_pg_conn():
             if conn is None or conn.closed:
                 _discard_raw_pg_connection(pool, conn)
                 continue
-
-            cur = conn.cursor()
-            try:
-                cur.execute("SELECT 1")
-                cur.fetchone()
-            finally:
-                cur.close()
-
-            # SELECT 1 starts a transaction under psycopg2 default settings.
-            # Roll it back before handing the connection to application code.
-            conn.rollback()
             return _PooledConnection(pool, conn)
 
         except _PG_TRANSIENT_ERRORS as exc:
@@ -1066,7 +1054,7 @@ def get_pg_conn():
 
     if last_error is not None:
         raise last_error
-    raise RuntimeError("Unable to obtain a healthy PostgreSQL connection.")
+    raise RuntimeError("Unable to obtain a PostgreSQL connection.")
 
 
 def test_postgres_connection():
@@ -2951,10 +2939,8 @@ def _v121_remove_wrong_august_finsys_rows():
     finally:
         conn.close()
 
-try:
-    _v121_removed_wrong_rows=_v121_remove_wrong_august_finsys_rows()
-except Exception:
-    _v121_removed_wrong_rows=0
+# Incorrect historical rows were already cleaned up. Do not write to DB on every rerun.
+_v121_removed_wrong_rows=0
 
 def _v121_old_importer_disabled():
     return True
@@ -9113,6 +9099,7 @@ if len(_v93_search_q) >= 2:
 # Read-only operational intelligence. No attendance/master/payroll rows are changed here.
 # ============================================================
 
+@st.cache_data(ttl=30, show_spinner=False)
 def _v94_scalar(sql, params=()):
     try:
         _df = read_df(sql, params)
@@ -9279,6 +9266,7 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
+@st.cache_data(ttl=60, show_spinner=False)
 def _v83_system_online():
     try:
         _ping = read_df("SELECT 1 AS ok")
@@ -10656,14 +10644,17 @@ elif page == "Employees":
                     unsafe_allow_html=True
                 )
 
-                profile_tabs=st.tabs([
-                    "Overview","Attendance","Payroll","Work History","Statutory & Bank","Timeline"
-                ])
+                _v141_profile_section=st.radio(
+                    "Employee View",
+                    ["Overview","Attendance","Payroll","Work History","Statutory & Bank","Timeline"],
+                    horizontal=True,
+                    key=f"v141_employee_profile_{emp_id}"
+                )
 
                 # ------------------------------------------------
                 # OVERVIEW
                 # ------------------------------------------------
-                with profile_tabs[0]:
+                if _v141_profile_section=="Overview":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     c1,c2=st.columns([1,1],gap="small")
                     with c1:
@@ -10708,7 +10699,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 # ATTENDANCE
                 # ------------------------------------------------
-                with profile_tabs[1]:
+                if _v141_profile_section=="Attendance":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     c1,c2=st.columns([1.35,1],gap="small")
                     with c1:
@@ -10774,7 +10765,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 # PAYROLL
                 # ------------------------------------------------
-                with profile_tabs[2]:
+                if _v141_profile_section=="Payroll":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     if not can_view_salary(_current_role):
                         st.info("Your role does not have salary access.")
@@ -10854,7 +10845,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 # WORK HISTORY
                 # ------------------------------------------------
-                with profile_tabs[3]:
+                if _v141_profile_section=="Work History":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     if work_history.empty:
                         st.info("No machine/manpower allocation history is available for this employee.")
@@ -10878,7 +10869,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 # STATUTORY & BANK
                 # ------------------------------------------------
-                with profile_tabs[4]:
+                if _v141_profile_section=="Statutory & Bank":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     c1,c2=st.columns(2,gap="small")
                     with c1:
@@ -10926,7 +10917,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 # TIMELINE
                 # ------------------------------------------------
-                with profile_tabs[5]:
+                if _v141_profile_section=="Timeline":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     events=[]
                     if not att.empty:
@@ -10991,11 +10982,14 @@ elif page == "Employees":
 elif page == "Attendance":
     st.markdown('<div class="v104-attendance-page"></div>', unsafe_allow_html=True)
     v5_page_header("Attendance","Upload once, review exceptions, correct HR remarks and monitor monthly attendance.",global_division,global_work_date)
-    tab_upload, tab_daily, tab_review, tab_month = st.tabs(
-        ["Upload Attendance","Daily Register","HR Review","Monthly Summary"]
+    _v141_att_section=st.radio(
+        "Attendance View",
+        ["Upload Attendance","Daily Register","HR Review","Monthly Summary"],
+        horizontal=True,
+        key="v141_attendance_section"
     )
 
-    with tab_upload:
+    if _v141_att_section=="Upload Attendance":
         with st.container(border=True):
             v5_panel(
                 "Attendance Import",
@@ -11380,7 +11374,7 @@ elif page == "Attendance":
                         pass
                     st.error(f"Attendance pre-import check failed: {exc}")
 
-    with tab_daily:
+    if _v141_att_section=="Daily Register":
         register=v5_attendance_for_date(global_work_date,global_division)
         if register.empty:
             st.info("No attendance records for the selected date/division.")
@@ -11423,7 +11417,7 @@ elif page == "Attendance":
             else:
                 st.dataframe(show,hide_index=True,use_container_width=True)
 
-    with tab_review:
+    if _v141_att_section=="HR Review":
         # V11.4 HR REVIEW PERIOD FILTER
         # HR Review has its own date context and no longer depends on the app-wide Working Date.
         _hr_today = global_work_date
@@ -12147,7 +12141,7 @@ elif page == "Attendance":
                 else:
                     st.info("Only Admin / HR can resolve HR Review rows.")
 
-    with tab_month:
+    if _v141_att_section=="Monthly Summary":
         first,last=_month_range(global_payroll_month)
         clause,params=v5_division_clause(global_division,"a.")
         monthly=read_df(
@@ -12176,8 +12170,13 @@ elif page == "Payroll":
     if not can_view_salary(_current_role):
         st.warning("Your role does not have salary access.")
     else:
-        tab_live,tab_adj,tab_final=st.tabs(["Live Payroll","Adjustments","Finalize & History"])
-        with tab_live:
+        _v141_pay_section=st.radio(
+            "Payroll View",
+            ["Live Payroll","Adjustments","Finalize & History"],
+            horizontal=True,
+            key="v141_payroll_section"
+        )
+        if _v141_pay_section=="Live Payroll":
             payroll=calculate_live_payroll(global_payroll_month,global_division)
             if payroll.empty:
                 st.info("No payroll employees are available for the selected context.")
@@ -12203,7 +12202,7 @@ elif page == "Payroll":
                     })
                 st.caption("Use Report Centre for Excel salary registers and statutory reports.")
 
-        with tab_adj:
+        if _v141_pay_section=="Adjustments":
             if global_division==ALL_DIVISIONS:
                 adj_div=st.selectbox("Division",DIVISIONS,key="v5_adj_div")
             else: adj_div=global_division
@@ -12261,7 +12260,7 @@ elif page == "Payroll":
                     )
                     st.success("Payroll adjustment saved.");st.rerun()
 
-        with tab_final:
+        if _v141_pay_section=="Finalize & History":
             final_div=st.selectbox("Finalize Division",DIVISIONS,index=DIVISIONS.index(global_division) if global_division in DIVISIONS else 0,key="v5_final_div")
             live=calculate_live_payroll(global_payroll_month,final_div)
             blockers=live[(live["HR Review"]>0)|(live["Missing Days"]>0)] if not live.empty else pd.DataFrame()
@@ -12311,9 +12310,14 @@ elif page == "Contractors":
         "Greater Noida Plant",
         month_value=global_payroll_month
     )
-    tab_overview,tab_work=st.tabs(["Overview","Work Entry"])
+    _v141_con_section=st.radio(
+        "Contractor View",
+        ["Overview","Work Entry"],
+        horizontal=True,
+        key="v141_contractor_section"
+    )
 
-    with tab_overview:
+    if _v141_con_section=="Overview":
         summary=contractor_month_summary(global_payroll_month)
         if summary.empty:
             st.info("No contractor work entries for the selected month.")
@@ -12336,7 +12340,7 @@ elif page == "Contractors":
                 column_config={"Amount":st.column_config.NumberColumn("Amount",format="₹%.2f")}
             )
 
-    with tab_work:
+    if _v141_con_section=="Work Entry":
         contractors=read_df(
             "SELECT contractor_id,vendor_name,thekedar_name,active FROM contractors "
             "WHERE division='Greater Noida Plant' AND active=TRUE ORDER BY vendor_name,thekedar_name"
@@ -12448,15 +12452,18 @@ elif page == "Operations":
     # V12.2 MD PRODUCTION REPORTING MODEL
     # V13.0 FINSYS STYLE REEL REPORT VIEW
     # V13.2 SIMPLE FINSYS REPORT CENTRE
-    tab_prod,tab_report_centre,tab_mp=st.tabs([
-        "Production Entry","Report Centre","Manpower Allocation"
-    ])
+    _v141_ops_section=st.radio(
+        "Operations View",
+        ["Production Entry","Report Centre","Manpower Allocation"],
+        horizontal=True,
+        key="v141_operations_section"
+    )
 
     st.caption(
         "Production reports below use only data saved in this application: reel issue/return/consumption, daily production and manpower allocation."
     )
 
-    with tab_prod:
+    if _v141_ops_section=="Production Entry":
         # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
         st.markdown("### Daily Production Entry")
         st.caption(
@@ -13100,7 +13107,7 @@ elif page == "Operations":
         else:
             st.info(f"No production entry is saved for {pdate.strftime('%d/%m/%Y')} yet.")
 
-    with tab_report_centre:
+    if _v141_ops_section=="Report Centre":
         st.markdown("""
         <style>
         .v132-report-head{
@@ -13796,7 +13803,7 @@ elif page == "Operations":
                         key="v132_month_excel"
                     )
 
-    with tab_mp:
+    if _v141_ops_section=="Manpower Allocation":
         c1,c2,c3=st.columns(3)
         mdate=c1.date_input("Allocation Date",value=global_work_date,format="DD/MM/YYYY",key="v5_mp_date")
         mshift=c2.selectbox("Shift",["A","B"],key="v5_mp_shift")
@@ -14059,11 +14066,14 @@ elif page == "AI Tools":
         unsafe_allow_html=True
     )
 
-    tab1,tab2,tab3,tab4,tab5 = st.tabs(
-        ["Workforce Visualizer","Attendance Intelligence","Payroll Risk","Ask HR Data","Automation Hub"]
+    _v141_ai_section=st.radio(
+        "AI Tools View",
+        ["Workforce Visualizer","Attendance Intelligence","Payroll Risk","Ask HR Data","Automation Hub"],
+        horizontal=True,
+        key="v141_ai_section"
     )
 
-    with tab1:
+    if _v141_ai_section=="Workforce Visualizer":
         a1,a2=st.columns(2,gap="small")
         with a1:
             with st.container(border=True):
@@ -14107,7 +14117,7 @@ elif page == "AI Tools":
                     )
                     st.altair_chart(chart,use_container_width=True)
 
-    with tab2:
+    if _v141_ai_section=="Attendance Intelligence":
         a1,a2=st.columns([1.25,.75],gap="small")
         with a1:
             with st.container(border=True):
@@ -14145,7 +14155,7 @@ elif page == "AI Tools":
                     )
                     st.altair_chart(chart,use_container_width=True)
 
-    with tab3:
+    if _v141_ai_section=="Payroll Risk":
         with st.container(border=True):
             v5_panel("Payroll Risk Monitor","Employees that require action before finalization.")
             if not can_view_salary(_current_role):
@@ -14168,7 +14178,7 @@ elif page == "AI Tools":
                         hide_index=True,use_container_width=True
                     )
 
-    with tab4:
+    if _v141_ai_section=="Ask HR Data":
         with st.container(border=True):
             v5_panel(
                 "Ask HR Data",
@@ -14209,7 +14219,7 @@ elif page == "AI Tools":
                 )
 
 
-    with tab5:
+    if _v141_ai_section=="Automation Hub":
         st.markdown('<div class="v96-section-head"><span>AUTOMATION HUB</span><small>Live readiness gates · no silent data edits</small></div>', unsafe_allow_html=True)
 
         _v96_auto_rows = [
@@ -17579,3 +17589,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 """, unsafe_allow_html=True)
 
 # V12.9 TWO DECIMAL PRODUCTION DISPLAY
+
+# V14.1 DIRECT PERFORMANCE OPTIMIZATION
