@@ -13262,10 +13262,41 @@ elif page == "Operations":
                         try:
                             _v136_file.seek(0)
                             _v136_name=str(getattr(_v136_file,"name","")).lower()
+                            # V13.7 LEGACY XLS READER FIX
+                            # Finsys exports old BIFF .XLS files. Pandas cannot always
+                            # auto-detect these, so select the engine explicitly.
                             if _v136_name.endswith(".csv"):
                                 _v136_raw=pd.read_csv(_v136_file)
+                            elif _v136_name.endswith(".xlsx"):
+                                _v136_file.seek(0)
+                                _v136_raw=pd.read_excel(_v136_file,engine="openpyxl")
+                            elif _v136_name.endswith(".xls"):
+                                _v136_file.seek(0)
+                                try:
+                                    _v136_raw=pd.read_excel(_v136_file,engine="xlrd")
+                                except Exception:
+                                    # Direct xlrd fallback for older BIFF2/BIFF3 Finsys exports.
+                                    _v136_file.seek(0)
+                                    import xlrd
+                                    _book=xlrd.open_workbook(
+                                        file_contents=_v136_file.read()
+                                    )
+                                    if _book.nsheets<1:
+                                        raise ValueError("The XLS file does not contain a worksheet.")
+                                    _sheet=_book.sheet_by_index(0)
+                                    if _sheet.nrows<1:
+                                        raise ValueError("The XLS worksheet is empty.")
+                                    _rows=[
+                                        [_sheet.cell_value(r,c) for c in range(_sheet.ncols)]
+                                        for r in range(_sheet.nrows)
+                                    ]
+                                    _headers=[
+                                        str(v).strip() if str(v).strip() else f"COL_{i+1}"
+                                        for i,v in enumerate(_rows[0])
+                                    ]
+                                    _v136_raw=pd.DataFrame(_rows[1:],columns=_headers)
                             else:
-                                _v136_raw=pd.read_excel(_v136_file)
+                                raise ValueError("Unsupported file type. Upload XLS, XLSX or CSV.")
 
                             _v136_raw.columns=[str(c).strip() for c in _v136_raw.columns]
                             _lc={str(c).strip().lower():c for c in _v136_raw.columns}
@@ -17929,3 +17960,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V13.5 REEL REPORTS USE KG
 
 # V13.6 FINSYS CONSUMPTION SUMMARY IMPORT
+
+# V13.7 LEGACY XLS READER FIX
