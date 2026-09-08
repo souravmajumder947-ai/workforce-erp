@@ -1,0 +1,39 @@
+name: Validate V13.7 Legacy XLS Reader
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v137-validate-legacy-xls-reader.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify XLS reader
+        run: |
+          python - <<'PY'
+          import xlrd, pandas, openpyxl
+          print("xlrd", xlrd.__version__)
+          print("pandas", pandas.__version__)
+          print("openpyxl", openpyxl.__version__)
+          PY
+          grep -q "V13.7 LEGACY XLS READER FIX" app.py
+          grep -q 'engine="xlrd"' app.py
+      - name: Record validation
+        run: |
+          printf "V13.7 validated\n" > .v137_validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .v137_validation
+          git commit -m "Validate legacy Finsys XLS reader"
+          git push origin main
