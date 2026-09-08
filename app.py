@@ -13135,7 +13135,7 @@ elif page == "Operations":
             [
                 "Reel Wise Issue",
                 "Reel Wise Return",
-                "Reel Wise Consumption",
+                "Consumption Report",
                 "Daily Corrugation",
                 "Monthly Corrugation"
             ],
@@ -13145,7 +13145,7 @@ elif page == "Operations":
 
         # V13.3 REEL WISE CONSUMPTION REPORT
         # ---------------- REEL WISE ISSUE / RETURN / CONSUMPTION ----------------
-        if _v132_report in ["Reel Wise Issue","Reel Wise Return","Reel Wise Consumption"]:
+        if _v132_report in ["Reel Wise Issue","Reel Wise Return","Consumption Report"]:
             st.markdown("#### Select Period")
             st.caption("Date format: DD/MM/YYYY")
 
@@ -13227,6 +13227,270 @@ elif page == "Operations":
                 key="v132_to"
             )
 
+            # V13.6 FINSYS CONSUMPTION SUMMARY IMPORT
+            if _v132_report=="Consumption Report":
+                with st.expander("Upload Finsys Consumption Report", expanded=False):
+                    st.caption(
+                        "This Finsys report is an item-wise monthly summary and has no transaction date. "
+                        "Choose the report month, upload the original .XLS/.XLSX/.CSV file, preview it, then import."
+                    )
+
+                    _v136_default_month=date(_v132_from.year,_v132_from.month,1)
+                    _v136_month=st.selectbox(
+                        "Report Month",
+                        _month_opts,
+                        index=(
+                            _month_opts.index(_v136_default_month)
+                            if _v136_default_month in _month_opts
+                            else len(_month_opts)-1
+                        ),
+                        format_func=lambda d:d.strftime("%b %Y"),
+                        key="v136_consumption_month"
+                    )
+                    _v136_file=st.file_uploader(
+                        "Consumption Report File",
+                        type=["xls","xlsx","csv"],
+                        key="v136_consumption_file"
+                    )
+                    _v136_replace=st.checkbox(
+                        "Replace existing summary for this month",
+                        value=False,
+                        key="v136_consumption_replace"
+                    )
+
+                    if _v136_file is not None:
+                        try:
+                            _v136_file.seek(0)
+                            _v136_name=str(getattr(_v136_file,"name","")).lower()
+                            if _v136_name.endswith(".csv"):
+                                _v136_raw=pd.read_csv(_v136_file)
+                            else:
+                                _v136_raw=pd.read_excel(_v136_file)
+
+                            _v136_raw.columns=[str(c).strip() for c in _v136_raw.columns]
+                            _lc={str(c).strip().lower():c for c in _v136_raw.columns}
+
+                            if all(k in _lc for k in ["f1","grp","cref","f2","f3","f4","f5","f6","f7","f8","f9"]):
+                                # Exact raw Finsys layout from the supplied CONSUMPTION REPROT.XLS.
+                                _v136_parsed=pd.DataFrame({
+                                    "ITEM_GROUP":_v136_raw[_lc["f1"]],
+                                    "GROUP_CODE":_v136_raw[_lc["grp"]],
+                                    "CREF":_v136_raw[_lc["cref"]],
+                                    "ITEM":_v136_raw[_lc["f2"]],
+                                    "SOURCE_F3_QTY":_v136_raw[_lc["f3"]],
+                                    "REEL_ISS":_v136_raw[_lc["f4"]],
+                                    "REEL_RET":_v136_raw[_lc["f5"]],
+                                    "NET_ISSUE":_v136_raw[_lc["f6"]],
+                                    "REEL_SIZE":_v136_raw[_lc["f7"]],
+                                    "ERP_CODE":_v136_raw[_lc["f8"]],
+                                    "REEL_CONS":_v136_raw[_lc["f9"]],
+                                    "UNIT":"KGS",
+                                })
+                            else:
+                                _norm={
+                                    "".join(ch for ch in str(c).upper() if ch.isalnum()):c
+                                    for c in _v136_raw.columns
+                                }
+                                def _v136_pick(*names):
+                                    for nm in names:
+                                        k="".join(ch for ch in str(nm).upper() if ch.isalnum())
+                                        if k in _norm:
+                                            return _norm[k]
+                                    return None
+
+                                _item=_v136_pick("INAME","ITEM","ITEM NAME")
+                                _erp=_v136_pick("ERP_CODE","ERP CODE","ICODE")
+                                _iss=_v136_pick("REEL_ISS","REEL ISSUE","ISSUE")
+                                _ret=_v136_pick("REEL_RET","REEL RETURN","RETURN")
+                                _net=_v136_pick("NET_ISSUE","NET ISSUE")
+                                _cons=_v136_pick("REEL_CONS","REEL CONSUMPTION","CONSUMPTION")
+                                _size=_v136_pick("REEL_SIZE","REEL SIZE","SIZE")
+                                _unit=_v136_pick("UNIT","UOM")
+                                _source=_v136_pick("FLOOR_WIP","SOURCE_F3_QTY")
+
+                                if not all([_item,_erp,_iss,_ret,_net,_cons]):
+                                    raise ValueError(
+                                        "Unsupported format. Expected raw Finsys f1..f9 columns or "
+                                        "INAME/ERP_CODE/REEL_ISS/REEL_RET/NET_ISSUE/REEL_CONS."
+                                    )
+
+                                _v136_parsed=pd.DataFrame({
+                                    "ITEM_GROUP":"",
+                                    "GROUP_CODE":"",
+                                    "CREF":"",
+                                    "ITEM":_v136_raw[_item],
+                                    "SOURCE_F3_QTY":(_v136_raw[_source] if _source else 0),
+                                    "REEL_ISS":_v136_raw[_iss],
+                                    "REEL_RET":_v136_raw[_ret],
+                                    "NET_ISSUE":_v136_raw[_net],
+                                    "REEL_SIZE":(_v136_raw[_size] if _size else ""),
+                                    "ERP_CODE":_v136_raw[_erp],
+                                    "REEL_CONS":_v136_raw[_cons],
+                                    "UNIT":(_v136_raw[_unit] if _unit else "KGS"),
+                                })
+
+                            for _c in ["SOURCE_F3_QTY","REEL_ISS","REEL_RET","NET_ISSUE","REEL_CONS"]:
+                                _v136_parsed[_c]=pd.to_numeric(
+                                    _v136_parsed[_c],errors="coerce"
+                                ).fillna(0.0)
+                            for _c in ["ITEM_GROUP","GROUP_CODE","CREF","ITEM","REEL_SIZE","ERP_CODE","UNIT"]:
+                                _v136_parsed[_c]=_v136_parsed[_c].fillna("").astype(str).str.strip()
+
+                            _v136_parsed=_v136_parsed[
+                                (_v136_parsed["ITEM"]!="") | (_v136_parsed["ERP_CODE"]!="")
+                            ].copy()
+                            if _v136_parsed.empty:
+                                raise ValueError("No valid item rows found.")
+
+                            _issue=float(_v136_parsed["REEL_ISS"].sum())
+                            _return=float(_v136_parsed["REEL_RET"].sum())
+                            _net=float(_v136_parsed["NET_ISSUE"].sum())
+                            _cons=float(_v136_parsed["REEL_CONS"].sum())
+
+                            p1,p2,p3,p4,p5=st.columns(5)
+                            p1.metric("Items",f"{len(_v136_parsed):,}")
+                            p2.metric("Reel Issue",f"{_issue:,.0f} Kg")
+                            p3.metric("Reel Return",f"{_return:,.0f} Kg")
+                            p4.metric("Net Issue",f"{_net:,.0f} Kg")
+                            p5.metric("Source REEL_CONS",f"{_cons:,.0f} Kg")
+
+                            st.dataframe(
+                                _v136_parsed[[
+                                    "ITEM","ERP_CODE","REEL_SIZE",
+                                    "REEL_ISS","REEL_RET","NET_ISSUE","REEL_CONS"
+                                ]].head(100),
+                                hide_index=True,use_container_width=True,
+                                column_config={
+                                    "REEL_ISS":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "REEL_RET":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "NET_ISSUE":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "REEL_CONS":st.column_config.NumberColumn(format="%.0f Kg"),
+                                }
+                            )
+                            if len(_v136_parsed)>100:
+                                st.caption(f"Preview shows first 100 of {len(_v136_parsed):,} rows.")
+                            if _cons==0:
+                                st.warning(
+                                    "This source file itself reports REEL_CONS = 0. "
+                                    "The app will preserve it exactly; Net Issue will not be renamed as consumption."
+                                )
+
+                            if st.button(
+                                "Import Consumption Summary",
+                                type="primary",
+                                use_container_width=True,
+                                key="v136_import_consumption"
+                            ):
+                                _conn=get_pg_conn()
+                                try:
+                                    _cur=_conn.cursor()
+                                    _cur.execute(
+                                        """
+                                        CREATE TABLE IF NOT EXISTS production_consumption_summary(
+                                            id BIGSERIAL PRIMARY KEY,
+                                            period_month DATE NOT NULL,
+                                            item_group TEXT,
+                                            group_code TEXT,
+                                            cref TEXT,
+                                            item_name TEXT,
+                                            source_f3_qty_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                                            reel_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                                            reel_return_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                                            net_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                                            reel_size TEXT,
+                                            erp_code TEXT,
+                                            reel_consumption_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                                            unit TEXT,
+                                            source_file TEXT,
+                                            imported_by TEXT,
+                                            imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                            UNIQUE(period_month,erp_code,item_name)
+                                        )
+                                        """
+                                    )
+                                    _cur.execute(
+                                        "SELECT COUNT(*) FROM production_consumption_summary WHERE period_month=%s",
+                                        (_v136_month.isoformat(),)
+                                    )
+                                    _exists=int(_cur.fetchone()[0] or 0)
+                                    if _exists and not _v136_replace:
+                                        raise ValueError(
+                                            f"{_exists} row(s) already exist for {_v136_month.strftime('%b %Y')}. "
+                                            "Tick Replace existing summary to import again."
+                                        )
+                                    if _exists and _v136_replace:
+                                        _cur.execute(
+                                            "DELETE FROM production_consumption_summary WHERE period_month=%s",
+                                            (_v136_month.isoformat(),)
+                                        )
+
+                                    _rows=[]
+                                    for _,_r in _v136_parsed.iterrows():
+                                        _rows.append((
+                                            _v136_month.isoformat(),
+                                            str(_r["ITEM_GROUP"]),str(_r["GROUP_CODE"]),
+                                            str(_r["CREF"]),str(_r["ITEM"]),
+                                            float(_r["SOURCE_F3_QTY"]),float(_r["REEL_ISS"]),
+                                            float(_r["REEL_RET"]),float(_r["NET_ISSUE"]),
+                                            str(_r["REEL_SIZE"]),str(_r["ERP_CODE"]),
+                                            float(_r["REEL_CONS"]),str(_r["UNIT"] or "KGS"),
+                                            str(getattr(_v136_file,"name","")),
+                                            _current_user["username"]
+                                        ))
+                                    _cur.executemany(
+                                        """
+                                        INSERT INTO production_consumption_summary(
+                                            period_month,item_group,group_code,cref,item_name,
+                                            source_f3_qty_kg,reel_issue_kg,reel_return_kg,net_issue_kg,
+                                            reel_size,erp_code,reel_consumption_kg,unit,
+                                            source_file,imported_by
+                                        ) VALUES (
+                                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                                        )
+                                        ON CONFLICT(period_month,erp_code,item_name) DO UPDATE SET
+                                            item_group=excluded.item_group,
+                                            group_code=excluded.group_code,
+                                            cref=excluded.cref,
+                                            source_f3_qty_kg=excluded.source_f3_qty_kg,
+                                            reel_issue_kg=excluded.reel_issue_kg,
+                                            reel_return_kg=excluded.reel_return_kg,
+                                            net_issue_kg=excluded.net_issue_kg,
+                                            reel_size=excluded.reel_size,
+                                            reel_consumption_kg=excluded.reel_consumption_kg,
+                                            unit=excluded.unit,
+                                            source_file=excluded.source_file,
+                                            imported_by=excluded.imported_by,
+                                            imported_at=CURRENT_TIMESTAMP
+                                        """,
+                                        _rows
+                                    )
+                                    _conn.commit()
+                                    _cur.close()
+                                except Exception:
+                                    _conn.rollback()
+                                    raise
+                                finally:
+                                    _conn.close()
+
+                                record_audit_event(
+                                    _current_user["username"],
+                                    "FINSYS_CONSUMPTION_SUMMARY_IMPORT",
+                                    "Operations",
+                                    "Consumption Summary",
+                                    _v136_month.isoformat(),
+                                    (
+                                        f"Rows={len(_v136_parsed)}; IssueKg={_issue:.0f}; "
+                                        f"ReturnKg={_return:.0f}; NetIssueKg={_net:.0f}; "
+                                        f"SourceConsumptionKg={_cons:.0f}"
+                                    )
+                                )
+                                st.success(
+                                    f"Imported {len(_v136_parsed):,} rows for {_v136_month.strftime('%b %Y')}."
+                                )
+                                st.rerun()
+                        except Exception as _exc:
+                            st.error(f"Unable to read/import consumption report: {_exc}")
+
             if _v132_from>_v132_to:
                 st.error("Date From cannot be after Date To.")
             else:
@@ -13257,24 +13521,26 @@ elif page == "Operations":
                         key="v132_reel_search"
                     )
 
-                    if _rr_type=="Reel Wise Consumption":
-                        # V13.4 CONSUMPTION RECONCILIATION FALLBACK
-                        # Prefer true actual-consumption rows. When those are not loaded yet,
-                        # show the available Finsys Issue/Return reconciliation instead of an empty page.
-                        _actual=read_df(
-                            """SELECT work_date,line_no,reel_reference,paper_grade,
-                                      COALESCE(NULLIF(consumption_ton,0),quantity_ton) AS consumption_ton,
-                                      value_amount,remark
-                               FROM production_reel_consumption
-                               WHERE machine='Corrugation'
-                                 AND work_date BETWEEN ? AND ?
-                                 AND COALESCE(NULLIF(consumption_ton,0),quantity_ton)>0
-                               ORDER BY work_date,line_no""",
-                            (_rr_from.isoformat(),_rr_to.isoformat())
-                        )
+                    if _rr_type=="Consumption Report":
+                        _month_from=date(_rr_from.year,_rr_from.month,1)
+                        _month_to=date(_rr_to.year,_rr_to.month,1)
 
-                        if not _actual.empty:
-                            _df=_actual.copy()
+                        try:
+                            _summary=read_df(
+                                """SELECT period_month,item_group,group_code,cref,item_name,
+                                          source_f3_qty_kg,reel_issue_kg,reel_return_kg,
+                                          net_issue_kg,reel_size,erp_code,reel_consumption_kg,
+                                          unit,source_file
+                                   FROM production_consumption_summary
+                                   WHERE period_month BETWEEN ? AND ?
+                                   ORDER BY period_month,item_name,erp_code""",
+                                (_month_from.isoformat(),_month_to.isoformat())
+                            )
+                        except Exception:
+                            _summary=pd.DataFrame()
+
+                        if not _summary.empty:
+                            _df=_summary.copy()
                             if str(_search or "").strip():
                                 _needle=str(_search).strip().lower()
                                 _mask=_df.astype(str).apply(
@@ -13282,173 +13548,129 @@ elif page == "Operations":
                                 ).any(axis=1)
                                 _df=_df[_mask].copy()
 
-                            _df["QTY_CONS"]=pd.to_numeric(
-                                _df["consumption_ton"],errors="coerce"
-                            ).fillna(0.0)*1000.0
-                            _df["QTY_TON"]=pd.to_numeric(
-                                _df["consumption_ton"],errors="coerce"
-                            ).fillna(0.0)
-                            _df["VALUE"]=pd.to_numeric(
-                                _df["value_amount"],errors="coerce"
-                            ).fillna(0.0)
-                            _df["RATE"]=_df.apply(
-                                lambda r:(
-                                    float(r["VALUE"])/float(r["QTY_CONS"])
-                                    if float(r["QTY_CONS"])>0 else 0.0
-                                ),
-                                axis=1
-                            )
                             _df=_df.rename(columns={
-                                "work_date":"VCH_DT",
-                                "line_no":"LINE",
-                                "reel_reference":"ERP_CODE",
-                                "paper_grade":"ITEM",
-                                "remark":"REMARK"
+                                "period_month":"MONTH",
+                                "item_group":"ITEM_GROUP",
+                                "group_code":"GROUP_CODE",
+                                "cref":"CREF",
+                                "item_name":"ITEM",
+                                "source_f3_qty_kg":"SOURCE_F3_QTY",
+                                "reel_issue_kg":"REEL_ISS",
+                                "reel_return_kg":"REEL_RET",
+                                "net_issue_kg":"NET_ISSUE",
+                                "reel_size":"REEL_SIZE",
+                                "erp_code":"ERP_CODE",
+                                "reel_consumption_kg":"REEL_CONS",
+                                "unit":"UNIT",
+                                "source_file":"SOURCE_FILE",
                             })
-                            _df["VCH_DT"]=pd.to_datetime(
-                                _df["VCH_DT"],errors="coerce"
-                            ).dt.strftime("%d/%m/%Y")
+                            _df["MONTH"]=pd.to_datetime(
+                                _df["MONTH"],errors="coerce"
+                            ).dt.strftime("%b %Y")
 
                             _all_cols=[
-                                "VCH_DT","LINE","ERP_CODE","ITEM",
-                                "QTY_CONS","QTY_TON","RATE","VALUE","REMARK"
+                                "MONTH","ITEM","ERP_CODE","REEL_SIZE",
+                                "REEL_ISS","REEL_RET","NET_ISSUE","REEL_CONS","UNIT",
+                                "ITEM_GROUP","GROUP_CODE","CREF","SOURCE_F3_QTY","SOURCE_FILE"
                             ]
                             _default_cols=[
-                                "VCH_DT","ERP_CODE","ITEM",
-                                "QTY_CONS","RATE","VALUE"
+                                "MONTH","ITEM","ERP_CODE","REEL_SIZE",
+                                "REEL_ISS","REEL_RET","NET_ISSUE","REEL_CONS","UNIT"
                             ]
                             _all_cols=[c for c in _all_cols if c in _df.columns]
                             _default_cols=[c for c in _default_cols if c in _df.columns]
 
                             with st.expander("Print / Export Selected Columns"):
                                 _show_cols=st.multiselect(
-                                    "Columns",
-                                    _all_cols,
-                                    default=_default_cols,
-                                    key="v134_actual_consumption_columns"
+                                    "Columns",_all_cols,default=_default_cols,
+                                    key="v136_summary_columns"
                                 )
                                 if not _show_cols:
                                     _show_cols=_default_cols
 
-                            _records=len(_df)
-                            _kg=float(pd.to_numeric(_df["QTY_CONS"],errors="coerce").fillna(0).sum())
-                            _ton=float(pd.to_numeric(_df["QTY_TON"],errors="coerce").fillna(0).sum())
-                            _value=float(pd.to_numeric(_df["VALUE"],errors="coerce").fillna(0).sum())
-                            _avg_rate=(_value/_kg) if _kg>0 else 0.0
+                            _issue=float(pd.to_numeric(_df["REEL_ISS"],errors="coerce").fillna(0).sum())
+                            _return=float(pd.to_numeric(_df["REEL_RET"],errors="coerce").fillna(0).sum())
+                            _net=float(pd.to_numeric(_df["NET_ISSUE"],errors="coerce").fillna(0).sum())
+                            _cons=float(pd.to_numeric(_df["REEL_CONS"],errors="coerce").fillna(0).sum())
 
-                            m1,m2,m3,m4=st.columns(4)
-                            m1.metric("Records",f"{_records:,}")
-                            m2.metric("Consumption Qty",f"{_kg:,.0f} Kg")
-                            m3.metric("Consumption Value",v5_money(_value))
-                            m4.metric("Avg Rate",f"₹{_avg_rate:,.2f}/Kg")
+                            m1,m2,m3,m4,m5=st.columns(5)
+                            m1.metric("Items",f"{len(_df):,}")
+                            m2.metric("Reel Issue",f"{_issue:,.0f} Kg")
+                            m3.metric("Reel Return",f"{_return:,.0f} Kg")
+                            m4.metric("Net Issue",f"{_net:,.0f} Kg")
+                            m5.metric("Source REEL_CONS",f"{_cons:,.0f} Kg")
 
-                            st.success("Actual consumption data is available for this period.")
+                            st.info(
+                                "This is the Finsys item-wise monthly Consumption Report. "
+                                "The source file has no transaction date, so it is stored and reported by month."
+                            )
+                            if _cons==0:
+                                st.warning(
+                                    "The Finsys source itself reports REEL_CONS = 0. "
+                                    "Net Issue remains a separate field and is not shown as actual consumption."
+                                )
+
                             _sheet=_df[_show_cols].copy()
                             st.dataframe(
-                                _sheet,
-                                hide_index=True,
-                                use_container_width=True,
-                                height=620,
+                                _sheet,hide_index=True,use_container_width=True,height=620,
                                 column_config={
-                                    "QTY_CONS":st.column_config.NumberColumn("QTY_CONS",format="%.0f"),
-                                    "QTY_TON":st.column_config.NumberColumn("QTY_TON",format="%.2f T"),
-                                    "RATE":st.column_config.NumberColumn("RATE",format="₹%.2f"),
-                                    "VALUE":st.column_config.NumberColumn("VALUE",format="₹%.2f"),
+                                    "REEL_ISS":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "REEL_RET":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "NET_ISSUE":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "REEL_CONS":st.column_config.NumberColumn(format="%.0f Kg"),
+                                    "SOURCE_F3_QTY":st.column_config.NumberColumn(format="%.0f Kg"),
                                 }
                             )
-
                             e1,e2=st.columns(2)
                             _xlsx=make_excel_report(
-                                _sheet,_rr_type,
+                                _sheet,"Finsys Consumption Report",
                                 f"{_rr_from.strftime('%d/%m/%Y')} to {_rr_to.strftime('%d/%m/%Y')}"
                             )
                             e1.download_button(
-                                "Download Excel",
-                                data=_xlsx,
-                                file_name=f"Reel_Wise_Consumption_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.xlsx",
+                                "Download Excel",data=_xlsx,
+                                file_name=f"Finsys_Consumption_Report_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                type="primary",
-                                use_container_width=True,
-                                key="v134_actual_consumption_excel"
+                                type="primary",use_container_width=True,key="v136_summary_excel"
                             )
                             e2.download_button(
                                 "Download CSV",
                                 data=_sheet.to_csv(index=False).encode("utf-8-sig"),
-                                file_name=f"Reel_Wise_Consumption_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.csv",
-                                mime="text/csv",
-                                use_container_width=True,
-                                key="v134_actual_consumption_csv"
+                                file_name=f"Finsys_Consumption_Report_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.csv",
+                                mime="text/csv",use_container_width=True,key="v136_summary_csv"
                             )
                         else:
-                            _movement=read_df(
-                                """SELECT
-                                      MIN(CASE WHEN movement_type='ISSUE' THEN work_date END) AS issue_date,
-                                      MAX(CASE WHEN movement_type='RETURN' THEN work_date END) AS return_date,
-                                      COALESCE(reel_no,'') AS reel_no,
-                                      COALESCE(co_reel,'') AS co_reel,
-                                      MAX(COALESCE(supplier,'')) AS supplier,
-                                      MAX(COALESCE(item,'')) AS item,
-                                      MAX(COALESCE(icode,'')) AS icode,
-                                      MAX(COALESCE(gsm,0)) AS gsm,
-                                      MAX(COALESCE(reel_size,0)) AS reel_size,
-                                      MAX(COALESCE(job_no,'')) AS job_no,
-                                      SUM(CASE WHEN movement_type='ISSUE' THEN quantity_kg ELSE 0 END) AS issue_kg,
-                                      SUM(CASE WHEN movement_type='RETURN' THEN quantity_kg ELSE 0 END) AS return_kg,
-                                      SUM(CASE WHEN movement_type='ISSUE' THEN movement_value ELSE 0 END) AS issue_value,
-                                      SUM(CASE WHEN movement_type='RETURN' THEN movement_value ELSE 0 END) AS return_value
-                                   FROM production_reel_transactions
-                                   WHERE work_date BETWEEN ? AND ?
-                                     AND movement_type IN ('ISSUE','RETURN')
-                                   GROUP BY COALESCE(reel_no,''),COALESCE(co_reel,'')
-                                   ORDER BY MIN(work_date),COALESCE(reel_no,'')""",
+                            _actual=read_df(
+                                """SELECT work_date,line_no,reel_reference,paper_grade,
+                                          COALESCE(NULLIF(consumption_ton,0),quantity_ton) AS consumption_ton,
+                                          value_amount,remark
+                                   FROM production_reel_consumption
+                                   WHERE machine='Corrugation'
+                                     AND work_date BETWEEN ? AND ?
+                                     AND COALESCE(NULLIF(consumption_ton,0),quantity_ton)>0
+                                   ORDER BY work_date,line_no""",
                                 (_rr_from.isoformat(),_rr_to.isoformat())
                             )
-
-                            if _movement.empty:
-                                st.info("No Issue, Return or actual Consumption data is available for this period.")
-                            else:
-                                _df=_movement.copy()
-                                for _c in ["issue_kg","return_kg","issue_value","return_value","gsm","reel_size"]:
-                                    _df[_c]=pd.to_numeric(_df[_c],errors="coerce").fillna(0.0)
-
-                                _df["NET_ISSUE_QTY"]=_df["issue_kg"]-_df["return_kg"]
-                                _df["NET_ISSUE_TON"]=_df["NET_ISSUE_QTY"]/1000.0
-                                _df["NET_VALUE"]=_df["issue_value"]-_df["return_value"]
+                            if not _actual.empty:
+                                _df=_actual.copy()
+                                _df["QTY_CONS"]=pd.to_numeric(
+                                    _df["consumption_ton"],errors="coerce"
+                                ).fillna(0.0)*1000.0
+                                _df["VALUE"]=pd.to_numeric(
+                                    _df["value_amount"],errors="coerce"
+                                ).fillna(0.0)
                                 _df["RATE"]=_df.apply(
                                     lambda r:(
-                                        float(r["issue_value"])/float(r["issue_kg"])
-                                        if float(r["issue_kg"])>0 else 0.0
-                                    ),
-                                    axis=1
+                                        float(r["VALUE"])/float(r["QTY_CONS"])
+                                        if float(r["QTY_CONS"])>0 else 0.0
+                                    ),axis=1
                                 )
-                                _df["STATUS"]=_df.apply(
-                                    lambda r:(
-                                        "Return from earlier issue"
-                                        if float(r["issue_kg"])<=0 and float(r["return_kg"])>0
-                                        else "Issue / Return reconciliation"
-                                    ),
-                                    axis=1
-                                )
-                                _df["ACTUAL_CONSUMPTION"]="PENDING"
                                 _df=_df.rename(columns={
-                                    "issue_date":"ISSUE_DATE",
-                                    "return_date":"RETURN_DATE",
-                                    "reel_no":"REEL_NO",
-                                    "co_reel":"CO_REEL",
-                                    "supplier":"SUPPLIER",
-                                    "item":"ITEM",
-                                    "icode":"ICODE",
-                                    "gsm":"GSM",
-                                    "reel_size":"REEL_SIZE",
-                                    "job_no":"JOB_NO",
-                                    "issue_kg":"ISSUE_QTY",
-                                    "return_kg":"RETURN_QTY"
+                                    "work_date":"VCH_DT","reel_reference":"ERP_CODE",
+                                    "paper_grade":"ITEM","remark":"REMARK"
                                 })
-                                for _dc in ["ISSUE_DATE","RETURN_DATE"]:
-                                    _df[_dc]=pd.to_datetime(
-                                        _df[_dc],errors="coerce"
-                                    ).dt.strftime("%d/%m/%Y").fillna("")
-
+                                _df["VCH_DT"]=pd.to_datetime(
+                                    _df["VCH_DT"],errors="coerce"
+                                ).dt.strftime("%d/%m/%Y")
                                 if str(_search or "").strip():
                                     _needle=str(_search).strip().lower()
                                     _mask=_df.astype(str).apply(
@@ -13456,85 +13678,48 @@ elif page == "Operations":
                                     ).any(axis=1)
                                     _df=_df[_mask].copy()
 
-                                _all_cols=[
-                                    "ISSUE_DATE","RETURN_DATE","REEL_NO","CO_REEL",
-                                    "SUPPLIER","ITEM","ICODE","GSM","REEL_SIZE","JOB_NO",
-                                    "ISSUE_QTY","RETURN_QTY","NET_ISSUE_QTY","NET_ISSUE_TON",
-                                    "RATE","NET_VALUE","ACTUAL_CONSUMPTION","STATUS"
-                                ]
-                                _default_cols=[
-                                    "ISSUE_DATE","RETURN_DATE","REEL_NO","CO_REEL",
-                                    "ITEM","ISSUE_QTY","RETURN_QTY","NET_ISSUE_QTY",
-                                    "RATE","NET_VALUE","ACTUAL_CONSUMPTION"
-                                ]
-                                _all_cols=[c for c in _all_cols if c in _df.columns]
-                                _default_cols=[c for c in _default_cols if c in _df.columns]
-
-                                with st.expander("Print / Export Selected Columns"):
-                                    _show_cols=st.multiselect(
-                                        "Columns",
-                                        _all_cols,
-                                        default=_default_cols,
-                                        key="v134_reconciliation_columns"
-                                    )
-                                    if not _show_cols:
-                                        _show_cols=_default_cols
-
-                                _issue_kg=float(_df["ISSUE_QTY"].sum())
-                                _return_kg=float(_df["RETURN_QTY"].sum())
-                                _net_kg=float(_df["NET_ISSUE_QTY"].sum())
-                                m1,m2,m3,m4,m5=st.columns(5)
-                                m1.metric("Reels / Rows",f"{len(_df):,}")
-                                m2.metric("Reel Issue",f"{_issue_kg:,.0f} Kg")
-                                m3.metric("Reel Return",f"{_return_kg:,.0f} Kg")
-                                m4.metric("Net Issue",f"{_net_kg:,.0f} Kg")
-                                m5.metric("Actual Consumption","PENDING")
-
-                                st.warning(
-                                    "Actual consumption has not been loaded yet. "
-                                    "The sheet below is built from your Finsys Issue and Return data, so it is no longer blank. "
-                                    "NET ISSUE = ISSUE − RETURN; it is shown for reconciliation and is not silently labelled as actual consumption."
-                                )
-
-                                _sheet=_df[_show_cols].copy()
+                                _sheet=_df[[
+                                    "VCH_DT","ERP_CODE","ITEM","QTY_CONS","RATE","VALUE","REMARK"
+                                ]].copy()
+                                m1,m2,m3=st.columns(3)
+                                m1.metric("Records",f"{len(_sheet):,}")
+                                m2.metric("Consumption Qty",f"{float(_sheet['QTY_CONS'].sum()):,.0f} Kg")
+                                m3.metric("Consumption Value",v5_money(float(_sheet["VALUE"].sum())))
                                 st.dataframe(
-                                    _sheet,
-                                    hide_index=True,
-                                    use_container_width=True,
-                                    height=620,
+                                    _sheet,hide_index=True,use_container_width=True,height=620,
                                     column_config={
-                                        "ISSUE_QTY":st.column_config.NumberColumn("ISSUE_QTY",format="%.0f"),
-                                        "RETURN_QTY":st.column_config.NumberColumn("RETURN_QTY",format="%.0f"),
-                                        "NET_ISSUE_QTY":st.column_config.NumberColumn("NET_ISSUE_QTY",format="%.0f"),
-                                        "NET_ISSUE_TON":st.column_config.NumberColumn("NET_ISSUE_TON",format="%.2f T"),
-                                        "RATE":st.column_config.NumberColumn("RATE",format="₹%.2f"),
-                                        "NET_VALUE":st.column_config.NumberColumn("NET_VALUE",format="₹%.2f"),
+                                        "QTY_CONS":st.column_config.NumberColumn(format="%.0f Kg"),
+                                        "RATE":st.column_config.NumberColumn(format="₹%.2f"),
+                                        "VALUE":st.column_config.NumberColumn(format="₹%.2f"),
                                     }
                                 )
-
-                                e1,e2=st.columns(2)
-                                _xlsx=make_excel_report(
-                                    _sheet,
-                                    "Reel Wise Consumption / Movement Reconciliation",
-                                    f"{_rr_from.strftime('%d/%m/%Y')} to {_rr_to.strftime('%d/%m/%Y')}"
+                            else:
+                                _movement=read_df(
+                                    """SELECT movement_type,
+                                              SUM(quantity_kg) AS qty_kg
+                                       FROM production_reel_transactions
+                                       WHERE work_date BETWEEN ? AND ?
+                                         AND movement_type IN ('ISSUE','RETURN')
+                                       GROUP BY movement_type""",
+                                    (_rr_from.isoformat(),_rr_to.isoformat())
                                 )
-                                e1.download_button(
-                                    "Download Excel",
-                                    data=_xlsx,
-                                    file_name=f"Reel_Consumption_Reconciliation_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    type="primary",
-                                    use_container_width=True,
-                                    key="v134_reconciliation_excel"
-                                )
-                                e2.download_button(
-                                    "Download CSV",
-                                    data=_sheet.to_csv(index=False).encode("utf-8-sig"),
-                                    file_name=f"Reel_Consumption_Reconciliation_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.csv",
-                                    mime="text/csv",
-                                    use_container_width=True,
-                                    key="v134_reconciliation_csv"
-                                )
+                                _issue=_return=0.0
+                                for _,_r in _movement.iterrows():
+                                    if str(_r["movement_type"])=="ISSUE":
+                                        _issue=float(_r["qty_kg"] or 0)
+                                    elif str(_r["movement_type"])=="RETURN":
+                                        _return=float(_r["qty_kg"] or 0)
+                                if _issue>0 or _return>0:
+                                    m1,m2,m3=st.columns(3)
+                                    m1.metric("Reel Issue",f"{_issue:,.0f} Kg")
+                                    m2.metric("Reel Return",f"{_return:,.0f} Kg")
+                                    m3.metric("Net Issue",f"{(_issue-_return):,.0f} Kg")
+                                    st.warning(
+                                        "Issue/Return data is available, but a Finsys Consumption Summary has not been imported for this period. "
+                                        "Open 'Upload Finsys Consumption Report' above and import the monthly file."
+                                    )
+                                else:
+                                    st.info("No consumption-summary, actual-consumption, or reel-movement data is available for this period.")
                     else:
                         _movement="ISSUE" if _rr_type=="Reel Wise Issue" else "RETURN"
                         _qty_col="QTY_OUT" if _movement=="ISSUE" else "QTY_RETURN"
@@ -17742,3 +17927,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V14.1 DIRECT PERFORMANCE OPTIMIZATION
 
 # V13.5 REEL REPORTS USE KG
+
+# V13.6 FINSYS CONSUMPTION SUMMARY IMPORT
