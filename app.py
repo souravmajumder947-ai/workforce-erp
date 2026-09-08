@@ -9016,9 +9016,9 @@ st.sidebar.markdown('<div class="v5-sidebar-label">Live Context</div>', unsafe_a
 global_division = st.sidebar.selectbox(
     "Division", [ALL_DIVISIONS]+DIVISIONS, key="v5_global_division"
 )
-global_work_date = st.sidebar.date_input(
-    "Working Date", value=date.today(), format="DD/MM/YYYY", key="v5_global_work_date"
-)
+# V13.1: Working Date removed from sidebar to avoid date/month confusion.
+# Each operational page controls its own date/period.
+global_work_date = date.today()
 _month_opts = v5_month_options()
 global_payroll_month = st.sidebar.selectbox(
     "Payroll Month", _month_opts,
@@ -13102,8 +13102,13 @@ elif page == "Operations":
 
     with tab_daily_report:
         st.markdown("### Daily Corrugation Report")
-        _v128_day=global_work_date
-        st.caption(f"Date: {_v128_day.strftime('%d/%m/%Y')} · controlled by sidebar Working Date")
+        _v128_day=st.date_input(
+            "Report Date",
+            value=date.today(),
+            format="DD/MM/YYYY",
+            key="v131_daily_corrugation_date"
+        )
+        st.caption(f"Daily report: {_v128_day.strftime('%d/%m/%Y')}")
 
         _v128_move=read_df(
             """SELECT movement_type,
@@ -13212,7 +13217,7 @@ elif page == "Operations":
 
     with tab_monthly:
         st.markdown("### Monthly Corrugation Report")
-        _v128_default_month=date(global_work_date.year,global_work_date.month,1)
+        _v128_default_month=date(date.today().year,date.today().month,1)
         _v128_default_month=(
             _v128_default_month if _v128_default_month in _month_opts else _month_opts[-1]
         )
@@ -13413,107 +13418,110 @@ elif page == "Operations":
             )
 
     with tab_reel_reports:
+        # V13.1 FULL FINSYS SHEET REPORT
         st.markdown("### Reel Reports")
         st.caption(
-            "Finsys-style searchable register for Reel Wise Issue and Reel Wise Return. "
-            "Use DD/MM/YYYY dates, search any field, sort columns and export the filtered result."
+            "Full Finsys-style Reel Wise Issue / Reel Wise Return register. "
+            "Choose the period, search any field, sort the sheet and export selected columns."
         )
 
-        _v130_report_type=st.radio(
-            "Report",
+        _v131_report_type=st.radio(
+            "Report Type",
             ["Reel Wise Issue","Reel Wise Return","Issue + Return"],
             horizontal=True,
-            key="v130_reel_report_type"
+            key="v131_report_type"
         )
 
-        _v130_preset=st.selectbox(
-            "Period",
-            [
-                "This Month","Previous Month","Next Month","Y.T.D (Year To Date)",
-                "Today","Yesterday","First Qtr","Second Qtr","Third Qtr","Fourth Qtr",
-                "Full Year","Custom"
-            ],
-            key="v130_period_preset"
-        )
+        with st.expander("Select Period", expanded=True):
+            _v131_preset=st.radio(
+                "Quick Period",
+                [
+                    "M.T.D (Month To Date)","Y.T.D (Year To Date)",
+                    "Previous Month","Next Month","Yesterday","Today",
+                    "First Qtr","Second Qtr","Third Qtr","Fourth Qtr",
+                    "Full Year","Custom"
+                ],
+                horizontal=True,
+                key="v131_period_preset"
+            )
 
-        def _v130_month_bounds(_d):
-            _first=date(_d.year,_d.month,1)
-            if _d.month==12:
-                _next=date(_d.year+1,1,1)
-            else:
-                _next=date(_d.year,_d.month+1,1)
-            return _first,_next-timedelta(days=1)
+            def _v131_month_bounds(_d):
+                _first=date(_d.year,_d.month,1)
+                if _d.month==12:
+                    _next=date(_d.year+1,1,1)
+                else:
+                    _next=date(_d.year,_d.month+1,1)
+                return _first,_next-timedelta(days=1)
 
-        def _v130_shift_month(_d,_delta):
-            _y=_d.year
-            _m=_d.month+_delta
-            while _m<1:
-                _m+=12; _y-=1
-            while _m>12:
-                _m-=12; _y+=1
-            return date(_y,_m,1)
+            def _v131_shift_month(_d,_delta):
+                _y,_m=_d.year,_d.month+_delta
+                while _m<1:
+                    _m+=12; _y-=1
+                while _m>12:
+                    _m-=12; _y+=1
+                return date(_y,_m,1)
 
-        def _v130_resolve_period(_preset):
-            _wd=global_work_date
-            if _preset=="This Month":
-                return _v130_month_bounds(_wd)
-            if _preset=="Previous Month":
-                return _v130_month_bounds(_v130_shift_month(_wd,-1))
-            if _preset=="Next Month":
-                return _v130_month_bounds(_v130_shift_month(_wd,1))
-            if _preset=="Y.T.D (Year To Date)":
-                return date(_wd.year,1,1),_wd
-            if _preset=="Today":
-                return _wd,_wd
-            if _preset=="Yesterday":
-                _y=_wd-timedelta(days=1)
-                return _y,_y
-            if _preset=="First Qtr":
-                return date(_wd.year,1,1),date(_wd.year,3,31)
-            if _preset=="Second Qtr":
-                return date(_wd.year,4,1),date(_wd.year,6,30)
-            if _preset=="Third Qtr":
-                return date(_wd.year,7,1),date(_wd.year,9,30)
-            if _preset=="Fourth Qtr":
-                return date(_wd.year,10,1),date(_wd.year,12,31)
-            if _preset=="Full Year":
-                return date(_wd.year,1,1),date(_wd.year,12,31)
-            return _v130_month_bounds(_wd)
+            def _v131_period(_preset):
+                _wd=date.today()
+                if _preset=="M.T.D (Month To Date)":
+                    return date(_wd.year,_wd.month,1),_wd
+                if _preset=="Y.T.D (Year To Date)":
+                    return date(_wd.year,1,1),_wd
+                if _preset=="Previous Month":
+                    return _v131_month_bounds(_v131_shift_month(_wd,-1))
+                if _preset=="Next Month":
+                    return _v131_month_bounds(_v131_shift_month(_wd,1))
+                if _preset=="Yesterday":
+                    _y=_wd-timedelta(days=1)
+                    return _y,_y
+                if _preset=="Today":
+                    return _wd,_wd
+                if _preset=="First Qtr":
+                    return date(_wd.year,1,1),date(_wd.year,3,31)
+                if _preset=="Second Qtr":
+                    return date(_wd.year,4,1),date(_wd.year,6,30)
+                if _preset=="Third Qtr":
+                    return date(_wd.year,7,1),date(_wd.year,9,30)
+                if _preset=="Fourth Qtr":
+                    return date(_wd.year,10,1),date(_wd.year,12,31)
+                if _preset=="Full Year":
+                    return date(_wd.year,1,1),date(_wd.year,12,31)
+                return _v131_month_bounds(_wd)
 
-        _v130_preset_from,_v130_preset_to=_v130_resolve_period(_v130_preset)
-        if st.session_state.get("v130_last_period") != _v130_preset:
-            if _v130_preset!="Custom":
-                st.session_state["v130_date_from"]=_v130_preset_from
-                st.session_state["v130_date_to"]=_v130_preset_to
-            elif "v130_date_from" not in st.session_state:
-                st.session_state["v130_date_from"]=_v130_preset_from
-                st.session_state["v130_date_to"]=_v130_preset_to
-            st.session_state["v130_last_period"]=_v130_preset
+            _pf,_pt=_v131_period(_v131_preset)
+            if st.session_state.get("v131_last_period") != _v131_preset:
+                if _v131_preset!="Custom":
+                    st.session_state["v131_date_from"]=_pf
+                    st.session_state["v131_date_to"]=_pt
+                else:
+                    st.session_state.setdefault("v131_date_from",_pf)
+                    st.session_state.setdefault("v131_date_to",_pt)
+                st.session_state["v131_last_period"]=_v131_preset
 
-        p1,p2=st.columns(2)
-        _v130_from=p1.date_input(
-            "Date From",
-            value=st.session_state.get("v130_date_from",_v130_preset_from),
-            format="DD/MM/YYYY",
-            key="v130_date_from"
-        )
-        _v130_to=p2.date_input(
-            "Date To",
-            value=st.session_state.get("v130_date_to",_v130_preset_to),
-            format="DD/MM/YYYY",
-            key="v130_date_to"
-        )
+            d1,d2=st.columns(2)
+            _v131_from=d1.date_input(
+                "Date From",
+                value=st.session_state.get("v131_date_from",_pf),
+                format="DD/MM/YYYY",
+                key="v131_date_from"
+            )
+            _v131_to=d2.date_input(
+                "Date To",
+                value=st.session_state.get("v131_date_to",_pt),
+                format="DD/MM/YYYY",
+                key="v131_date_to"
+            )
 
-        if _v130_from>_v130_to:
+        if _v131_from>_v131_to:
             st.error("Date From cannot be after Date To.")
         else:
-            _v130_movement_types=(
-                ["ISSUE"] if _v130_report_type=="Reel Wise Issue"
-                else ["RETURN"] if _v130_report_type=="Reel Wise Return"
+            _v131_types=(
+                ["ISSUE"] if _v131_report_type=="Reel Wise Issue"
+                else ["RETURN"] if _v131_report_type=="Reel Wise Return"
                 else ["ISSUE","RETURN"]
             )
 
-            _v130_raw=read_df(
+            _v131_raw=read_df(
                 """SELECT movement_type,work_date,vch_no,supplier,acode,item,
                           quantity_kg,quantity_ton,reel_no,co_reel,reel_mill,
                           irate,movement_value,job_no,job_date,reel_size,gsm,
@@ -13522,44 +13530,43 @@ elif page == "Operations":
                    WHERE work_date BETWEEN ? AND ?
                      AND movement_type = ANY(?::text[])
                    ORDER BY work_date,vch_no,reel_no""",
-                (
-                    _v130_from.isoformat(),
-                    _v130_to.isoformat(),
-                    _v130_movement_types
-                )
+                (_v131_from.isoformat(),_v131_to.isoformat(),_v131_types)
             )
 
-            _v130_search=st.text_input(
+            _v131_search=st.text_input(
                 "Search",
-                placeholder="Voucher, supplier, item, reel no., job no., ICODE...",
-                key="v130_reel_search"
+                placeholder="Voucher / Supplier / Item / Reel No / Job No / ICODE / Part No",
+                key="v131_search"
             )
 
-            if not _v130_raw.empty:
-                _v130_view=_v130_raw.copy()
-                if str(_v130_search or "").strip():
-                    _needle=str(_v130_search).strip().lower()
-                    _mask=_v130_view.astype(str).apply(
+            if _v131_raw.empty:
+                st.info(
+                    f"No {_v131_report_type.lower()} records found from "
+                    f"{_v131_from.strftime('%d/%m/%Y')} to {_v131_to.strftime('%d/%m/%Y')}."
+                )
+            else:
+                _v131_df=_v131_raw.copy()
+                if str(_v131_search or "").strip():
+                    _needle=str(_v131_search).strip().lower()
+                    _mask=_v131_df.astype(str).apply(
                         lambda col:col.str.lower().str.contains(_needle,na=False)
                     ).any(axis=1)
-                    _v130_view=_v130_view[_mask].copy()
+                    _v131_df=_v131_df[_mask].copy()
 
-                _qty_name=(
-                    "QTY_OUT"
-                    if _v130_report_type=="Reel Wise Issue"
-                    else "QTY_RETURN"
-                    if _v130_report_type=="Reel Wise Return"
+                _qty_col=(
+                    "QTY_OUT" if _v131_report_type=="Reel Wise Issue"
+                    else "QTY_RETURN" if _v131_report_type=="Reel Wise Return"
                     else "QTY_KG"
                 )
 
-                _v130_view=_v130_view.rename(columns={
+                _v131_df=_v131_df.rename(columns={
                     "movement_type":"TYPE",
                     "work_date":"VCH_DT",
                     "vch_no":"VCH_NO",
                     "supplier":"SUPPLIER",
                     "acode":"ACODE",
                     "item":"ITEM",
-                    "quantity_kg":_qty_name,
+                    "quantity_kg":_qty_col,
                     "quantity_ton":"QTY_TON",
                     "reel_no":"REEL_NO",
                     "co_reel":"CO_REEL",
@@ -13574,70 +13581,78 @@ elif page == "Operations":
                     "cpartno":"CPARTNO"
                 })
 
-                _v130_view["VCH_DT"]=pd.to_datetime(
-                    _v130_view["VCH_DT"],errors="coerce"
+                _v131_df["VCH_DT"]=pd.to_datetime(
+                    _v131_df["VCH_DT"],errors="coerce"
                 ).dt.strftime("%d/%m/%Y")
-                _v130_view["JOB_DT"]=pd.to_datetime(
-                    _v130_view["JOB_DT"],errors="coerce"
+                _v131_df["JOB_DT"]=pd.to_datetime(
+                    _v131_df["JOB_DT"],errors="coerce"
                 ).dt.strftime("%d/%m/%Y")
 
-                _all_cols=[
-                    "VCH_DT","VCH_NO","SUPPLIER","ITEM",_qty_name,
+                _sheet_cols=[
+                    "VCH_DT","VCH_NO","SUPPLIER","ITEM",_qty_col,
                     "REEL_NO","CO_REEL","REEL_MILL","TYPE","IRATE",
-                    "JOB_NO","JOB_DT","REEL_SIZE","GSM","ICODE","CPARTNO",
-                    "ACODE","QTY_TON","VALUE"
+                    "JOB_NO","JOB_DT","REEL_SIZE","GSM","ICODE",
+                    "CPARTNO","ACODE","QTY_TON","VALUE"
                 ]
+                _sheet_cols=[c for c in _sheet_cols if c in _v131_df.columns]
+
                 _default_cols=[
-                    "VCH_DT","VCH_NO","SUPPLIER","ITEM",_qty_name,
+                    "VCH_DT","VCH_NO","SUPPLIER","ITEM",_qty_col,
                     "REEL_NO","CO_REEL","REEL_MILL","TYPE","IRATE",
                     "JOB_NO","JOB_DT","REEL_SIZE","GSM","ICODE"
                 ]
-                _all_cols=[c for c in _all_cols if c in _v130_view.columns]
-                _default_cols=[c for c in _default_cols if c in _v130_view.columns]
+                _default_cols=[c for c in _default_cols if c in _v131_df.columns]
 
-                with st.expander("Report Columns"):
-                    _v130_cols=st.multiselect(
-                        "Columns to display/export",
-                        _all_cols,
+                with st.expander("Print / Export Selected Columns", expanded=False):
+                    _v131_selected_cols=st.multiselect(
+                        "Select report columns",
+                        _sheet_cols,
                         default=_default_cols,
-                        key="v130_report_columns"
+                        key="v131_selected_columns"
                     )
-                    if not _v130_cols:
-                        _v130_cols=_default_cols
+                    if not _v131_selected_cols:
+                        _v131_selected_cols=_default_cols
 
-                _v130_records=len(_v130_view)
-                _v130_qty_kg=float(
-                    pd.to_numeric(_v130_view.get(_qty_name,0),errors="coerce").fillna(0).sum()
+                _records=len(_v131_df)
+                _qty_kg=float(
+                    pd.to_numeric(_v131_df[_qty_col],errors="coerce").fillna(0).sum()
                 )
-                _v130_qty_ton=float(
-                    pd.to_numeric(_v130_view.get("QTY_TON",0),errors="coerce").fillna(0).sum()
+                _qty_ton=float(
+                    pd.to_numeric(_v131_df["QTY_TON"],errors="coerce").fillna(0).sum()
                 )
-                _v130_value=float(
-                    pd.to_numeric(_v130_view.get("VALUE",0),errors="coerce").fillna(0).sum()
+                _value=float(
+                    pd.to_numeric(_v131_df["VALUE"],errors="coerce").fillna(0).sum()
+                )
+                _avg_rate=(
+                    _value/_qty_kg if _qty_kg>0 else 0.0
                 )
 
                 st.markdown(
-                    f"#### {_v130_report_type} "
-                    f"{_v130_from.strftime('%d/%m/%Y')} to {_v130_to.strftime('%d/%m/%Y')}"
+                    f"### {_v131_report_type} "
+                    f"{_v131_from.strftime('%d/%m/%Y')} to {_v131_to.strftime('%d/%m/%Y')}"
                 )
-                r1,r2,r3,r4=st.columns(4)
-                r1.metric("Records",f"{_v130_records:,}")
-                r2.metric("Total Quantity",f"{_v130_qty_kg:,.0f} Kg")
-                r3.metric("Total Ton",f"{_v130_qty_ton:,.2f} T")
-                r4.metric("Movement Value",v5_money(_v130_value))
+
+                # Finsys-style sheet totals directly above the register.
+                h1,h2,h3,h4,h5=st.columns(5)
+                h1.metric("Records",f"{_records:,}")
+                h2.metric("Total Qty",f"{_qty_kg:,.0f} Kg")
+                h3.metric("Total Ton",f"{_qty_ton:,.2f} T")
+                h4.metric("Total Value",v5_money(_value))
+                h5.metric("Avg Rate",f"₹{_avg_rate:,.2f}/Kg")
 
                 st.caption(
-                    "Click a column header to sort. Use Search to filter the register. "
-                    "The total above updates with the filtered result."
+                    "Click any column header to sort. Search filters the complete sheet. "
+                    "Horizontal scroll is available for all ERP columns."
                 )
 
+                _v131_sheet=_v131_df[_v131_selected_cols].copy()
                 st.dataframe(
-                    _v130_view[_v130_cols],
+                    _v131_sheet,
                     hide_index=True,
                     use_container_width=True,
-                    height=560,
+                    height=650,
                     column_config={
-                        _qty_name:st.column_config.NumberColumn(_qty_name,format="%.0f"),
+                        _qty_col:st.column_config.NumberColumn(_qty_col,format="%.0f"),
                         "QTY_TON":st.column_config.NumberColumn("QTY_TON",format="%.2f T"),
                         "IRATE":st.column_config.NumberColumn("IRATE",format="₹%.2f"),
                         "VALUE":st.column_config.NumberColumn("VALUE",format="₹%.2f"),
@@ -13646,28 +13661,36 @@ elif page == "Operations":
                     }
                 )
 
-                _v130_export=_v130_view[_v130_cols].copy()
-                _v130_bytes=make_excel_report(
-                    _v130_export,
-                    _v130_report_type,
-                    f"{_v130_from.strftime('%d/%m/%Y')} to {_v130_to.strftime('%d/%m/%Y')}"
+                e1,e2=st.columns(2)
+                _v131_excel=make_excel_report(
+                    _v131_sheet,
+                    _v131_report_type,
+                    f"{_v131_from.strftime('%d/%m/%Y')} to {_v131_to.strftime('%d/%m/%Y')}"
                 )
-                st.download_button(
-                    "Download Excel Report",
-                    data=_v130_bytes,
+                e1.download_button(
+                    "Download Excel - Current Sheet",
+                    data=_v131_excel,
                     file_name=(
-                        f"{_v130_report_type.replace(' ','_')}_"
-                        f"{_v130_from.strftime('%Y%m%d')}_to_{_v130_to.strftime('%Y%m%d')}.xlsx"
+                        f"{_v131_report_type.replace(' ','_')}_"
+                        f"{_v131_from.strftime('%Y%m%d')}_to_{_v131_to.strftime('%Y%m%d')}.xlsx"
                     ),
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     type="primary",
                     use_container_width=True,
-                    key="v130_download_reel_register"
+                    key="v131_download_current_sheet"
                 )
-            else:
-                st.info(
-                    f"No {_v130_report_type.lower()} records found from "
-                    f"{_v130_from.strftime('%d/%m/%Y')} to {_v130_to.strftime('%d/%m/%Y')}."
+
+                _v131_csv=_v131_sheet.to_csv(index=False).encode("utf-8-sig")
+                e2.download_button(
+                    "Download CSV - Current Sheet",
+                    data=_v131_csv,
+                    file_name=(
+                        f"{_v131_report_type.replace(' ','_')}_"
+                        f"{_v131_from.strftime('%Y%m%d')}_to_{_v131_to.strftime('%Y%m%d')}.csv"
+                    ),
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="v131_download_current_csv"
                 )
 
     with tab_mp:
