@@ -1,0 +1,40 @@
+name: V14.0B Apply Performance Fast Path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v140b-apply-performance-fast-path.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-performance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply performance patch
+        run: python tools/v140_performance_fast_path.py
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify performance markers
+        run: |
+          grep -q "V14.0 PERFORMANCE FAST PATH" app.py
+          grep -q "v140_operations_section" app.py
+          grep -q "Fast read-only PostgreSQL path" app.py
+      - name: Commit performance update
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Apply app performance fast path"
+          git pull --rebase origin main
+          git push origin main
