@@ -13258,7 +13258,10 @@ elif page == "Operations":
                     )
 
                     if _rr_type=="Reel Wise Consumption":
-                        _raw=read_df(
+                        # V13.4 CONSUMPTION RECONCILIATION FALLBACK
+                        # Prefer true actual-consumption rows. When those are not loaded yet,
+                        # show the available Finsys Issue/Return reconciliation instead of an empty page.
+                        _actual=read_df(
                             """SELECT work_date,line_no,reel_reference,paper_grade,
                                       COALESCE(NULLIF(consumption_ton,0),quantity_ton) AS consumption_ton,
                                       value_amount,remark
@@ -13270,13 +13273,8 @@ elif page == "Operations":
                             (_rr_from.isoformat(),_rr_to.isoformat())
                         )
 
-                        if _raw.empty:
-                            st.info(
-                                "No actual reel consumption records found for the selected period. "
-                                "Issue/Return data is not treated as consumption."
-                            )
-                        else:
-                            _df=_raw.copy()
+                        if not _actual.empty:
+                            _df=_actual.copy()
                             if str(_search or "").strip():
                                 _needle=str(_search).strip().lower()
                                 _mask=_df.astype(str).apply(
@@ -13315,11 +13313,11 @@ elif page == "Operations":
                                 "VCH_DT","LINE","ERP_CODE","ITEM",
                                 "QTY_CONS","QTY_TON","RATE","VALUE","REMARK"
                             ]
-                            _all_cols=[c for c in _all_cols if c in _df.columns]
                             _default_cols=[
                                 "VCH_DT","ERP_CODE","ITEM",
                                 "QTY_CONS","QTY_TON","RATE","VALUE"
                             ]
+                            _all_cols=[c for c in _all_cols if c in _df.columns]
                             _default_cols=[c for c in _default_cols if c in _df.columns]
 
                             with st.expander("Print / Export Selected Columns"):
@@ -13327,7 +13325,7 @@ elif page == "Operations":
                                     "Columns",
                                     _all_cols,
                                     default=_default_cols,
-                                    key="v133_consumption_columns"
+                                    key="v134_actual_consumption_columns"
                                 )
                                 if not _show_cols:
                                     _show_cols=_default_cols
@@ -13345,10 +13343,7 @@ elif page == "Operations":
                             m4.metric("Consumption Value",v5_money(_value))
                             m5.metric("Avg Rate",f"₹{_avg_rate:,.2f}/Kg")
 
-                            st.caption(
-                                "Actual consumption only. Net Issue is not used as consumption. "
-                                "Click column headers to sort and use horizontal scroll for the full sheet."
-                            )
+                            st.success("Actual consumption data is available for this period.")
                             _sheet=_df[_show_cols].copy()
                             st.dataframe(
                                 _sheet,
@@ -13375,7 +13370,7 @@ elif page == "Operations":
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 type="primary",
                                 use_container_width=True,
-                                key="v133_consumption_excel"
+                                key="v134_actual_consumption_excel"
                             )
                             e2.download_button(
                                 "Download CSV",
@@ -13383,8 +13378,166 @@ elif page == "Operations":
                                 file_name=f"Reel_Wise_Consumption_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.csv",
                                 mime="text/csv",
                                 use_container_width=True,
-                                key="v133_consumption_csv"
+                                key="v134_actual_consumption_csv"
                             )
+                        else:
+                            _movement=read_df(
+                                """SELECT
+                                      MIN(CASE WHEN movement_type='ISSUE' THEN work_date END) AS issue_date,
+                                      MAX(CASE WHEN movement_type='RETURN' THEN work_date END) AS return_date,
+                                      COALESCE(reel_no,'') AS reel_no,
+                                      COALESCE(co_reel,'') AS co_reel,
+                                      MAX(COALESCE(supplier,'')) AS supplier,
+                                      MAX(COALESCE(item,'')) AS item,
+                                      MAX(COALESCE(icode,'')) AS icode,
+                                      MAX(COALESCE(gsm,0)) AS gsm,
+                                      MAX(COALESCE(reel_size,0)) AS reel_size,
+                                      MAX(COALESCE(job_no,'')) AS job_no,
+                                      SUM(CASE WHEN movement_type='ISSUE' THEN quantity_kg ELSE 0 END) AS issue_kg,
+                                      SUM(CASE WHEN movement_type='RETURN' THEN quantity_kg ELSE 0 END) AS return_kg,
+                                      SUM(CASE WHEN movement_type='ISSUE' THEN movement_value ELSE 0 END) AS issue_value,
+                                      SUM(CASE WHEN movement_type='RETURN' THEN movement_value ELSE 0 END) AS return_value
+                                   FROM production_reel_transactions
+                                   WHERE work_date BETWEEN ? AND ?
+                                     AND movement_type IN ('ISSUE','RETURN')
+                                   GROUP BY COALESCE(reel_no,''),COALESCE(co_reel,'')
+                                   ORDER BY MIN(work_date),COALESCE(reel_no,'')""",
+                                (_rr_from.isoformat(),_rr_to.isoformat())
+                            )
+
+                            if _movement.empty:
+                                st.info("No Issue, Return or actual Consumption data is available for this period.")
+                            else:
+                                _df=_movement.copy()
+                                for _c in ["issue_kg","return_kg","issue_value","return_value","gsm","reel_size"]:
+                                    _df[_c]=pd.to_numeric(_df[_c],errors="coerce").fillna(0.0)
+
+                                _df["NET_ISSUE_QTY"]=_df["issue_kg"]-_df["return_kg"]
+                                _df["NET_ISSUE_TON"]=_df["NET_ISSUE_QTY"]/1000.0
+                                _df["NET_VALUE"]=_df["issue_value"]-_df["return_value"]
+                                _df["RATE"]=_df.apply(
+                                    lambda r:(
+                                        float(r["issue_value"])/float(r["issue_kg"])
+                                        if float(r["issue_kg"])>0 else 0.0
+                                    ),
+                                    axis=1
+                                )
+                                _df["STATUS"]=_df.apply(
+                                    lambda r:(
+                                        "Return from earlier issue"
+                                        if float(r["issue_kg"])<=0 and float(r["return_kg"])>0
+                                        else "Issue / Return reconciliation"
+                                    ),
+                                    axis=1
+                                )
+                                _df["ACTUAL_CONSUMPTION"]="PENDING"
+                                _df=_df.rename(columns={
+                                    "issue_date":"ISSUE_DATE",
+                                    "return_date":"RETURN_DATE",
+                                    "reel_no":"REEL_NO",
+                                    "co_reel":"CO_REEL",
+                                    "supplier":"SUPPLIER",
+                                    "item":"ITEM",
+                                    "icode":"ICODE",
+                                    "gsm":"GSM",
+                                    "reel_size":"REEL_SIZE",
+                                    "job_no":"JOB_NO",
+                                    "issue_kg":"ISSUE_QTY",
+                                    "return_kg":"RETURN_QTY"
+                                })
+                                for _dc in ["ISSUE_DATE","RETURN_DATE"]:
+                                    _df[_dc]=pd.to_datetime(
+                                        _df[_dc],errors="coerce"
+                                    ).dt.strftime("%d/%m/%Y").fillna("")
+
+                                if str(_search or "").strip():
+                                    _needle=str(_search).strip().lower()
+                                    _mask=_df.astype(str).apply(
+                                        lambda col:col.str.lower().str.contains(_needle,na=False)
+                                    ).any(axis=1)
+                                    _df=_df[_mask].copy()
+
+                                _all_cols=[
+                                    "ISSUE_DATE","RETURN_DATE","REEL_NO","CO_REEL",
+                                    "SUPPLIER","ITEM","ICODE","GSM","REEL_SIZE","JOB_NO",
+                                    "ISSUE_QTY","RETURN_QTY","NET_ISSUE_QTY","NET_ISSUE_TON",
+                                    "RATE","NET_VALUE","ACTUAL_CONSUMPTION","STATUS"
+                                ]
+                                _default_cols=[
+                                    "ISSUE_DATE","RETURN_DATE","REEL_NO","CO_REEL",
+                                    "ITEM","ISSUE_QTY","RETURN_QTY","NET_ISSUE_QTY",
+                                    "NET_ISSUE_TON","RATE","NET_VALUE","ACTUAL_CONSUMPTION"
+                                ]
+                                _all_cols=[c for c in _all_cols if c in _df.columns]
+                                _default_cols=[c for c in _default_cols if c in _df.columns]
+
+                                with st.expander("Print / Export Selected Columns"):
+                                    _show_cols=st.multiselect(
+                                        "Columns",
+                                        _all_cols,
+                                        default=_default_cols,
+                                        key="v134_reconciliation_columns"
+                                    )
+                                    if not _show_cols:
+                                        _show_cols=_default_cols
+
+                                _issue_kg=float(_df["ISSUE_QTY"].sum())
+                                _return_kg=float(_df["RETURN_QTY"].sum())
+                                _net_kg=float(_df["NET_ISSUE_QTY"].sum())
+                                _net_ton=_net_kg/1000.0
+
+                                m1,m2,m3,m4,m5=st.columns(5)
+                                m1.metric("Reels / Rows",f"{len(_df):,}")
+                                m2.metric("Reel Issue",f"{_issue_kg/1000.0:,.2f} T")
+                                m3.metric("Reel Return",f"{_return_kg/1000.0:,.2f} T")
+                                m4.metric("Net Issue",f"{_net_ton:,.2f} T")
+                                m5.metric("Actual Consumption","PENDING")
+
+                                st.warning(
+                                    "Actual consumption has not been loaded yet. "
+                                    "The sheet below is built from your Finsys Issue and Return data, so it is no longer blank. "
+                                    "NET ISSUE = ISSUE − RETURN; it is shown for reconciliation and is not silently labelled as actual consumption."
+                                )
+
+                                _sheet=_df[_show_cols].copy()
+                                st.dataframe(
+                                    _sheet,
+                                    hide_index=True,
+                                    use_container_width=True,
+                                    height=620,
+                                    column_config={
+                                        "ISSUE_QTY":st.column_config.NumberColumn("ISSUE_QTY",format="%.0f"),
+                                        "RETURN_QTY":st.column_config.NumberColumn("RETURN_QTY",format="%.0f"),
+                                        "NET_ISSUE_QTY":st.column_config.NumberColumn("NET_ISSUE_QTY",format="%.0f"),
+                                        "NET_ISSUE_TON":st.column_config.NumberColumn("NET_ISSUE_TON",format="%.2f T"),
+                                        "RATE":st.column_config.NumberColumn("RATE",format="₹%.2f"),
+                                        "NET_VALUE":st.column_config.NumberColumn("NET_VALUE",format="₹%.2f"),
+                                    }
+                                )
+
+                                e1,e2=st.columns(2)
+                                _xlsx=make_excel_report(
+                                    _sheet,
+                                    "Reel Wise Consumption / Movement Reconciliation",
+                                    f"{_rr_from.strftime('%d/%m/%Y')} to {_rr_to.strftime('%d/%m/%Y')}"
+                                )
+                                e1.download_button(
+                                    "Download Excel",
+                                    data=_xlsx,
+                                    file_name=f"Reel_Consumption_Reconciliation_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="v134_reconciliation_excel"
+                                )
+                                e2.download_button(
+                                    "Download CSV",
+                                    data=_sheet.to_csv(index=False).encode("utf-8-sig"),
+                                    file_name=f"Reel_Consumption_Reconciliation_{_rr_from:%Y%m%d}_to_{_rr_to:%Y%m%d}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True,
+                                    key="v134_reconciliation_csv"
+                                )
                     else:
                         _movement="ISSUE" if _rr_type=="Reel Wise Issue" else "RETURN"
                         _qty_col="QTY_OUT" if _movement=="ISSUE" else "QTY_RETURN"
