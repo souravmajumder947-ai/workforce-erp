@@ -1,0 +1,35 @@
+name: Validate V13.6 Consumption Summary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v136-validate-consumption-summary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify V13.6 markers
+        run: |
+          grep -q "V13.6 FINSYS CONSUMPTION SUMMARY IMPORT" app.py
+          grep -q "Consumption Report" app.py
+          grep -q "production_consumption_summary" app.py
+      - name: Record validation
+        run: |
+          printf "V13.6 validated\n" > .v136_validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .v136_validation
+          git commit -m "Validate Finsys consumption summary report"
+          git pull --rebase origin main
+          git push origin main
