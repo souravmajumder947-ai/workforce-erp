@@ -9006,11 +9006,19 @@ global_division = st.sidebar.selectbox(
 # Each operational page controls its own date/period.
 global_work_date = date.today()
 _month_opts = v5_month_options()
+
+# Payroll normally runs for the last completed month.  Defaulting to the
+# current calendar month made every fresh session/deployment jump to an empty
+# month (for example Sep 2026 instead of the completed Aug 2026 payroll).
+_v154_last_month_end = date.today().replace(day=1) - timedelta(days=1)
+_v154_default_payroll_month = date(
+    _v154_last_month_end.year, _v154_last_month_end.month, 1
+)
 global_payroll_month = st.sidebar.selectbox(
     "Payroll Month", _month_opts,
     index=next(
         (i for i,d in enumerate(_month_opts)
-         if d.year==date.today().year and d.month==date.today().month),
+         if d == _v154_default_payroll_month),
         0
     ),
     format_func=lambda d:d.strftime("%b %Y"),
