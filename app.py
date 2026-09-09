@@ -9364,6 +9364,237 @@ def _v138_ensure_consumption_summary_schema():
 
 
 
+# V15.0 FINAL SALARY SHEET IMPORT
+@st.cache_resource(show_spinner=False)
+def _v150_ensure_final_salary_schema():
+    """Prepare immutable source storage for imported final monthly salary sheets."""
+    conn=get_pg_conn()
+    cur=None
+    try:
+        cur=conn.cursor()
+        cur.execute("SELECT pg_advisory_lock(%s)", (150026,))
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS payroll_final_salary_import(
+                payroll_month TEXT NOT NULL,
+                division TEXT NOT NULL,
+                source_row INTEGER NOT NULL,
+                s_no TEXT,
+                employee_id TEXT NOT NULL,
+                employee_name TEXT,
+                father_husband_name TEXT,
+                joining_date DATE,
+                uan_number TEXT,
+                esic_number TEXT,
+                pan_number TEXT,
+                department TEXT,
+                designation TEXT,
+                bank_name TEXT,
+                ifsc_code TEXT,
+                bank_account TEXT,
+                gross_salary_master DOUBLE PRECISION NOT NULL DEFAULT 0,
+                basic_vda DOUBLE PRECISION NOT NULL DEFAULT 0,
+                hra DOUBLE PRECISION NOT NULL DEFAULT 0,
+                conveyance DOUBLE PRECISION NOT NULL DEFAULT 0,
+                other_allowance DOUBLE PRECISION NOT NULL DEFAULT 0,
+                gross_pay DOUBLE PRECISION NOT NULL DEFAULT 0,
+                additional_fixed_monthly DOUBLE PRECISION NOT NULL DEFAULT 0,
+                pf_wage DOUBLE PRECISION NOT NULL DEFAULT 0,
+                total_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+                paid_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+                additional_fixed_earned DOUBLE PRECISION NOT NULL DEFAULT 0,
+                performance_incentive DOUBLE PRECISION NOT NULL DEFAULT 0,
+                attendance_bonus DOUBLE PRECISION NOT NULL DEFAULT 0,
+                tds DOUBLE PRECISION NOT NULL DEFAULT 0,
+                other_deduction DOUBLE PRECISION NOT NULL DEFAULT 0,
+                advance DOUBLE PRECISION NOT NULL DEFAULT 0,
+                fine_raw TEXT,
+                fine_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+                pf DOUBLE PRECISION NOT NULL DEFAULT 0,
+                esic DOUBLE PRECISION NOT NULL DEFAULT 0,
+                fooding DOUBLE PRECISION NOT NULL DEFAULT 0,
+                total_deduction DOUBLE PRECISION NOT NULL DEFAULT 0,
+                net_payable DOUBLE PRECISION NOT NULL DEFAULT 0,
+                gross_earned DOUBLE PRECISION NOT NULL DEFAULT 0,
+                total_payable DOUBLE PRECISION NOT NULL DEFAULT 0,
+                remark TEXT,
+                source_month_text TEXT,
+                incentive_tpd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                master_match BOOLEAN NOT NULL DEFAULT FALSE,
+                master_employee_name TEXT,
+                source_file TEXT,
+                imported_by TEXT,
+                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(payroll_month,division,employee_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_final_salary_month_div "
+            "ON payroll_final_salary_import(payroll_month,division)"
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if cur is not None:
+            try:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (150026,))
+                conn.commit()
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+            try: cur.close()
+            except Exception: pass
+        conn.close()
+
+
+def _v150_parse_final_salary_sheet(uploaded_file):
+    """Parse the Greater Noida final monthly salary workbook without touching Employee Master."""
+    uploaded_file.seek(0)
+    name=str(getattr(uploaded_file,"name","")).lower()
+    if name.endswith(".xlsx"):
+        df=pd.read_excel(uploaded_file,header=0,engine="openpyxl")
+    elif name.endswith(".xls"):
+        df=pd.read_excel(uploaded_file,header=0,engine="xlrd")
+    else:
+        raise ValueError("Upload the final salary workbook in XLSX or XLS format.")
+
+    if df.shape[1] < 35:
+        raise ValueError(
+            f"Salary sheet has only {df.shape[1]} columns. Expected the Greater Noida final salary structure through Net Payable."
+        )
+
+    records=[]
+    deduction_errors=[]
+    duplicate_ids=[]
+    seen=set()
+
+    for idx,row in df.iterrows():
+        eid=_clean_code(row.iloc[1] if len(row)>1 else None)
+        if not eid or not any(ch.isdigit() for ch in eid):
+            continue
+        if eid in seen:
+            duplicate_ids.append(eid)
+        seen.add(eid)
+
+        raw_fine=row.iloc[29] if len(row)>29 else None
+        fine_text=_clean_text(raw_fine)
+        # In this source workbook, text "54" is not included in Total Deduction.
+        # Preserve it as raw source text; only real numeric fine amounts are deducted.
+        fine_amount=0.0 if fine_text=="54" else _num(raw_fine,0)
+
+        total_days=_num(row.iloc[21],0)
+        paid_days=_num(row.iloc[22],0)
+        add_earned=_num(row.iloc[23],0)
+        perf=_num(row.iloc[24],0)
+        bonus=_num(row.iloc[25],0)
+        tds=_num(row.iloc[26],0)
+        other_ded=_num(row.iloc[27],0)
+        advance=_num(row.iloc[28],0)
+        pf=_num(row.iloc[30],0)
+        esic=_num(row.iloc[31],0)
+        fooding=_num(row.iloc[32],0)
+        total_ded=_num(row.iloc[33],0)
+        net=_num(row.iloc[34],0)
+
+        calc_ded=tds+other_ded+advance+fine_amount+pf+esic+fooding
+        if abs(calc_ded-total_ded)>0.01:
+            deduction_errors.append(
+                f"{eid}: source deduction={total_ded:.2f}, components={calc_ded:.2f}"
+            )
+
+        # Derive the source gross-earned amount from the final salary arithmetic
+        # so the imported record reconciles exactly to Net Payable.
+        gross_earned=net+total_ded-add_earned-perf-bonus
+        total_payable=net+total_ded
+
+        doj=pd.to_datetime(row.iloc[4] if len(row)>4 else None,errors="coerce")
+        joining_date=None if pd.isna(doj) else doj.date().isoformat()
+
+        records.append({
+            "source_row":int(idx)+2,
+            "s_no":_clean_code(row.iloc[0] if len(row)>0 else None),
+            "employee_id":eid,
+            "employee_name":_clean_text(row.iloc[2] if len(row)>2 else None) or eid,
+            "father_husband_name":_clean_text(row.iloc[3] if len(row)>3 else None),
+            "joining_date":joining_date,
+            "uan_number":_clean_code(row.iloc[5] if len(row)>5 else None),
+            "esic_number":_clean_code(row.iloc[6] if len(row)>6 else None),
+            "pan_number":_clean_code(row.iloc[7] if len(row)>7 else None),
+            "department":_clean_text(row.iloc[8] if len(row)>8 else None),
+            "designation":_clean_text(row.iloc[9] if len(row)>9 else None),
+            "bank_name":_clean_text(row.iloc[10] if len(row)>10 else None),
+            "ifsc_code":_clean_code(row.iloc[11] if len(row)>11 else None),
+            "bank_account":_clean_code(row.iloc[12] if len(row)>12 else None),
+            "gross_salary_master":_num(row.iloc[13],0),
+            "basic_vda":_num(row.iloc[14],0),
+            "hra":_num(row.iloc[15],0),
+            "conveyance":_num(row.iloc[16],0),
+            "other_allowance":_num(row.iloc[17],0),
+            "gross_pay":_num(row.iloc[18],0),
+            "additional_fixed_monthly":_num(row.iloc[19],0),
+            "pf_wage":_num(row.iloc[20],0),
+            "total_days":total_days,
+            "paid_days":paid_days,
+            "additional_fixed_earned":add_earned,
+            "performance_incentive":perf,
+            "attendance_bonus":bonus,
+            "tds":tds,
+            "other_deduction":other_ded,
+            "advance":advance,
+            "fine_raw":fine_text,
+            "fine_amount":fine_amount,
+            "pf":pf,
+            "esic":esic,
+            "fooding":fooding,
+            "total_deduction":total_ded,
+            "net_payable":net,
+            "gross_earned":gross_earned,
+            "total_payable":total_payable,
+            "remark":_clean_text(row.iloc[35] if len(row)>35 else None),
+            "source_month_text":_clean_text(row.iloc[36] if len(row)>36 else None),
+            "incentive_tpd":_num(row.iloc[37],0) if len(row)>37 else 0.0,
+        })
+
+    if not records:
+        raise ValueError("No valid employee salary rows were found.")
+    if duplicate_ids:
+        raise ValueError(
+            "Duplicate Employee ID(s) found in salary sheet: "
+            + ", ".join(sorted(set(duplicate_ids))[:20])
+        )
+    if deduction_errors:
+        raise ValueError(
+            "Salary sheet deduction validation failed: "
+            + " | ".join(deduction_errors[:10])
+        )
+    return records
+
+
+def _v150_final_payroll_summary(payroll_month, division=ALL_DIVISIONS):
+    """Summarize finalized/imported payroll_records for MD reporting."""
+    sql="""
+        SELECT division,COUNT(*) AS employees,
+               COALESCE(SUM(gross_earned),0) AS gross_earned,
+               COALESCE(SUM(net_payable),0) AS net_payable,
+               COALESCE(SUM(ot_pay),0) AS ot_pay,
+               COALESCE(SUM(pf),0) AS pf,
+               COALESCE(SUM(esic),0) AS esic,
+               COALESCE(SUM(total_deduction),0) AS total_deduction
+        FROM payroll_records
+        WHERE payroll_month=?
+    """
+    params=[_month_key(payroll_month)]
+    if division!=ALL_DIVISIONS:
+        sql+=" AND division=?"
+        params.append(division)
+    sql+=" GROUP BY division ORDER BY division"
+    return read_df(sql,tuple(params))
+
+
 # ============================================================
 # HOME — HR OPERATIONAL WORKSPACE
 # ============================================================
@@ -9663,24 +9894,49 @@ if page == "Home":
         if _v115_att_records else 0.0
     )
 
-    _v115_gross = (
-        float(pd.to_numeric(payroll.get("Gross Earned", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
-        if not payroll.empty else 0.0
-    )
-    _v115_net = (
-        float(pd.to_numeric(payroll.get("Net Payable", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
-        if not payroll.empty else 0.0
-    )
-    _v115_ot_pay = (
-        float(pd.to_numeric(payroll.get("OT Pay", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
-        if not payroll.empty else 0.0
-    )
-    _v115_pf_esic = (
-        float(
-            pd.to_numeric(payroll.get("PF", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
-            + pd.to_numeric(payroll.get("ESIC", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
-        )
-        if not payroll.empty else 0.0
+    # V15.0: use finalized/imported salary records for divisions where they exist.
+    # Other divisions continue to use live attendance-based payroll.
+    _v115_gross = 0.0
+    _v115_net = 0.0
+    _v115_ot_pay = 0.0
+    _v115_pf_esic = 0.0
+    _v115_pay_blockers = 0
+    _v115_final_divisions=set()
+    try:
+        _v115_final_pay=_v150_final_payroll_summary(global_payroll_month,global_division)
+        if not _v115_final_pay.empty:
+            _v115_final_divisions=set(_v115_final_pay["division"].astype(str).tolist())
+            _v115_gross+=float(pd.to_numeric(_v115_final_pay["gross_earned"],errors="coerce").fillna(0).sum())
+            _v115_net+=float(pd.to_numeric(_v115_final_pay["net_payable"],errors="coerce").fillna(0).sum())
+            _v115_ot_pay+=float(pd.to_numeric(_v115_final_pay["ot_pay"],errors="coerce").fillna(0).sum())
+            _v115_pf_esic+=float(
+                pd.to_numeric(_v115_final_pay["pf"],errors="coerce").fillna(0).sum()
+                + pd.to_numeric(_v115_final_pay["esic"],errors="coerce").fillna(0).sum()
+            )
+    except Exception:
+        _v115_final_pay=pd.DataFrame()
+
+    if not payroll.empty:
+        _v115_live=payroll.copy()
+        if _v115_final_divisions and "Division" in _v115_live.columns:
+            _v115_live=_v115_live[
+                ~_v115_live["Division"].astype(str).isin(_v115_final_divisions)
+            ].copy()
+        if not _v115_live.empty:
+            _v115_gross+=float(pd.to_numeric(_v115_live.get("Gross Earned",0),errors="coerce").fillna(0).sum())
+            _v115_net+=float(pd.to_numeric(_v115_live.get("Net Payable",0),errors="coerce").fillna(0).sum())
+            _v115_ot_pay+=float(pd.to_numeric(_v115_live.get("OT Pay",0),errors="coerce").fillna(0).sum())
+            _v115_pf_esic+=float(
+                pd.to_numeric(_v115_live.get("PF",0),errors="coerce").fillna(0).sum()
+                + pd.to_numeric(_v115_live.get("ESIC",0),errors="coerce").fillna(0).sum()
+            )
+            _v115_pay_blockers=int(
+                ((_v115_live["Missing Days"]>0)|(_v115_live["HR Review"]>0)).sum()
+            )
+    _v115_payroll_source=(
+        "Final Salary" if _v115_final_divisions and _v115_pay_blockers==0
+        else "Final + Live" if _v115_final_divisions
+        else "Live Payroll"
     )
 
     try:
@@ -9761,7 +10017,7 @@ if page == "Home":
 
     _v115_cost_items = [
         ("₹", "Gross Earned", v5_money(_v115_gross) if can_view_salary(_current_role) else "Restricted", global_payroll_month.strftime("%b %Y"), "blue"),
-        ("₹", "Net Payable", ("PENDING" if _v10_pay_blockers else v5_money(_v115_net)) if can_view_salary(_current_role) else "Restricted", f"{_v10_pay_blockers:,} payroll blocker(s)" if _v10_pay_blockers else "Ready", "amber" if _v10_pay_blockers else "green"),
+        ("₹", "Net Payable", ("PENDING" if _v115_pay_blockers else v5_money(_v115_net)) if can_view_salary(_current_role) else "Restricted", f"{_v115_pay_blockers:,} payroll blocker(s)" if _v115_pay_blockers else _v115_payroll_source, "amber" if _v115_pay_blockers else "green"),
         ("◴", "OT Pay", v5_money(_v115_ot_pay) if can_view_salary(_current_role) else "Restricted", "Attendance-linked", "cyan"),
         ("▤", "PF + ESIC", v5_money(_v115_pf_esic) if can_view_salary(_current_role) else "Restricted", "Employee deductions", "purple"),
         ("▣", "Contractor Payable", v5_money(_v115_contractor_cost), "Greater Noida · selected month", "amber"),
@@ -12234,7 +12490,7 @@ elif page == "Payroll":
     else:
         _v141_pay_section=st.radio(
             "Payroll View",
-            ["Live Payroll","Adjustments","Finalize & History"],
+            ["Live Payroll","Adjustments","Final Salary Import","Finalize & History"],
             horizontal=True,
             key="v141_payroll_section"
         )
@@ -12321,6 +12577,358 @@ elif page == "Payroll":
                         f"Month={global_payroll_month.strftime('%Y-%m')}; Division={adj_div}"
                     )
                     st.success("Payroll adjustment saved.");st.rerun()
+
+        if _v141_pay_section=="Final Salary Import":
+            if not can_edit_hr(_current_role):
+                st.info("🔒 Final salary import is available only to Admin / HR.")
+            else:
+                try:
+                    _v150_ensure_final_salary_schema()
+                except Exception as _v150_schema_exc:
+                    st.error(f"Unable to prepare final salary storage: {_v150_schema_exc}")
+                    st.stop()
+
+                st.markdown("### Import Final Salary Sheet")
+                st.caption(
+                    "Use this for the finalized monthly salary workbook from HR. "
+                    "It does not change Employee Master salary rates and does not recalculate the approved Net Payable."
+                )
+
+                _v150_division="Greater Noida Plant"
+                _v150_month=st.selectbox(
+                    "Salary Month",
+                    _month_opts,
+                    index=(
+                        _month_opts.index(global_payroll_month)
+                        if global_payroll_month in _month_opts
+                        else len(_month_opts)-1
+                    ),
+                    format_func=lambda d:d.strftime("%b %Y"),
+                    key="v150_salary_month"
+                )
+                _v150_file=st.file_uploader(
+                    "Greater Noida Final Salary Sheet",
+                    type=["xlsx","xls"],
+                    key="v150_final_salary_file"
+                )
+                _v150_replace=st.checkbox(
+                    "Replace existing final payroll for this month / division",
+                    value=False,
+                    key="v150_replace_final_salary",
+                    help="Use only when HR has issued a corrected final salary sheet."
+                )
+
+                _v150_preview=None
+                _v150_records=None
+                if _v150_file is not None:
+                    try:
+                        _v150_records=_v150_parse_final_salary_sheet(_v150_file)
+                        _v150_ids=[str(r["employee_id"]) for r in _v150_records]
+                        _v150_master=read_df(
+                            "SELECT employee_id,employee_name,division FROM employees WHERE employee_id = ANY(?::text[])",
+                            (_v150_ids,)
+                        )
+                        _v150_master_map={
+                            str(r["employee_id"]):r.to_dict()
+                            for _,r in _v150_master.iterrows()
+                        } if not _v150_master.empty else {}
+
+                        _preview_rows=[]
+                        _matched=0
+                        _new_joinees=0
+                        _fine54=0
+                        for rec in _v150_records:
+                            master=_v150_master_map.get(str(rec["employee_id"]))
+                            matched=bool(
+                                master
+                                and _clean_text(master.get("division"))==_v150_division
+                            )
+                            if matched: _matched+=1
+                            if _clean_text(rec.get("remark")).lower()=="new joinee":
+                                _new_joinees+=1
+                            if _clean_text(rec.get("fine_raw"))=="54":
+                                _fine54+=1
+                            rec["master_match"]=matched
+                            rec["master_employee_name"]=(
+                                _clean_text(master.get("employee_name")) if master else ""
+                            )
+                            _preview_rows.append({
+                                "Employee ID":rec["employee_id"],
+                                "Employee Name":rec["employee_name"],
+                                "Department":rec["department"],
+                                "Designation":rec["designation"],
+                                "Gross Salary":rec["gross_pay"],
+                                "TPD":rec["paid_days"],
+                                "Gross Earned":rec["gross_earned"],
+                                "Performance Incentive":rec["performance_incentive"],
+                                "Attendance Bonus":rec["attendance_bonus"],
+                                "PF":rec["pf"],
+                                "ESIC":rec["esic"],
+                                "Total Deduction":rec["total_deduction"],
+                                "Net Payable":rec["net_payable"],
+                                "Master Match":"Yes" if matched else "No",
+                                "Remark":rec["remark"],
+                            })
+                        _v150_preview=pd.DataFrame(_preview_rows)
+
+                        _gross_master=sum(float(r["gross_salary_master"]) for r in _v150_records)
+                        _gross_earned=sum(float(r["gross_earned"]) for r in _v150_records)
+                        _perf=sum(float(r["performance_incentive"]) for r in _v150_records)
+                        _bonus=sum(float(r["attendance_bonus"]) for r in _v150_records)
+                        _pf=sum(float(r["pf"]) for r in _v150_records)
+                        _esic=sum(float(r["esic"]) for r in _v150_records)
+                        _ded=sum(float(r["total_deduction"]) for r in _v150_records)
+                        _net=sum(float(r["net_payable"]) for r in _v150_records)
+
+                        k1,k2,k3,k4,k5,k6=st.columns(6)
+                        k1.metric("Employees",f"{len(_v150_records):,}")
+                        k2.metric("Monthly Gross",v5_money(_gross_master))
+                        k3.metric("Gross Earned",v5_money(_gross_earned))
+                        k4.metric("PF + ESIC",v5_money(_pf+_esic))
+                        k5.metric("Total Deduction",v5_money(_ded))
+                        k6.metric("Final Net Payable",v5_money(_net))
+
+                        k1,k2,k3,k4=st.columns(4)
+                        k1.metric("Performance Incentive",v5_money(_perf))
+                        k2.metric("Attendance Bonus",v5_money(_bonus))
+                        k3.metric("Employee Master Match",f"{_matched:,} / {len(_v150_records):,}")
+                        k4.metric("New Joinee Rows",f"{_new_joinees:,}")
+
+                        if _fine54:
+                            st.info(
+                                f"{_fine54} row(s) contain Fine = '54' as text. "
+                                "The source workbook does not include those text values in Total Deduction, "
+                                "so the app preserves them as source text and does not deduct ₹54."
+                            )
+                        if _matched < len(_v150_records):
+                            st.warning(
+                                f"{len(_v150_records)-_matched} employee(s) do not currently match Greater Noida Employee Master. "
+                                "They can still be preserved in the finalized monthly salary history; Employee Master will not be changed."
+                            )
+
+                        st.markdown("#### Salary Sheet Preview")
+                        st.dataframe(
+                            _v150_preview,
+                            hide_index=True,use_container_width=True,height=480,
+                            column_config={
+                                "Gross Salary":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Gross Earned":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Performance Incentive":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Attendance Bonus":st.column_config.NumberColumn(format="₹%.2f"),
+                                "PF":st.column_config.NumberColumn(format="₹%.2f"),
+                                "ESIC":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Total Deduction":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Net Payable":st.column_config.NumberColumn(format="₹%.2f"),
+                            }
+                        )
+
+                        _month_key_v150=_month_key(_v150_month)
+                        _existing_src=read_df(
+                            """SELECT COUNT(*) AS rows
+                               FROM payroll_final_salary_import
+                               WHERE payroll_month=? AND division=?""",
+                            (_month_key_v150,_v150_division)
+                        )
+                        _existing_final=read_df(
+                            """SELECT COUNT(*) AS rows
+                               FROM payroll_records
+                               WHERE payroll_month=? AND division=?""",
+                            (_month_key_v150,_v150_division)
+                        )
+                        _src_count=int(_existing_src.iloc[0]["rows"] or 0) if not _existing_src.empty else 0
+                        _final_count=int(_existing_final.iloc[0]["rows"] or 0) if not _existing_final.empty else 0
+                        if (_src_count or _final_count) and not _v150_replace:
+                            st.warning(
+                                f"Existing data found for {_v150_month.strftime('%b %Y')}: "
+                                f"{_src_count} source row(s), {_final_count} finalized payroll row(s). "
+                                "Tick Replace existing final payroll to import the corrected sheet."
+                            )
+
+                        _can_import=not ((_src_count or _final_count) and not _v150_replace)
+                        if st.button(
+                            "Import Final Salary Sheet",
+                            type="primary",
+                            use_container_width=True,
+                            disabled=not _can_import,
+                            key="v150_import_final_salary"
+                        ):
+                            conn=get_pg_conn()
+                            try:
+                                cur=conn.cursor()
+                                cur.execute("SELECT pg_advisory_xact_lock(%s)",(150026,))
+                                if _v150_replace:
+                                    cur.execute(
+                                        "DELETE FROM payroll_final_salary_import WHERE payroll_month=%s AND division=%s",
+                                        (_month_key_v150,_v150_division)
+                                    )
+                                    cur.execute(
+                                        "DELETE FROM payroll_records WHERE payroll_month=%s AND division=%s",
+                                        (_month_key_v150,_v150_division)
+                                    )
+
+                                for rec in _v150_records:
+                                    cur.execute(
+                                        """INSERT INTO payroll_final_salary_import(
+                                           payroll_month,division,source_row,s_no,employee_id,employee_name,
+                                           father_husband_name,joining_date,uan_number,esic_number,pan_number,
+                                           department,designation,bank_name,ifsc_code,bank_account,
+                                           gross_salary_master,basic_vda,hra,conveyance,other_allowance,gross_pay,
+                                           additional_fixed_monthly,pf_wage,total_days,paid_days,
+                                           additional_fixed_earned,performance_incentive,attendance_bonus,
+                                           tds,other_deduction,advance,fine_raw,fine_amount,pf,esic,fooding,
+                                           total_deduction,net_payable,gross_earned,total_payable,remark,
+                                           source_month_text,incentive_tpd,master_match,master_employee_name,
+                                           source_file,imported_by,imported_at
+                                           ) VALUES (
+                                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP
+                                           )
+                                           ON CONFLICT(payroll_month,division,employee_id) DO UPDATE SET
+                                           source_row=excluded.source_row,s_no=excluded.s_no,
+                                           employee_name=excluded.employee_name,father_husband_name=excluded.father_husband_name,
+                                           joining_date=excluded.joining_date,uan_number=excluded.uan_number,
+                                           esic_number=excluded.esic_number,pan_number=excluded.pan_number,
+                                           department=excluded.department,designation=excluded.designation,
+                                           bank_name=excluded.bank_name,ifsc_code=excluded.ifsc_code,
+                                           bank_account=excluded.bank_account,gross_salary_master=excluded.gross_salary_master,
+                                           basic_vda=excluded.basic_vda,hra=excluded.hra,conveyance=excluded.conveyance,
+                                           other_allowance=excluded.other_allowance,gross_pay=excluded.gross_pay,
+                                           additional_fixed_monthly=excluded.additional_fixed_monthly,
+                                           pf_wage=excluded.pf_wage,total_days=excluded.total_days,paid_days=excluded.paid_days,
+                                           additional_fixed_earned=excluded.additional_fixed_earned,
+                                           performance_incentive=excluded.performance_incentive,
+                                           attendance_bonus=excluded.attendance_bonus,tds=excluded.tds,
+                                           other_deduction=excluded.other_deduction,advance=excluded.advance,
+                                           fine_raw=excluded.fine_raw,fine_amount=excluded.fine_amount,
+                                           pf=excluded.pf,esic=excluded.esic,fooding=excluded.fooding,
+                                           total_deduction=excluded.total_deduction,net_payable=excluded.net_payable,
+                                           gross_earned=excluded.gross_earned,total_payable=excluded.total_payable,
+                                           remark=excluded.remark,source_month_text=excluded.source_month_text,
+                                           incentive_tpd=excluded.incentive_tpd,master_match=excluded.master_match,
+                                           master_employee_name=excluded.master_employee_name,
+                                           source_file=excluded.source_file,imported_by=excluded.imported_by,
+                                           imported_at=CURRENT_TIMESTAMP""",
+                                        (
+                                            _month_key_v150,_v150_division,int(rec["source_row"]),rec["s_no"],
+                                            rec["employee_id"],rec["employee_name"],rec["father_husband_name"],
+                                            rec["joining_date"],rec["uan_number"],rec["esic_number"],rec["pan_number"],
+                                            rec["department"],rec["designation"],rec["bank_name"],rec["ifsc_code"],
+                                            rec["bank_account"],rec["gross_salary_master"],rec["basic_vda"],rec["hra"],
+                                            rec["conveyance"],rec["other_allowance"],rec["gross_pay"],
+                                            rec["additional_fixed_monthly"],rec["pf_wage"],rec["total_days"],rec["paid_days"],
+                                            rec["additional_fixed_earned"],rec["performance_incentive"],rec["attendance_bonus"],
+                                            rec["tds"],rec["other_deduction"],rec["advance"],rec["fine_raw"],rec["fine_amount"],
+                                            rec["pf"],rec["esic"],rec["fooding"],rec["total_deduction"],rec["net_payable"],
+                                            rec["gross_earned"],rec["total_payable"],rec["remark"],rec["source_month_text"],
+                                            rec["incentive_tpd"],bool(rec["master_match"]),rec["master_employee_name"],
+                                            str(getattr(_v150_file,"name","")),_current_user["username"]
+                                        )
+                                    )
+
+                                    cur.execute(
+                                        """INSERT INTO payroll_records(
+                                           payroll_month,division,employee_id,employee_name,designation,department,
+                                           monthly_salary,calendar_days,attendance_records,paid_days,present_days,
+                                           weekly_off_days,paid_leave_days,lwp_days,review_days,missing_days,ot_hours,
+                                           gross_earned,additional_fixed_earned,ot_pay,performance_incentive,
+                                           attendance_bonus,endorsement_allowance,total_payable,pf,esic,tds,
+                                           advance,other_deduction,fine,fooding,total_deduction,net_payable,
+                                           payroll_status,finalized_by,finalized_at
+                                           ) VALUES (
+                                           %s,%s,%s,%s,%s,%s,%s,%s,0,%s,0,0,0,0,0,0,0,
+                                           %s,%s,0,%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                                           'Imported Final Salary',%s,CURRENT_TIMESTAMP
+                                           )
+                                           ON CONFLICT(payroll_month,division,employee_id) DO UPDATE SET
+                                           employee_name=excluded.employee_name,designation=excluded.designation,
+                                           department=excluded.department,monthly_salary=excluded.monthly_salary,
+                                           calendar_days=excluded.calendar_days,attendance_records=0,
+                                           paid_days=excluded.paid_days,present_days=0,weekly_off_days=0,
+                                           paid_leave_days=0,lwp_days=0,review_days=0,missing_days=0,ot_hours=0,
+                                           gross_earned=excluded.gross_earned,
+                                           additional_fixed_earned=excluded.additional_fixed_earned,ot_pay=0,
+                                           performance_incentive=excluded.performance_incentive,
+                                           attendance_bonus=excluded.attendance_bonus,endorsement_allowance=0,
+                                           total_payable=excluded.total_payable,pf=excluded.pf,esic=excluded.esic,
+                                           tds=excluded.tds,advance=excluded.advance,
+                                           other_deduction=excluded.other_deduction,fine=excluded.fine,
+                                           fooding=excluded.fooding,total_deduction=excluded.total_deduction,
+                                           net_payable=excluded.net_payable,payroll_status='Imported Final Salary',
+                                           finalized_by=excluded.finalized_by,finalized_at=CURRENT_TIMESTAMP""",
+                                        (
+                                            _month_key_v150,_v150_division,rec["employee_id"],rec["employee_name"],
+                                            rec["designation"],rec["department"],rec["gross_pay"],
+                                            int(rec["total_days"] or 0),rec["paid_days"],rec["gross_earned"],
+                                            rec["additional_fixed_earned"],rec["performance_incentive"],
+                                            rec["attendance_bonus"],rec["total_payable"],rec["pf"],rec["esic"],
+                                            rec["tds"],rec["advance"],rec["other_deduction"],rec["fine_amount"],
+                                            rec["fooding"],rec["total_deduction"],rec["net_payable"],
+                                            _current_user["username"]
+                                        )
+                                    )
+
+                                conn.commit()
+                                cur.close()
+                            except Exception:
+                                conn.rollback()
+                                raise
+                            finally:
+                                conn.close()
+
+                            record_audit_event(
+                                _current_user["username"],
+                                "FINAL_SALARY_IMPORT",
+                                "Payroll",
+                                "Final Salary",
+                                f"{_month_key_v150}|{_v150_division}",
+                                (
+                                    f"Rows={len(_v150_records)}; GrossMaster={_gross_master:.2f}; "
+                                    f"GrossEarned={_gross_earned:.2f}; Deduction={_ded:.2f}; "
+                                    f"NetPayable={_net:.2f}; Matched={_matched}; "
+                                    f"Source={getattr(_v150_file,'name','')}"
+                                )
+                            )
+                            st.success(
+                                f"Final salary imported: {len(_v150_records)} employees · "
+                                f"Net Payable {v5_money(_net)}."
+                            )
+                            st.rerun()
+                    except Exception as exc:
+                        st.error(f"Unable to read final salary sheet: {exc}")
+
+                # Always show already-imported final payroll for the selected month.
+                _v150_saved=read_df(
+                    """SELECT employee_id,employee_name,department,designation,
+                              monthly_salary,paid_days,gross_earned,performance_incentive,
+                              attendance_bonus,pf,esic,total_deduction,net_payable,payroll_status
+                       FROM payroll_records
+                       WHERE payroll_month=? AND division=?
+                       ORDER BY employee_name,employee_id""",
+                    (_month_key(_v150_month),_v150_division)
+                )
+                if not _v150_saved.empty:
+                    st.markdown("#### Imported Final Payroll")
+                    s1,s2,s3,s4=st.columns(4)
+                    s1.metric("Employees",f"{len(_v150_saved):,}")
+                    s2.metric("Gross Earned",v5_money(_v150_saved["gross_earned"].sum()))
+                    s3.metric("Total Deduction",v5_money(_v150_saved["total_deduction"].sum()))
+                    s4.metric("Net Payable",v5_money(_v150_saved["net_payable"].sum()))
+                    st.dataframe(
+                        _v150_saved,
+                        hide_index=True,use_container_width=True,height=420,
+                        column_config={
+                            "monthly_salary":st.column_config.NumberColumn("Monthly Gross",format="₹%.2f"),
+                            "paid_days":st.column_config.NumberColumn("TPD",format="%.2f"),
+                            "gross_earned":st.column_config.NumberColumn("Gross Earned",format="₹%.2f"),
+                            "performance_incentive":st.column_config.NumberColumn("Performance Incentive",format="₹%.2f"),
+                            "attendance_bonus":st.column_config.NumberColumn("Attendance Bonus",format="₹%.2f"),
+                            "pf":st.column_config.NumberColumn("PF",format="₹%.2f"),
+                            "esic":st.column_config.NumberColumn("ESIC",format="₹%.2f"),
+                            "total_deduction":st.column_config.NumberColumn("Total Deduction",format="₹%.2f"),
+                            "net_payable":st.column_config.NumberColumn("Net Payable",format="₹%.2f"),
+                        }
+                    )
 
         if _v141_pay_section=="Finalize & History":
             final_div=st.selectbox("Finalize Division",DIVISIONS,index=DIVISIONS.index(global_division) if global_division in DIVISIONS else 0,key="v5_final_div")
@@ -18023,3 +18631,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V13.8 SAFE CONSUMPTION SUMMARY SCHEMA
 
 # V13.8B MOVE CONSUMPTION SCHEMA HELPER BEFORE PAGE ROUTING
+
+# V15.0 FINAL SALARY SHEET IMPORT
