@@ -10623,6 +10623,11 @@ elif page == "Management":
         "The selected Division and Payroll Month remain your live management context."
     )
 
+    def _v93_open_module(_module, _title):
+        """Update the navigation widget in its callback before the next rerun."""
+        st.session_state["v5_navigation"] = _module
+        st.session_state["v93_last_mis"] = _title
+
     def _v93_mis_card(_icon, _title, _subtitle, _module, _key):
         st.markdown(
             f"""
@@ -10636,10 +10641,13 @@ elif page == "Management":
             unsafe_allow_html=True,
         )
         if _module in available_modules:
-            if st.button(f"Open {_title}", key=_key, use_container_width=True):
-                st.session_state["_v83_nav_request"] = _module
-                st.session_state["v93_last_mis"] = _title
-                st.rerun()
+            st.button(
+                f"Open {_title}",
+                key=_key,
+                use_container_width=True,
+                on_click=_v93_open_module,
+                args=(_module, _title),
+            )
         else:
             st.caption("Access restricted for this user role.")
 
