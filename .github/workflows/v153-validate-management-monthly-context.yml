@@ -1,0 +1,34 @@
+name: Validate V15.3 Management Monthly Context
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v153-validate-management-monthly-context.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify V15.3 markers
+        run: |
+          grep -q "V15.3 MANAGEMENT MONTHLY EXECUTIVE CONTEXT" app.py
+          grep -q "MONTHLY ATTENDANCE" app.py
+          grep -q "FINAL PAYROLL" app.py
+      - name: Record validation
+        run: |
+          printf "V15.3 validated\n" > .v153_validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .v153_validation
+          git commit -m "Validate Management monthly executive context"
+          git push origin main
