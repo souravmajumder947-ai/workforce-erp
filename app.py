@@ -9894,50 +9894,87 @@ if page == "Home":
         if _v115_att_records else 0.0
     )
 
-    # V15.0: use finalized/imported salary records for divisions where they exist.
-    # Other divisions continue to use live attendance-based payroll.
+    # V15.1 MD FINAL PAYROLL CLARITY
+    # Financial cards must never mix finalized salary with unfinished live payroll.
+    # If any division has a finalized/imported payroll for the selected month,
+    # show ONLY finalized values in the MD money cards and separately flag live blockers.
     _v115_gross = 0.0
     _v115_net = 0.0
     _v115_ot_pay = 0.0
     _v115_pf_esic = 0.0
+    _v115_total_deduction = 0.0
     _v115_pay_blockers = 0
     _v115_final_divisions=set()
+    _v115_final_employees=0
+    _v115_live_pending_divisions=set()
+
     try:
         _v115_final_pay=_v150_final_payroll_summary(global_payroll_month,global_division)
         if not _v115_final_pay.empty:
             _v115_final_divisions=set(_v115_final_pay["division"].astype(str).tolist())
-            _v115_gross+=float(pd.to_numeric(_v115_final_pay["gross_earned"],errors="coerce").fillna(0).sum())
-            _v115_net+=float(pd.to_numeric(_v115_final_pay["net_payable"],errors="coerce").fillna(0).sum())
-            _v115_ot_pay+=float(pd.to_numeric(_v115_final_pay["ot_pay"],errors="coerce").fillna(0).sum())
-            _v115_pf_esic+=float(
+            _v115_final_employees=int(
+                pd.to_numeric(_v115_final_pay["employees"],errors="coerce").fillna(0).sum()
+            )
+            _v115_gross=float(
+                pd.to_numeric(_v115_final_pay["gross_earned"],errors="coerce").fillna(0).sum()
+            )
+            _v115_net=float(
+                pd.to_numeric(_v115_final_pay["net_payable"],errors="coerce").fillna(0).sum()
+            )
+            _v115_ot_pay=float(
+                pd.to_numeric(_v115_final_pay["ot_pay"],errors="coerce").fillna(0).sum()
+            )
+            _v115_pf_esic=float(
                 pd.to_numeric(_v115_final_pay["pf"],errors="coerce").fillna(0).sum()
                 + pd.to_numeric(_v115_final_pay["esic"],errors="coerce").fillna(0).sum()
+            )
+            _v115_total_deduction=float(
+                pd.to_numeric(_v115_final_pay["total_deduction"],errors="coerce").fillna(0).sum()
             )
     except Exception:
         _v115_final_pay=pd.DataFrame()
 
-    if not payroll.empty:
-        _v115_live=payroll.copy()
-        if _v115_final_divisions and "Division" in _v115_live.columns:
-            _v115_live=_v115_live[
-                ~_v115_live["Division"].astype(str).isin(_v115_final_divisions)
-            ].copy()
-        if not _v115_live.empty:
-            _v115_gross+=float(pd.to_numeric(_v115_live.get("Gross Earned",0),errors="coerce").fillna(0).sum())
-            _v115_net+=float(pd.to_numeric(_v115_live.get("Net Payable",0),errors="coerce").fillna(0).sum())
-            _v115_ot_pay+=float(pd.to_numeric(_v115_live.get("OT Pay",0),errors="coerce").fillna(0).sum())
-            _v115_pf_esic+=float(
-                pd.to_numeric(_v115_live.get("PF",0),errors="coerce").fillna(0).sum()
-                + pd.to_numeric(_v115_live.get("ESIC",0),errors="coerce").fillna(0).sum()
+    # Live payroll is used only when there is NO finalized payroll in the selected scope.
+    # When final salary exists, unfinished divisions are shown as pending context, not added
+    # into the approved money figures.
+    _v115_live=payroll.copy() if not payroll.empty else pd.DataFrame()
+    if not _v115_live.empty and _v115_final_divisions and "Division" in _v115_live.columns:
+        _v115_live=_v115_live[
+            ~_v115_live["Division"].astype(str).isin(_v115_final_divisions)
+        ].copy()
+
+    if not _v115_live.empty:
+        _v115_pay_blockers=int(
+            ((_v115_live["Missing Days"]>0)|(_v115_live["HR Review"]>0)).sum()
+        )
+        if "Division" in _v115_live.columns:
+            _v115_live_pending_divisions=set(_v115_live["Division"].astype(str).tolist())
+
+    if not _v115_final_divisions:
+        if not payroll.empty:
+            _v115_gross=float(pd.to_numeric(payroll.get("Gross Earned",0),errors="coerce").fillna(0).sum())
+            _v115_net=float(pd.to_numeric(payroll.get("Net Payable",0),errors="coerce").fillna(0).sum())
+            _v115_ot_pay=float(pd.to_numeric(payroll.get("OT Pay",0),errors="coerce").fillna(0).sum())
+            _v115_pf_esic=float(
+                pd.to_numeric(payroll.get("PF",0),errors="coerce").fillna(0).sum()
+                + pd.to_numeric(payroll.get("ESIC",0),errors="coerce").fillna(0).sum()
             )
-            _v115_pay_blockers=int(
-                ((_v115_live["Missing Days"]>0)|(_v115_live["HR Review"]>0)).sum()
+            _v115_total_deduction=float(
+                pd.to_numeric(payroll.get("Total Deduction",0),errors="coerce").fillna(0).sum()
             )
-    _v115_payroll_source=(
-        "Final Salary" if _v115_final_divisions and _v115_pay_blockers==0
-        else "Final + Live" if _v115_final_divisions
-        else "Live Payroll"
-    )
+        _v115_payroll_source="Live Payroll"
+    else:
+        _v115_payroll_source="Final Salary"
+        if global_division==ALL_DIVISIONS and _v115_live_pending_divisions:
+            _v115_payroll_source=(
+                "Final Salary · "
+                + ", ".join(sorted(_v115_final_divisions))
+                + " · other division payroll pending"
+            )
+        elif len(_v115_final_divisions)==1:
+            _v115_payroll_source="Final Salary · "+next(iter(_v115_final_divisions))
+        else:
+            _v115_payroll_source="Final Salary · "+", ".join(sorted(_v115_final_divisions))
 
     try:
         _v115_contractor = contractor_month_summary(global_payroll_month)
@@ -10015,11 +10052,29 @@ if page == "Home":
                 unsafe_allow_html=True,
             )
 
+    _v115_money_is_final=bool(_v115_final_divisions)
+    _v115_net_value=(
+        v5_money(_v115_net)
+        if (_v115_money_is_final or not _v115_pay_blockers)
+        else "PENDING"
+    )
+    _v115_net_sub=(
+        _v115_payroll_source
+        if _v115_money_is_final
+        else (f"{_v115_pay_blockers:,} payroll blocker(s)" if _v115_pay_blockers else "Live Payroll")
+    )
     _v115_cost_items = [
-        ("₹", "Gross Earned", v5_money(_v115_gross) if can_view_salary(_current_role) else "Restricted", global_payroll_month.strftime("%b %Y"), "blue"),
-        ("₹", "Net Payable", ("PENDING" if _v115_pay_blockers else v5_money(_v115_net)) if can_view_salary(_current_role) else "Restricted", f"{_v115_pay_blockers:,} payroll blocker(s)" if _v115_pay_blockers else _v115_payroll_source, "amber" if _v115_pay_blockers else "green"),
-        ("◴", "OT Pay", v5_money(_v115_ot_pay) if can_view_salary(_current_role) else "Restricted", "Attendance-linked", "cyan"),
-        ("▤", "PF + ESIC", v5_money(_v115_pf_esic) if can_view_salary(_current_role) else "Restricted", "Employee deductions", "purple"),
+        ("₹", "Gross Earned" if not _v115_money_is_final else "Final Gross Earned",
+         v5_money(_v115_gross) if can_view_salary(_current_role) else "Restricted",
+         _v115_payroll_source if _v115_money_is_final else global_payroll_month.strftime("%b %Y"), "blue"),
+        ("₹", "Net Payable" if not _v115_money_is_final else "Final Net Payable",
+         _v115_net_value if can_view_salary(_current_role) else "Restricted",
+         _v115_net_sub,
+         "green" if _v115_money_is_final or not _v115_pay_blockers else "amber"),
+        ("◴", "OT Pay", v5_money(_v115_ot_pay) if can_view_salary(_current_role) else "Restricted",
+         "Final salary" if _v115_money_is_final else "Attendance-linked", "cyan"),
+        ("▤", "PF + ESIC", v5_money(_v115_pf_esic) if can_view_salary(_current_role) else "Restricted",
+         "Final salary deductions" if _v115_money_is_final else "Employee deductions", "purple"),
         ("▣", "Contractor Payable", v5_money(_v115_contractor_cost), "Greater Noida · selected month", "amber"),
         ("🏭", "Corrugation Output", f"{_v115_corr_output:,.2f} T", f"Target {_v115_corr_target:,.2f} T · {_v115_corr_achievement:.1f}%", "blue"),
     ]
@@ -10087,12 +10142,13 @@ if page == "Home":
             )
             if can_view_salary(_current_role):
                 _v115_pay_rows = pd.DataFrame([
+                    {"Metric":"Payroll Source","Value":_v115_payroll_source},
+                    {"Metric":"Finalized Employees","Value":f"{_v115_final_employees:,}" if _v115_money_is_final else "—"},
                     {"Metric":"Gross Earned","Value":v5_money(_v115_gross)},
-                    {"Metric":"Net Payable","Value":"Pending" if _v10_pay_blockers else v5_money(_v115_net)},
-                    {"Metric":"OT Pay","Value":v5_money(_v115_ot_pay)},
+                    {"Metric":"Net Payable","Value":_v115_net_value},
                     {"Metric":"PF + ESIC","Value":v5_money(_v115_pf_esic)},
-                    {"Metric":"Contractor Payable","Value":v5_money(_v115_contractor_cost)},
-                    {"Metric":"Payroll Blockers","Value":f"{_v10_pay_blockers:,}"},
+                    {"Metric":"Total Deduction","Value":v5_money(_v115_total_deduction)},
+                    {"Metric":"Unfinished Live Blockers","Value":f"{_v115_pay_blockers:,}"},
                 ])
                 st.dataframe(_v115_pay_rows, hide_index=True, use_container_width=True, height=220)
             else:
@@ -18633,3 +18689,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V13.8B MOVE CONSUMPTION SCHEMA HELPER BEFORE PAGE ROUTING
 
 # V15.0 FINAL SALARY SHEET IMPORT
+
+# V15.1 MD FINAL PAYROLL CLARITY
