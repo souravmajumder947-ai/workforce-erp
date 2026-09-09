@@ -1,0 +1,35 @@
+name: Validate V15.0 Final Salary Import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v150-validate-final-salary-import.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify V15.0 markers
+        run: |
+          grep -q "V15.0 FINAL SALARY SHEET IMPORT" app.py
+          grep -q "Final Salary Import" app.py
+          grep -q "payroll_final_salary_import" app.py
+          grep -q "Imported Final Salary" app.py
+      - name: Record validation
+        run: |
+          printf "V15.0 validated\n" > .v150_validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .v150_validation
+          git commit -m "Validate final salary sheet import"
+          git push origin main
