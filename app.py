@@ -10508,24 +10508,52 @@ if page == "Home":
 # MANAGEMENT — EXECUTIVE DASHBOARD
 # ============================================================
 elif page == "Management":
+    # V15.3 MANAGEMENT MONTHLY EXECUTIVE CONTEXT
     v5_page_header(
         "Management Overview",
-        "Executive HR, payroll and workforce view without operational editing.",
-        global_division, global_work_date, global_payroll_month
+        "Executive monthly HR, payroll and workforce view without operational editing.",
+        global_division, None, global_payroll_month
     )
     emp_all = v5_active_employees(global_division)
-    att = v5_attendance_for_date(global_work_date, global_division)
+    _v153_first,_v153_last=_month_range(global_payroll_month)
+    _v153_att_clause,_v153_att_params=v5_division_clause(global_division,"a.")
+    try:
+        att=read_df(
+            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours
+               FROM attendance a
+               WHERE a.work_date BETWEEN ? AND ? """ + _v153_att_clause + """
+               ORDER BY a.work_date,a.division,a.employee_id""",
+            (_v153_first.isoformat(),_v153_last.isoformat())+_v153_att_params
+        )
+    except Exception:
+        att=pd.DataFrame()
     pay = calculate_live_payroll(global_payroll_month, global_division) if can_view_salary(_current_role) else pd.DataFrame()
     contractor = contractor_month_summary(global_payroll_month)
     if global_division not in (ALL_DIVISIONS,"Greater Noida Plant"):
         contractor = contractor.iloc[0:0]
 
-    # V9.6 executive pulse: read-only management decision support.
+    # Monthly executive pulse — same period as selected Payroll Month.
     _v96_m_active = len(emp_all)
-    _v96_m_present = int((att["status"] == "Present").sum()) if not att.empty else 0
-    _v96_m_review = int((att["status"] == "HR Review").sum()) if not att.empty else 0
-    _v96_m_att_rate = (_v96_m_present / _v96_m_active * 100.0) if _v96_m_active else 0.0
-    # V15.2 MANAGEMENT FINAL PAYROLL SOURCE
+    _v153_status=(
+        att["status"].fillna("").astype(str).str.strip()
+        if not att.empty else pd.Series(dtype=str)
+    )
+    _v153_present=float((_v153_status=="Present").sum())
+    _v153_half=float((_v153_status=="Half Day").sum())
+    _v153_paid_off=float(_v153_status.isin(["WO","Holiday","Leave","CL","SL","EL"]).sum())
+    _v153_absent=float(_v153_status.isin(["Absent","LWP"]).sum())
+    _v96_m_review=int((_v153_status=="HR Review").sum())
+    _v153_records=len(att)
+    _v153_present_eq=_v153_present+(0.5*_v153_half)
+    _v153_coverage=(
+        ((_v153_present_eq+_v153_paid_off)/_v153_records*100.0)
+        if _v153_records else 0.0
+    )
+    _v153_present_rate=(
+        (_v153_present_eq/_v153_records*100.0)
+        if _v153_records else 0.0
+    )
+
     _v152_final_summary=(
         _v150_final_payroll_summary(global_payroll_month,global_division)
         if can_view_salary(_current_role) else pd.DataFrame()
@@ -10538,6 +10566,7 @@ elif page == "Management":
         int(pd.to_numeric(_v152_final_summary["employees"],errors="coerce").fillna(0).sum())
         if not _v152_final_summary.empty else 0
     )
+
     _v152_live_remaining=pay.copy() if not pay.empty else pd.DataFrame()
     if (
         not _v152_live_remaining.empty
@@ -10547,20 +10576,31 @@ elif page == "Management":
         _v152_live_remaining=_v152_live_remaining[
             ~_v152_live_remaining["Division"].astype(str).isin(_v152_final_divisions)
         ].copy()
-    _v96_m_blockers = int(
-        ((_v152_live_remaining["Missing Days"] > 0) | (_v152_live_remaining["HR Review"] > 0)).sum()
+    _v96_m_blockers=int(
+        ((_v152_live_remaining["Missing Days"]>0)|(_v152_live_remaining["HR Review"]>0)).sum()
     ) if not _v152_live_remaining.empty else 0
-    _v96_m_score = max(
+
+    _v96_m_score=max(
         0.0,
-        min(100.0, _v96_m_att_rate - min(25.0, _v96_m_review * 0.7 + _v96_m_blockers * 0.25)),
+        min(100.0,_v153_coverage-min(20.0,_v96_m_review*0.25))
     )
+
+    if _v152_final_divisions:
+        _v153_pay_label="FINAL PAYROLL"
+        _v153_pay_value=f"{_v152_final_employees:,}"
+        _v153_pay_sub="Approved employee salary rows"
+    else:
+        _v153_pay_label="PAYROLL GATES"
+        _v153_pay_value=f"{_v96_m_blockers:,}"
+        _v153_pay_sub="Employees blocking close"
+
     st.markdown(
         f"""
         <div class="v96-exec-pulse">
-          <div><small>AI EXECUTIVE PULSE</small><b>{_v96_m_score:.0f}/100</b><span>Operational workforce score</span></div>
-          <div><small>ATTENDANCE</small><b>{_v96_m_att_rate:.1f}%</b><span>{_v96_m_present:,} present / {_v96_m_active:,} active</span></div>
-          <div><small>HR SIGNALS</small><b>{_v96_m_review:,}</b><span>Selected-date review rows</span></div>
-          <div><small>PAYROLL GATES</small><b>{_v96_m_blockers:,}</b><span>Employees blocking close</span></div>
+          <div><small>MONTHLY WORKFORCE SCORE</small><b>{_v96_m_score:.0f}/100</b><span>{global_payroll_month.strftime("%b %Y")} executive score</span></div>
+          <div><small>MONTHLY ATTENDANCE</small><b>{_v153_present_rate:.1f}%</b><span>{_v153_present_eq:,.1f} present-equivalent days / {_v153_records:,} records</span></div>
+          <div><small>HR REVIEW</small><b>{_v96_m_review:,}</b><span>Selected-month review rows</span></div>
+          <div><small>{_v153_pay_label}</small><b>{_v153_pay_value}</b><span>{_v153_pay_sub}</span></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -10597,7 +10637,7 @@ elif page == "Management":
 
     _mis1, _mis2, _mis3, _mis4 = st.columns(4)
     with _mis1:
-        _v93_mis_card("◷", "Daily Attendance MIS", "Daily register, present/absent, WO, half day and HR exceptions.", "Attendance", "v93_mis_daily_att")
+        _v93_mis_card("◷", "Daily Attendance MIS", "Open the daily register when a specific attendance date is required.", "Attendance", "v93_mis_daily_att")
     with _mis2:
         _v93_mis_card("▦", "Monthly Attendance MIS", "Monthly attendance pattern, missing punches and employee history.", "Attendance", "v93_mis_month_att")
     with _mis3:
@@ -10618,17 +10658,14 @@ elif page == "Management":
     st.markdown("---")
 
     total_emp=len(emp_all)
-    att_status = att["status"].fillna("").astype(str).str.strip() if not att.empty else pd.Series(dtype=str)
-    present = int((att_status == "Present").sum())
-    half_day = int((att_status == "Half Day").sum())
-    paid_off = int(att_status.isin(["WO","Holiday","Leave","CL","SL","EL"]).sum())
-    absent_today = int(att_status.isin(["Absent","LWP"]).sum())
-    review_today = int((att_status == "HR Review").sum())
-    attendance_records = int(att["employee_id"].astype(str).nunique()) if not att.empty else 0
-    # Management coverage treats approved weekly off / paid leave as covered days.
-    # This avoids showing a misleading near-zero attendance percentage on Sundays/holidays.
-    covered_today = present + (0.5 * half_day) + paid_off
-    attendance_pct=(covered_today/total_emp*100) if total_emp else 0
+    att_status=_v153_status
+    present=int(_v153_present)
+    half_day=int(_v153_half)
+    paid_off=int(_v153_paid_off)
+    absent_today=int(_v153_absent)
+    review_today=int(_v96_m_review)
+    attendance_records=_v153_records
+    attendance_pct=_v153_coverage
     # Finalized salary is authoritative for management money cards.
     _v152_money_is_final=bool(_v152_final_divisions)
     if _v152_money_is_final:
@@ -10666,8 +10703,8 @@ elif page == "Management":
     if _v152_money_is_final:
         v5_kpis([
             ("Headcount",f"{total_emp:,}","Active employees","blue"),
-            ("Attendance Coverage",f"{attendance_pct:.1f}%",
-             f"Present {present:,} · WO/Leave {paid_off:,} · Review {review_today:,}",
+            ("Monthly Attendance Coverage",f"{attendance_pct:.1f}%",
+             f"Present Eq {_v153_present_eq:,.1f} · WO/Leave {paid_off:,} · Review {review_today:,}",
              "good" if attendance_pct>=85 else "warn"),
             ("Final Net Payable",v5_money(net),_v152_source,"blue"),
             ("Finalized Employees",f"{_v152_final_employees:,}",global_payroll_month.strftime("%b %Y"),"good"),
@@ -10682,8 +10719,8 @@ elif page == "Management":
     else:
         v5_kpis([
             ("Headcount",f"{total_emp:,}","Active employees","blue"),
-            ("Attendance Coverage",f"{attendance_pct:.1f}%",
-             f"Present {present:,} · WO/Leave {paid_off:,} · Review {review_today:,}",
+            ("Monthly Attendance Coverage",f"{attendance_pct:.1f}%",
+             f"Present Eq {_v153_present_eq:,.1f} · WO/Leave {paid_off:,} · Review {review_today:,}",
              "good" if attendance_pct>=85 else "warn"),
             ("Net Salary","Pending" if management_payroll_blocked else v5_money(net),
              f"{management_payroll_blocked:,} payroll blocker(s)" if management_payroll_blocked else global_payroll_month.strftime("%b %Y"),
@@ -10696,7 +10733,16 @@ elif page == "Management":
     div_rows=[]
     for div in DIVISIONS:
         e=v5_active_employees(div)
-        a=v5_attendance_for_date(global_work_date,div)
+        try:
+            a=read_df(
+                """SELECT work_date,employee_id,status,ot_hours
+                   FROM attendance
+                   WHERE division=? AND work_date BETWEEN ? AND ?
+                   ORDER BY work_date,employee_id""",
+                (div,_v153_first.isoformat(),_v153_last.isoformat())
+            )
+        except Exception:
+            a=pd.DataFrame()
         p=calculate_live_payroll(global_payroll_month,div) if can_view_salary(_current_role) else pd.DataFrame()
         _v152_div_final=(
             _v150_final_payroll_summary(global_payroll_month,div)
@@ -10711,8 +10757,12 @@ elif page == "Management":
         a_absent = int(a_status.isin(["Absent","LWP"]).sum())
         a_review = int((a_status == "HR Review").sum())
         a_records = int(a["employee_id"].astype(str).nunique()) if not a.empty else 0
-        a_missing = max(len(e) - a_records, 0)
-        a_coverage = ((a_present + 0.5*a_half + a_off) / len(e) * 100.0) if len(e) else 0.0
+        a_missing = max(len(e) - a["employee_id"].astype(str).nunique(), 0) if not a.empty else len(e)
+        _a_total_records=len(a)
+        a_coverage = (
+            ((a_present + 0.5*a_half + a_off) / _a_total_records * 100.0)
+            if _a_total_records else 0.0
+        )
         if not _v152_div_final.empty:
             _v152_div_gross=float(
                 pd.to_numeric(_v152_div_final["gross_earned"],errors="coerce").fillna(0).sum()
@@ -10766,7 +10816,7 @@ elif page == "Management":
     c1,c2=st.columns([1.35,1],gap="small")
     with c1:
         with st.container(border=True):
-            v5_panel("Division Performance","All three locations on the same management standard.")
+            v5_panel("Division Monthly Performance",f"{global_payroll_month.strftime('%b %Y')} attendance and payroll status by location.")
             st.dataframe(div_df,hide_index=True,use_container_width=True,
                 column_config={
                     "Coverage %":st.column_config.NumberColumn("Coverage %",format="%.1f%%"),
@@ -10775,7 +10825,7 @@ elif page == "Management":
                 })
     with c2:
         with st.container(border=True):
-            v5_panel("Salary Cost by Division","Final salary when available; unfinished live payroll is not mixed into approved values.")
+            v5_panel("Salary Cost by Division",f"{global_payroll_month.strftime('%b %Y')} · final salary where available; unfinished live payroll is excluded.")
             chart_df=div_df[["Division","Net Payable","Payroll Source"]].copy()
             chart_df=chart_df[chart_df["Net Payable"]>0].copy()
             if not chart_df.empty and chart_df["Net Payable"].sum()>0:
@@ -18802,3 +18852,5 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V15.1 MD FINAL PAYROLL CLARITY
 
 # V15.2 MANAGEMENT FINAL PAYROLL SOURCE
+
+# V15.3 MANAGEMENT MONTHLY EXECUTIVE CONTEXT
