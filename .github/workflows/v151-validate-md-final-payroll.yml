@@ -1,0 +1,34 @@
+name: Validate V15.1 MD Final Payroll
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v151-validate-md-final-payroll.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify V15.1 markers
+        run: |
+          grep -q "V15.1 MD FINAL PAYROLL CLARITY" app.py
+          grep -q "Final Net Payable" app.py
+          grep -q "Unfinished Live Blockers" app.py
+      - name: Record validation
+        run: |
+          printf "V15.1 validated\n" > .v151_validation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .v151_validation
+          git commit -m "Validate MD final payroll dashboard"
+          git push origin main
