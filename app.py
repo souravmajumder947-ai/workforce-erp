@@ -15368,9 +15368,27 @@ elif page == "Master Centre":
             )
 
             machines=read_df(
-                """SELECT machine,department,target_type,standard_manpower,daily_target_ton,
-                          conversion_target_pct,active
-                   FROM machines ORDER BY department,machine"""
+                """SELECT
+                          m.machine,
+                          m.department,
+                          m.target_type,
+                          COALESCE(s.standard_manpower, m.standard_manpower, 0) AS standard_manpower,
+                          CASE
+                              WHEN m.target_type='FIXED_TON'
+                              THEN COALESCE(s.daily_target_ton, m.daily_target_ton, 0)
+                              ELSE COALESCE(m.daily_target_ton, 0)
+                          END AS daily_target_ton,
+                          m.conversion_target_pct,
+                          m.active
+                   FROM machines m
+                   LEFT JOIN (
+                       SELECT machine,
+                              SUM(standard_manpower) AS standard_manpower,
+                              SUM(target_ton) AS daily_target_ton
+                       FROM machine_shift_targets
+                       GROUP BY machine
+                   ) s ON s.machine=m.machine
+                   ORDER BY m.department,m.machine"""
             )
             if machines.empty:
                 machines=pd.DataFrame(columns=[
@@ -15380,6 +15398,7 @@ elif page == "Master Centre":
 
             edited=st.data_editor(
                 machines,hide_index=True,use_container_width=True,num_rows="dynamic",
+                disabled=["standard_manpower","daily_target_ton"],
                 column_config={
                     "target_type":st.column_config.SelectboxColumn(
                         "Target Type",options=["FIXED_TON","MATERIAL_CONVERSION"],required=True
@@ -15509,7 +15528,28 @@ elif page == "Master Centre":
                                     int(float(r.get("standard_manpower") or 0)),shift_target
                                 )
                             )
+                        cur.execute("""
+                            UPDATE machines m
+                            SET standard_manpower=s.standard_manpower,
+                                daily_target_ton=CASE
+                                    WHEN m.target_type='FIXED_TON' THEN s.daily_target_ton
+                                    ELSE m.daily_target_ton
+                                END,
+                                target_ton=CASE
+                                    WHEN m.target_type='FIXED_TON' THEN s.daily_target_ton/2.0
+                                    ELSE m.target_ton
+                                END
+                            FROM (
+                                SELECT machine,
+                                       SUM(standard_manpower)::INTEGER AS standard_manpower,
+                                       SUM(target_ton) AS daily_target_ton
+                                FROM machine_shift_targets
+                                GROUP BY machine
+                            ) s
+                            WHERE m.machine=s.machine
+                        """)
                         conn.commit();cur.close()
+                        get_machine_list_cached.clear()
                         st.success("Shift standards saved.")
                         st.rerun()
                     except Exception:
