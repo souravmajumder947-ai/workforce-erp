@@ -17758,8 +17758,120 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
   .v103-status-grid{margin-bottom:7px!important}
   .v103-location-strip{margin-bottom:8px}
   div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input{min-height:40px!important}
-  div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{min-height:42px!important}
 }
+
+/* FINAL RELIABLE LOGIN BRAND — intentionally last in login CSS. */
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+  position:relative!important;
+  overflow:hidden!important;
+  border:1px solid rgba(242,78,62,.52)!important;
+  border-radius:18px!important;
+  background:
+    radial-gradient(circle at 100% 0%,rgba(231,67,54,.20),transparent 32%),
+    radial-gradient(circle at 0% 100%,rgba(56,116,181,.12),transparent 30%),
+    linear-gradient(150deg,#0c1929 0%,#07121f 58%,#091522 100%)!important;
+  box-shadow:0 28px 75px rgba(0,0,0,.42),0 0 36px rgba(231,67,54,.09)!important;
+}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker):before{
+  content:""!important;
+  position:absolute!important;
+  inset:0 auto 0 0!important;
+  width:4px!important;
+  background:linear-gradient(180deg,#ff7468,#e74336 48%,#7d1715)!important;
+  box-shadow:0 0 24px rgba(231,67,54,.60)!important;
+}
+body:has(.v82-login-root) .v103-right-top{
+  border:1px solid rgba(111,145,178,.22)!important;
+  background:rgba(5,16,28,.58)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+}
+body:has(.v82-login-root) .v103-secure-state>i{
+  background:#39d99f!important;
+  box-shadow:0 0 14px rgba(57,217,159,.75)!important;
+}
+body:has(.v82-login-root) .v103-secure-state b{
+  color:#bdf5dd!important;font-size:9px!important;letter-spacing:.85px!important
+}
+body:has(.v82-login-root) .v103-secure-state small,
+body:has(.v82-login-root) .v103-right-time small{color:#8fa4b9!important;font-size:8px!important}
+body:has(.v82-login-root) .v103-right-time b{color:#ffffff!important;font-size:12px!important}
+body:has(.v82-login-root) .v103-auth-head{gap:16px!important;margin:4px 0 6px!important}
+body:has(.v82-login-root) .v103-auth-logo{
+  width:96px!important;height:72px!important;padding:7px!important;border-radius:14px!important;
+  background:#ffffff!important;border:1px solid rgba(255,107,94,.75)!important;
+  box-shadow:0 14px 34px rgba(231,67,54,.22),0 0 24px rgba(231,67,54,.12)!important
+}
+body:has(.v82-login-root) .v103-auth-logo img{
+  width:100%!important;height:100%!important;object-fit:contain!important
+}
+body:has(.v82-login-root) .v103-auth-head .v90-card-kicker{
+  color:#ff776c!important;font-size:10px!important;letter-spacing:1.7px!important;font-weight:950!important
+}
+body:has(.v82-login-root) .v103-auth-head .v90-card-title{
+  color:#ffffff!important;font-size:38px!important;letter-spacing:-1px!important;
+  text-shadow:0 10px 28px rgba(0,0,0,.32)!important
+}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) .v90-card-sub{
+  color:#b7c5d4!important;font-size:12px!important;margin:15px 0 17px!important
+}
+body:has(.v82-login-root) .v103-company-block{
+  padding:13px 15px!important;margin-bottom:14px!important;
+  border:1px solid rgba(231,67,54,.26)!important;border-left:4px solid #e74336!important;
+  background:linear-gradient(100deg,rgba(231,67,54,.14),rgba(14,37,60,.52))!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important
+}
+body:has(.v82-login-root) .v103-company-name{font-size:11px!important;color:#ffffff!important}
+body:has(.v82-login-root) .v103-company-line{font-size:9px!important;color:#9fb2c6!important}
+body:has(.v82-login-root) .v103-status-grid{gap:10px!important;margin-bottom:17px!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status{
+  min-height:70px!important;padding:11px 12px!important;
+  border:1px solid rgba(93,130,166,.25)!important;
+  background:linear-gradient(145deg,rgba(15,35,55,.88),rgba(7,21,35,.88))!important;
+  box-shadow:0 10px 26px rgba(0,0,0,.16)!important
+}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(1){border-top:2px solid #39d99f!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(2){border-top:2px solid #5ba8ff!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){border-top:2px solid #ff665c!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status b{font-size:9px!important;color:#f5f8fc!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status span{font-size:8px!important;color:#a9bbcc!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status small{font-size:7px!important;color:#71889e!important}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) [data-testid="stWidgetLabel"] p{
+  color:#f0f4f8!important;font-size:11px!important;font-weight:850!important
+}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input{
+  min-height:48px!important;color:#ffffff!important;background:#0d1a29!important;
+  border:1px solid rgba(102,132,162,.36)!important;border-radius:10px!important
+}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input:focus{
+  border-color:#f06155!important;box-shadow:0 0 0 3px rgba(231,67,54,.12)!important
+}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
+  min-height:48px!important;border-radius:10px!important;
+  background:linear-gradient(100deg,#a91f1b 0%,#e74336 48%,#ff6558 100%)!important;
+  border:1px solid rgba(255,128,116,.72)!important;
+  box-shadow:0 13px 30px rgba(183,37,32,.30),inset 0 1px 0 rgba(255,255,255,.20)!important;
+  color:#ffffff!important;font-size:12px!important;font-weight:900!important
+}
+body:has(.v82-login-root)
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]:hover{
+  transform:translateY(-2px)!important;filter:brightness(1.08)!important;
+  box-shadow:0 17px 36px rgba(183,37,32,.38)!important
+}
+body:has(.v82-login-root) .v103-footer{
+  margin-top:15px!important;padding-top:13px!important;
+  border-top:1px solid rgba(106,137,166,.18)!important
+}
+body:has(.v82-login-root) .v103-footer span{
+  color:#8298ac!important;font-size:7.5px!important;font-weight:650!important
+}
+body:has(.v82-login-root) .v103-footer span+span:before{color:#e74336!important}
 </style>
 """, unsafe_allow_html=True)
 
