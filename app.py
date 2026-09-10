@@ -5071,6 +5071,89 @@ def dashboard_data(report_date, selected_shift):
 # init_db()   # Old SQLite database initialization disabled
 migrate_postgres()
 
+
+def apply_greater_noida_august_2026_present_resolution():
+    """One-time owner-approved correction for missing August attendance blockers."""
+    resolution_key = "greater_noida_aug_2026_missing_marked_present_v1"
+    if str(get_setting_value(resolution_key, "")).strip().lower() == "done":
+        return
+
+    conn = get_pg_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            WITH eligible_employees AS (
+                SELECT
+                    e.employee_id,
+                    e.employee_name,
+                    e.division,
+                    e.designation,
+                    COALESCE(NULLIF(TRIM(e.shift), ''), 'General') AS shift,
+                    CASE
+                        WHEN COALESCE(e.joining_date, '') ~ '^\\d{4}-\\d{2}-\\d{2}$'
+                        THEN GREATEST(DATE '2026-08-01', e.joining_date::date)
+                        ELSE DATE '2026-08-01'
+                    END AS eligible_start
+                FROM employees e
+                WHERE e.status = 'Active'
+                  AND COALESCE(e.salary_active, TRUE) = TRUE
+                  AND e.division = 'Greater Noida Plant'
+            ),
+            missing_attendance AS (
+                SELECT
+                    d::date AS work_date,
+                    e.employee_id,
+                    e.employee_name,
+                    e.division,
+                    e.designation,
+                    e.shift
+                FROM eligible_employees e
+                CROSS JOIN LATERAL generate_series(
+                    e.eligible_start,
+                    DATE '2026-08-31',
+                    INTERVAL '1 day'
+                ) d
+                WHERE e.eligible_start <= DATE '2026-08-31'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM attendance a
+                      WHERE a.employee_id = e.employee_id
+                        AND a.work_date = d::date
+                  )
+            )
+            INSERT INTO attendance(
+                work_date, shift, employee_id, status, ot_hours, division, designation,
+                day_name, time_in, time_out, working_hours, raw_status, remark,
+                source_type, review_required, reviewed_by, source_employee_name,
+                source_issue, updated_at
+            )
+            SELECT
+                work_date, shift, employee_id, 'Present', 0, division, designation,
+                TO_CHAR(work_date, 'FMDay'), NULL, NULL, 0, 'HR APPROVED PRESENT',
+                'Owner approved all missing August 2026 days as Present',
+                'Payroll Resolution', FALSE, 'Owner', employee_name, '',
+                CURRENT_TIMESTAMP
+            FROM missing_attendance
+            ON CONFLICT(work_date, shift, employee_id) DO NOTHING
+        """)
+        inserted_rows = cur.rowcount
+        cur.execute("""
+            INSERT INTO app_settings(setting_key, setting_value)
+            VALUES (%s, 'done')
+            ON CONFLICT(setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value
+        """, (resolution_key,))
+        conn.commit()
+        get_setting_value.clear()
+        return inserted_rows
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+apply_greater_noida_august_2026_present_resolution()
+
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
 
