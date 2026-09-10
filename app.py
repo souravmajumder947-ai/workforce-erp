@@ -10275,7 +10275,7 @@ if page == "Home":
     _v10_trend_start = _v115_first
     _v10_trend_end = _v115_last
     _v10_trend_sql = """
-        SELECT work_date, status, COUNT(*) AS employees
+        SELECT work_date, status, COUNT(DISTINCT employee_id) AS employees
         FROM attendance
         WHERE work_date BETWEEN ? AND ?
     """
@@ -10290,21 +10290,39 @@ if page == "Home":
         _v10_trend_raw = pd.DataFrame()
 
     if not _v10_trend_raw.empty:
-        def _v10_bucket_status(v):
-            v = str(v)
-            if v == "Present":
-                return "Present"
-            if v in {"Absent", "LWP"}:
-                return "Absent"
-            if v in {"CL", "SL", "EL", "Leave", "Half Day"}:
-                return "Leave"
-            return None
-        _v10_trend_raw["Trend"] = _v10_trend_raw["status"].map(_v10_bucket_status)
-        _v10_trend_raw = _v10_trend_raw[_v10_trend_raw["Trend"].notna()].copy()
         _v10_trend_raw["work_date"] = pd.to_datetime(_v10_trend_raw["work_date"], errors="coerce")
+        _v10_trend_raw["employees"] = pd.to_numeric(
+            _v10_trend_raw["employees"], errors="coerce"
+        ).fillna(0.0)
+        _v10_regular = _v10_trend_raw[_v10_trend_raw["status"].astype(str) != "Half Day"].copy()
+        _v10_regular["Trend"] = _v10_regular["status"].astype(str).map({
+            "Present": "Present",
+            "Absent": "Absent",
+            "LWP": "Absent",
+            "WO": "Paid Off",
+            "Holiday": "Paid Off",
+            "CL": "Paid Off",
+            "SL": "Paid Off",
+            "EL": "Paid Off",
+            "Leave": "Paid Off",
+        })
+        _v10_half = _v10_trend_raw[
+            _v10_trend_raw["status"].astype(str) == "Half Day"
+        ].copy()
+        _v10_half["employees"] = _v10_half["employees"] * 0.5
+        _v10_half_present = _v10_half.copy()
+        _v10_half_present["Trend"] = "Present"
+        _v10_half_absent = _v10_half.copy()
+        _v10_half_absent["Trend"] = "Absent"
+        _v10_trend_parts = [
+            _v10_regular[_v10_regular["Trend"].notna()],
+            _v10_half_present,
+            _v10_half_absent,
+        ]
+        _v10_trend_source = pd.concat(_v10_trend_parts, ignore_index=True)
         _v10_trend = (
-            _v10_trend_raw.groupby(["work_date", "Trend"], as_index=False)["employees"].sum()
-            if not _v10_trend_raw.empty else pd.DataFrame()
+            _v10_trend_source.groupby(["work_date", "Trend"], as_index=False)["employees"].sum()
+            if not _v10_trend_source.empty else pd.DataFrame()
         )
         if not _v10_trend.empty:
             _v10_trend["Date Label"] = _v10_trend["work_date"].dt.strftime("%d %b")
@@ -10378,7 +10396,7 @@ if page == "Home":
                             "Trend:N",
                             title=None,
                             scale=alt.Scale(
-                                domain=["Present", "Absent", "Leave"],
+                                domain=["Present", "Absent", "Paid Off"],
                                 range=["#2ed39a", "#ff5d73", "#f5b83d"],
                             ),
                         ),
@@ -10537,7 +10555,15 @@ if page == "Home":
             st.markdown(
                 f"""
                 <div class="v10-location-card">
-                  <div class="v10-india-orbit">🇮🇳<span>3 LOCATIONS</span><i></i><i></i><i></i></div>
+                  <div class="v10-india-orbit">
+                    <svg class="v10-india-map" viewBox="0 0 150 170" role="img" aria-label="India locations">
+                      <path d="M55 8 L72 13 L82 25 L96 28 L103 39 L116 47 L109 58 L116 70 L105 78 L101 94 L91 101 L87 119 L78 139 L70 160 L61 143 L55 126 L44 117 L39 102 L27 93 L34 79 L27 65 L38 53 L42 38 L51 29 Z"></path>
+                      <circle class="site site1" cx="69" cy="43" r="4"><title>Greater Noida Plant</title></circle>
+                      <circle class="site site2" cx="64" cy="39" r="4"><title>Dhaulana Glass Plant</title></circle>
+                      <circle class="site site3" cx="60" cy="46" r="4"><title>D-63 Head Office</title></circle>
+                    </svg>
+                    <span>3 LOCATIONS</span>
+                  </div>
                   <div class="v10-location-list">{_v10_location_rows}</div>
                 </div>
                 """,
@@ -17437,10 +17463,12 @@ body:has(.v10-live-home-marker) div[data-testid="stVerticalBlockBorderWrapper"]{
   border:1px solid rgba(54,126,192,.16)
 }
 .v10-india-orbit span{font-size:7px;font-weight:900;letter-spacing:1.2px;color:#7fcdf7;margin-top:3px}
-.v10-india-orbit i{position:absolute;width:7px;height:7px;border-radius:50%;box-shadow:0 0 12px currentColor;animation:v96PulseDot 1.8s infinite}
-.v10-india-orbit i:nth-of-type(1){left:53%;top:42%;background:#ff5969;color:#ff5969}
-.v10-india-orbit i:nth-of-type(2){left:45%;top:54%;background:#2fd6ff;color:#2fd6ff;animation-delay:.3s}
-.v10-india-orbit i:nth-of-type(3){left:49%;top:65%;background:#27d89d;color:#27d89d;animation-delay:.6s}
+.v10-india-map{width:108px;height:126px;overflow:visible}
+.v10-india-map path{fill:#102b43;stroke:#5da9d6;stroke-width:1.5}
+.v10-india-map .site{stroke:#07111d;stroke-width:1.5;filter:drop-shadow(0 0 5px currentColor);animation:v96PulseDot 1.8s infinite}
+.v10-india-map .site1{fill:#2ed39a;color:#2ed39a}
+.v10-india-map .site2{fill:#3498ff;color:#3498ff;animation-delay:.3s}
+.v10-india-map .site3{fill:#ff665f;color:#ff665f;animation-delay:.6s}
 .v10-location-row{
   display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;
   border-bottom:1px solid rgba(55,101,146,.15)
