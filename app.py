@@ -10559,8 +10559,21 @@ if page == "Home":
                     f'<span>{"ACTIVE" if _v10_n else "—"}</span></div>'
                 )
             _v10_map_data = pd.DataFrame({
-                "latitude": [28.4744, 28.6760, 28.6270],
-                "longitude": [77.5040, 77.6530, 77.3750],
+                "location": [
+                    "Greater Noida Plant",
+                    "Dhaulana Glass Plant",
+                    "D-63 Head Office",
+                ],
+                "latitude": [
+                    28.451388100864982,
+                    28.630672782505492,
+                    28.612209897948606,
+                ],
+                "longitude": [
+                    77.57350512760937,
+                    77.67451944283206,
+                    77.38038405421369,
+                ],
                 "marker_size": [85, 85, 85],
             })
             _v10_map_col, _v10_location_col = st.columns([0.78, 1.22], gap="small")
