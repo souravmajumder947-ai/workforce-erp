@@ -10516,6 +10516,28 @@ if page == "Home":
 # MANAGEMENT — EXECUTIVE DASHBOARD
 # ============================================================
 elif page == "Management":
+    # V15.4 MANAGEMENT PAGE ISOLATION
+    # Streamlit can briefly retain DOM nodes from the Home page during widget
+    # navigation. Scope this page and suppress any leaked Home KPI row so the
+    # two MIS rows remain aligned and never overlap.
+    st.markdown(
+        """
+        <div class="v154-management-page"></div>
+        <style>
+        body:has(.v154-management-page)
+        div[data-testid="stHorizontalBlock"]:has(.v10-kpi){
+            display:none!important;
+        }
+        body:has(.v154-management-page) .v10-live-home-marker{
+            display:none!important;
+        }
+        body:has(.v154-management-page) .block-container{
+            overflow:visible!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     # V15.3 MANAGEMENT MONTHLY EXECUTIVE CONTEXT
     v5_page_header(
         "Management Overview",
