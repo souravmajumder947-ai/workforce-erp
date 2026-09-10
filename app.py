@@ -17872,6 +17872,65 @@ body:has(.v82-login-root) .v103-footer span{
   color:#8298ac!important;font-size:7.5px!important;font-weight:650!important
 }
 body:has(.v82-login-root) .v103-footer span+span:before{color:#e74336!important}
+
+/* FINAL RESPONSIVE RELIABLE LOGIN — keep the visual design on every screen. */
+body:has(.v82-login-root) .v103-auth-head{
+  position:relative!important;overflow:hidden!important;padding:22px 24px!important;
+  margin:8px 0 16px!important;border:1px solid rgba(255,105,91,.38)!important;border-radius:18px!important;
+  background:linear-gradient(115deg,rgba(231,67,54,.24),rgba(231,67,54,.04) 44%,transparent 64%),
+             radial-gradient(circle at 92% 12%,rgba(255,92,77,.22),transparent 29%),
+             linear-gradient(145deg,#14293f,#091625)!important;
+  box-shadow:0 20px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06)!important
+}
+body:has(.v82-login-root) .v103-auth-head:before{
+  content:"RELIABLE"!important;position:absolute!important;right:10px!important;bottom:-12px!important;
+  color:rgba(255,255,255,.045)!important;font-size:54px!important;font-weight:950!important;letter-spacing:3px!important
+}
+body:has(.v82-login-root) .v103-auth-head:after{
+  content:""!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:5px!important;
+  background:linear-gradient(180deg,#ff7568,#e74336,#8e1d19)!important;box-shadow:0 0 22px rgba(231,67,54,.72)!important
+}
+body:has(.v82-login-root) .v103-auth-logo{
+  position:relative!important;z-index:2!important;width:112px!important;height:82px!important;padding:8px!important
+}
+body:has(.v82-login-root) .v103-auth-head>div:last-child{position:relative!important;z-index:2!important}
+body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:42px!important;line-height:1!important}
+body:has(.v82-login-root) .v103-company-block{
+  padding:13px 15px!important;border-radius:13px!important;border-left:5px solid #e74336!important;
+  background:linear-gradient(90deg,rgba(231,67,54,.18),rgba(11,29,46,.82))!important
+}
+body:has(.v82-login-root) .v103-status-grid .v90-status{
+  min-height:72px!important;padding:12px!important;box-shadow:0 12px 28px rgba(0,0,0,.20)!important
+}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(1){border-top:3px solid #39d99f!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(2){border-top:3px solid #5ba8ff!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){border-top:3px solid #ff665c!important}
+body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
+  background:linear-gradient(100deg,#8f1c19,#e74336 52%,#ff7165)!important;
+  border:1px solid #ff887d!important;box-shadow:0 12px 28px rgba(231,67,54,.32)!important
+}
+@media(max-width:760px){
+  body:has(.v82-login-root) .block-container{width:100%!important;max-width:780px!important;padding:20px 16px!important}
+  body:has(.v82-login-root) div[data-testid="stHorizontalBlock"]{display:block!important;min-height:auto!important}
+  body:has(.v82-login-root) .v82-ref-hero{display:none!important}
+  body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+    width:100%!important;max-width:none!important;margin:0!important
+  }
+  body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker)>div{
+    padding:23px 20px 19px!important
+  }
+  body:has(.v82-login-root) .v103-auth-head{padding:20px!important;gap:17px!important}
+  body:has(.v82-login-root) .v103-auth-logo{width:105px!important;height:78px!important}
+  body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:38px!important}
+  body:has(.v82-login-root) .v103-status-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+}
+@media(max-width:540px){
+  body:has(.v82-login-root) .v103-right-top{grid-template-columns:1fr!important;row-gap:8px!important}
+  body:has(.v82-login-root) .v103-right-time{justify-content:start!important;text-align:left!important}
+  body:has(.v82-login-root) .v103-auth-logo{width:88px!important;height:68px!important}
+  body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:31px!important}
+  body:has(.v82-login-root) .v103-status-grid{grid-template-columns:1fr!important}
+}
 </style>
 """, unsafe_allow_html=True)
 
