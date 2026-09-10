@@ -10386,35 +10386,41 @@ if page == "Home":
             if _v10_trend.empty:
                 st.info("No attendance trend data is available for this period.")
             else:
-                _v10_line = (
+                _v10_stack = (
                     alt.Chart(_v10_trend)
-                    .mark_line(point=alt.OverlayMarkDef(size=45), strokeWidth=2.2)
+                    .mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2)
                     .encode(
-                        x=alt.X("Date Label:N", title=None, sort=None, axis=alt.Axis(labelAngle=0)),
-                        y=alt.Y("employees:Q", title=None),
+                        x=alt.X(
+                            "work_date:T",
+                            title=None,
+                            axis=alt.Axis(format="%d %b", labelAngle=0, tickCount=8),
+                        ),
+                        y=alt.Y("employees:Q", title="Employees", stack="zero"),
                         color=alt.Color(
                             "Trend:N",
                             title=None,
+                            sort=["Present", "Absent", "Paid Off"],
                             scale=alt.Scale(
                                 domain=["Present", "Absent", "Paid Off"],
                                 range=["#2ed39a", "#ff5d73", "#f5b83d"],
                             ),
                         ),
+                        order=alt.Order("Trend:N", sort="ascending"),
                         tooltip=[
                             alt.Tooltip("work_date:T", title="Date", format="%d %b %Y"),
                             alt.Tooltip("Trend:N", title="Status"),
-                            alt.Tooltip("employees:Q", title="Employees"),
+                            alt.Tooltip("employees:Q", title="Employees", format=".1f"),
                         ],
                     )
                     .properties(height=205)
                     .configure_view(strokeOpacity=0)
                     .configure_axis(
-                        gridColor="#17324d", gridOpacity=.45, domain=False,
+                        gridColor="#17324d", gridOpacity=.35, domain=False,
                         labelColor="#89a0b6", tickColor="#284968",
                     )
-                    .configure_legend(labelColor="#b7c8d9", symbolType="stroke")
+                    .configure_legend(labelColor="#b7c8d9", symbolType="square")
                 )
-                st.altair_chart(_v10_line, use_container_width=True)
+                st.altair_chart(_v10_stack, use_container_width=True)
 
     with _v10_row3:
         with st.container(border=True):
@@ -10552,23 +10558,27 @@ if page == "Home":
                     f'<div><b>{html.escape(_v10_loc)}</b><small>{_v10_n:,} active in selected scope</small></div>'
                     f'<span>{"ACTIVE" if _v10_n else "—"}</span></div>'
                 )
-            st.markdown(
-                f"""
-                <div class="v10-location-card">
-                  <div class="v10-india-orbit">
-                    <svg class="v10-india-map" viewBox="0 0 150 170" role="img" aria-label="India locations">
-                      <path d="M55 8 L72 13 L82 25 L96 28 L103 39 L116 47 L109 58 L116 70 L105 78 L101 94 L91 101 L87 119 L78 139 L70 160 L61 143 L55 126 L44 117 L39 102 L27 93 L34 79 L27 65 L38 53 L42 38 L51 29 Z"></path>
-                      <circle class="site site1" cx="69" cy="43" r="4"><title>Greater Noida Plant</title></circle>
-                      <circle class="site site2" cx="64" cy="39" r="4"><title>Dhaulana Glass Plant</title></circle>
-                      <circle class="site site3" cx="60" cy="46" r="4"><title>D-63 Head Office</title></circle>
-                    </svg>
-                    <span>3 LOCATIONS</span>
-                  </div>
-                  <div class="v10-location-list">{_v10_location_rows}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            _v10_map_data = pd.DataFrame({
+                "latitude": [28.4744, 28.6760, 28.6270],
+                "longitude": [77.5040, 77.6530, 77.3750],
+                "marker_size": [85, 85, 85],
+            })
+            _v10_map_col, _v10_location_col = st.columns([0.78, 1.22], gap="small")
+            with _v10_map_col:
+                st.map(
+                    _v10_map_data,
+                    latitude="latitude",
+                    longitude="longitude",
+                    size="marker_size",
+                    color="#ff5d67",
+                    zoom=9,
+                    height=190,
+                )
+            with _v10_location_col:
+                st.markdown(
+                    f'<div class="v10-location-list">{_v10_location_rows}</div>',
+                    unsafe_allow_html=True,
+                )
 
     with _v10_lower3:
         with st.container(border=True):
