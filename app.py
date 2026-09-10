@@ -7976,23 +7976,17 @@ def v5_page_header(title, subtitle="", division=None, work_date=None, month_valu
         try: ctx.append(("Payroll", month_value.strftime("%b %Y")))
         except Exception: ctx.append(("Payroll", str(month_value)))
 
-    _role_text = html.escape(str(_current_role)) if "_current_role" in globals() else "Secure"
     _context_html = "".join(
         f'<span class="v8-context-pill">{html.escape(label)} · <strong>{html.escape(value)}</strong></span>'
         for label, value in ctx
     )
-    # Keep this HTML compact. Markdown interprets an indented inline <span>
-    # as a code block when _context_html is empty (for example, Master Centre).
     _header_html = (
         '<div class="v8-topbar">'
         '<div class="v8-title-wrap">'
-        '<div class="v8-eyebrow">Reliable Packaging · HRMS</div>'
         f'<div class="v8-page-title">{html.escape(title)}</div>'
-        f'<div class="v8-page-sub">{html.escape(subtitle)}</div>'
         '</div>'
         '<div class="v8-context">'
         f'{_context_html}'
-        f'<span class="v8-ai-pill">✦ AI-ready · {_role_text}</span>'
         '</div>'
         '</div>'
     )
@@ -8005,14 +7999,13 @@ def v5_kpis(items):
         label, value, hint, tone = item
         cards.append(
             f'<div class="v5-kpi {tone}"><div class="l">{html.escape(str(label))}</div>'
-            f'<div class="v">{html.escape(str(value))}</div><div class="h">{html.escape(str(hint))}</div></div>'
+            f'<div class="v">{html.escape(str(value))}</div></div>'
         )
     st.markdown('<div class="v5-kpi-grid">'+''.join(cards)+'</div>', unsafe_allow_html=True)
 
 def v5_panel(title, subtitle=""):
     st.markdown(
-        f'<div class="v5-panel-title">{html.escape(title)}</div>'
-        + (f'<div class="v5-panel-sub">{html.escape(subtitle)}</div>' if subtitle else ''),
+        f'<div class="v5-panel-title">{html.escape(title)}</div>',
         unsafe_allow_html=True
     )
 
@@ -17629,6 +17622,17 @@ body:has(.v104-app-quality-marker) h3{
 }
 body:has(.v104-app-quality-marker) [data-testid="stCaptionContainer"]{
   color:#8196aa!important;
+}
+
+/* Clean ERP text mode: keep controls, values and alerts; remove decorative explanations. */
+body:has(.v104-app-quality-marker) [data-testid="stCaptionContainer"],
+body:has(.v104-app-quality-marker) .v8-page-sub,
+body:has(.v104-app-quality-marker) .v5-panel-sub,
+body:has(.v104-app-quality-marker) .v8-section-label .s,
+body:has(.v104-app-quality-marker) .v8-ai-card .d,
+body:has(.v104-app-quality-marker) .v5-action .d,
+body:has(.v104-app-quality-marker) .v5-kpi .h{
+  display:none!important;
 }
 
 /* Consistent tab/navigation treatment. Prevents tab text from touching. */
