@@ -4395,15 +4395,34 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
         eligible_elapsed = max(0, (as_of - eligible_start).days + 1) if as_of >= eligible_start else 0
 
         status_counts = emp_att["status"].astype(str).value_counts().to_dict() if not emp_att.empty else {}
-        paid_days = float(sum(PAID_STATUS_FACTORS.get(str(s), 0.0) for s in emp_att["status"].astype(str))) if not emp_att.empty else 0.0
-        present_days = float(status_counts.get("Present", 0)) + 0.5 * float(status_counts.get("Half Day", 0))
-        weekly_off_days = float(status_counts.get("WO", 0))
-        paid_leave_days = float(status_counts.get("CL", 0) + status_counts.get("SL", 0) + status_counts.get("EL", 0) + status_counts.get("Leave", 0))
-        lwp_days = float(status_counts.get("LWP", 0) + status_counts.get("Absent", 0))
-        review_days = float(status_counts.get("HR Review", 0))
-        attendance_records = int(emp_att["work_date"].nunique()) if not emp_att.empty else 0
-        missing_days = max(0.0, float(eligible_elapsed - attendance_records))
         ot_hours = float(pd.to_numeric(emp_att.get("ot_hours", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not emp_att.empty else 0.0
+
+        # D-63 HEAD OFFICE FULL-PAY POLICY
+        # Approved business rule: every eligible calendar day is paid.
+        # Monday-Saturday are treated as Present and Sundays as paid WO.
+        # Raw biometric/attendance exceptions do not block D-63 payroll.
+        if emp_div.strip().upper() == "D-63 HEAD OFFICE":
+            eligible_dates = (
+                pd.date_range(eligible_start, as_of, freq="D")
+                if eligible_elapsed > 0 else pd.DatetimeIndex([])
+            )
+            weekly_off_days = float(sum(1 for d in eligible_dates if d.weekday() == 6))
+            present_days = float(eligible_elapsed) - weekly_off_days
+            paid_days = float(eligible_elapsed)
+            paid_leave_days = 0.0
+            lwp_days = 0.0
+            review_days = 0.0
+            attendance_records = int(eligible_elapsed)
+            missing_days = 0.0
+        else:
+            paid_days = float(sum(PAID_STATUS_FACTORS.get(str(s), 0.0) for s in emp_att["status"].astype(str))) if not emp_att.empty else 0.0
+            present_days = float(status_counts.get("Present", 0)) + 0.5 * float(status_counts.get("Half Day", 0))
+            weekly_off_days = float(status_counts.get("WO", 0))
+            paid_leave_days = float(status_counts.get("CL", 0) + status_counts.get("SL", 0) + status_counts.get("EL", 0) + status_counts.get("Leave", 0))
+            lwp_days = float(status_counts.get("LWP", 0) + status_counts.get("Absent", 0))
+            review_days = float(status_counts.get("HR Review", 0))
+            attendance_records = int(emp_att["work_date"].nunique()) if not emp_att.empty else 0
+            missing_days = max(0.0, float(eligible_elapsed - attendance_records))
 
         monthly_salary = _num(emp.get("monthly_salary"), 0)
         gross_monthly = _num(emp.get("gross_pay"), monthly_salary) or monthly_salary
