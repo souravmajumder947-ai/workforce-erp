@@ -3003,6 +3003,11 @@ DIVISIONS = [
     "Dhaulana Glass Plant",
     "D-63 Head Office",
 ]
+SITE_LOCATIONS = {
+    "Greater Noida Plant": (28.451388100864982, 77.57350512760937),
+    "Dhaulana Glass Plant": (28.630672782505492, 77.67451944283206),
+    "D-63 Head Office": (28.612209897948606, 77.38038405421369),
+}
 ALL_DIVISIONS = "All Divisions"
 
 def _normalize_master_division(value, fallback=""):
@@ -6800,11 +6805,13 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
   border-radius:50%;
   animation:v95RedPulse 1.65s cubic-bezier(0,.2,.8,1) infinite;
 }
-.v95-location-dot.one{left:2%;top:25%;animation-delay:0s}
+/* Positions are normalized from the approved NCR coordinates:
+   one=Greater Noida, two=Dhaulana, three=D-63 Head Office. */
+.v95-location-dot.one{left:62%;top:82%;animation-delay:0s}
 .v95-location-dot.one:before{animation-delay:0s}
-.v95-location-dot.two{right:2%;top:2%;animation-delay:.24s}
+.v95-location-dot.two{left:86%;top:8%;animation-delay:.24s}
 .v95-location-dot.two:before{animation-delay:.24s}
-.v95-location-dot.three{right:9%;bottom:1%;animation-delay:.48s}
+.v95-location-dot.three{left:5%;top:18%;animation-delay:.48s}
 .v95-location-dot.three:before{animation-delay:.48s}
 </style>
 """, unsafe_allow_html=True)
@@ -6823,7 +6830,9 @@ if st.session_state.get("auth_user") is None:
                 <div class="v83-hero-live"><span class="v83-live-pill"><span class="v83-live-dot"></span>LIVE HR SYSTEM</span></div>
                 <div class="v90-hero-telemetry"><b>SMART FACTORY NETWORK</b><span class="v90-signal-bars"><i></i><i></i><i></i></span><span class="v92-live-sync" data-v92-live-sync>SYNC {_login_verified_time}</span></div>
                 <div class="v94-map-location v95-map-cluster" aria-label="Three live company locations">
-                  <span class="v95-location-dot one"></span><span class="v95-location-dot two"></span><span class="v95-location-dot three"></span>
+                  <span class="v95-location-dot one" title="Greater Noida Plant · 28.451388, 77.573505"></span>
+                  <span class="v95-location-dot two" title="Dhaulana Glass Plant · 28.630673, 77.674519"></span>
+                  <span class="v95-location-dot three" title="D-63 Head Office · 28.612210, 77.380384"></span>
                 </div>
                 <div class="v83-hero-ai-core"></div>
                 <div class="v90-glass-sheen"></div>
@@ -7004,30 +7013,14 @@ if st.session_state.get("auth_user") is None:
             st.markdown('<div class="v82-login-card-marker"></div>', unsafe_allow_html=True)
             st.markdown(
                 f"""
-                <div class="v103-right-top">
-                  <div class="v103-secure-state"><i></i><span><b>SYSTEM ONLINE</b><small>Secure HRMS access</small></span></div>
-                  <div class="v103-right-time"><small>IST · 24H</small><b>{_login_verified_time}</b></div>
-                </div>
-
                 <div class="v90-auth-head v103-auth-head">
-                  <div class="v90-auth-orb">AI</div>
+                  <div class="v90-auth-orb">RP</div>
                   <div>
-                    <div class="v90-card-kicker">Reliable Workforce Cloud</div>
-                    <div class="v90-card-title">Welcome back</div>
+                    <div class="v90-card-kicker">Reliable Packaging Industries Limited</div>
+                    <div class="v90-card-title">Sign in</div>
                   </div>
                 </div>
-                <div class="v90-card-sub">Sign in to your secure HRMS workspace for workforce intelligence, attendance, payroll and operations.</div>
-
-                <div class="v103-company-block">
-                  <div class="v103-company-name">Reliable Packaging Industries Limited</div>
-                  <div class="v103-company-line">Smart HRMS · People · Process · Performance</div>
-                </div>
-
-                <div class="v90-status-grid v103-status-grid">
-                  <div class="v90-status active"><b><i class="v90-status-dot"></i>LIVE DATABASE</b><span>PostgreSQL connected</span><small>Real-time source</small></div>
-                  <div class="v90-status"><b>✦ AI READY</b><span>HR intelligence online</span><small>Decision support</small></div>
-                  <div class="v90-status"><b>◈ SECURE</b><span>Role-based access</span><small>Protected session</small></div>
-                </div>
+                <div class="v90-card-sub">Secure HRMS access</div>
 
                 """,
                 unsafe_allow_html=True,
@@ -7077,9 +7070,7 @@ if st.session_state.get("auth_user") is None:
             st.markdown(
                 """
                 <div class="v82-card-footer v103-footer">
-                  <span>◈ Role-based secure access</span>
-                  <b>Reliable Packaging Industries Limited</b>
-                  <small>Built in India 🇮🇳 · Created by Sourav Majumder</small>
+                  <span>Secure access · Built in India 🇮🇳</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -10558,24 +10549,15 @@ if page == "Home":
                     f'<div><b>{html.escape(_v10_loc)}</b><small>{_v10_n:,} active in selected scope</small></div>'
                     f'<span>{"ACTIVE" if _v10_n else "—"}</span></div>'
                 )
-            _v10_map_data = pd.DataFrame({
-                "location": [
-                    "Greater Noida Plant",
-                    "Dhaulana Glass Plant",
-                    "D-63 Head Office",
-                ],
-                "latitude": [
-                    28.451388100864982,
-                    28.630672782505492,
-                    28.612209897948606,
-                ],
-                "longitude": [
-                    77.57350512760937,
-                    77.67451944283206,
-                    77.38038405421369,
-                ],
-                "marker_size": [85, 85, 85],
-            })
+            _v10_map_data = pd.DataFrame([
+                {
+                    "location": location,
+                    "latitude": coordinates[0],
+                    "longitude": coordinates[1],
+                    "marker_size": 85,
+                }
+                for location, coordinates in SITE_LOCATIONS.items()
+            ])
             _v10_map_col, _v10_location_col = st.columns([0.78, 1.22], gap="small")
             with _v10_map_col:
                 st.map(
