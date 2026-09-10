@@ -7005,6 +7005,77 @@ if st.session_state.get("auth_user") is None:
       font-size:clamp(10px,.42vw,16px)!important;
       font-weight:600!important;
     }
+
+    /* Reliable Packaging brand finish — login only. */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+      border-color:rgba(231,67,54,.38)!important;
+      box-shadow:0 24px 70px rgba(0,0,0,.32),0 0 0 1px rgba(231,67,54,.06)!important;
+    }
+    .v103-right-top{
+      display:grid!important;
+      grid-template-columns:minmax(0,1fr) auto!important;
+      align-items:center!important;
+      column-gap:18px!important;
+    }
+    .v103-secure-state{
+      display:grid!important;
+      grid-template-columns:8px auto minmax(0,1fr)!important;
+      align-items:center!important;
+      gap:8px!important;
+    }
+    .v103-secure-state b,.v103-secure-state small{
+      display:block!important;
+      margin:0!important;
+      white-space:nowrap!important;
+    }
+    .v103-secure-state small{
+      padding-left:8px!important;
+      border-left:1px solid rgba(138,158,180,.22)!important;
+    }
+    .v103-right-time{
+      display:grid!important;
+      grid-template-columns:auto auto!important;
+      align-items:center!important;
+      gap:7px!important;
+      white-space:nowrap!important;
+    }
+    .v103-right-time small,.v103-right-time b{display:block!important;margin:0!important}
+    .v103-auth-logo{
+      width:72px!important;
+      height:58px!important;
+      padding:5px!important;
+      border-radius:12px!important;
+      display:grid!important;
+      place-items:center!important;
+      background:#ffffff!important;
+      border:1px solid rgba(231,67,54,.48)!important;
+      box-shadow:0 10px 28px rgba(231,67,54,.16)!important;
+      overflow:hidden!important;
+    }
+    .v103-auth-logo img{
+      width:100%!important;
+      height:100%!important;
+      object-fit:contain!important;
+      display:block!important;
+    }
+    .v103-auth-head .v90-card-kicker{color:#ef665b!important}
+    .v103-company-block{border-left:3px solid #e74336!important}
+    .v103-status-grid .v90-status.active{border-color:rgba(46,211,154,.35)!important}
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
+      background:linear-gradient(135deg,#e74336,#b92520)!important;
+      border-color:#f06b60!important;
+      box-shadow:0 10px 24px rgba(183,37,32,.25)!important;
+    }
+    .v103-footer{
+      display:flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+      flex-wrap:wrap!important;
+      gap:0!important;
+      line-height:1.5!important;
+    }
+    .v103-footer span{display:inline-flex!important;align-items:center!important;margin:0!important}
+    .v103-footer span+span:before{content:"•";padding:0 8px;color:#e74336}
     </style>
     """, unsafe_allow_html=True)
 
@@ -7014,12 +7085,12 @@ if st.session_state.get("auth_user") is None:
             st.markdown(
                 f"""
                 <div class="v103-right-top">
-                  <div class="v103-secure-state"><i></i><span><b>SYSTEM ONLINE</b><small>Secure HRMS access</small></span></div>
+                  <div class="v103-secure-state"><i></i><b>SYSTEM ONLINE</b><small>Secure HRMS access</small></div>
                   <div class="v103-right-time"><small>IST · 24H</small><b>{_login_verified_time}</b></div>
                 </div>
 
                 <div class="v90-auth-head v103-auth-head">
-                  <div class="v90-auth-orb">AI</div>
+                  <div class="v103-auth-logo"><img src="{LOGO_FULL_DATA_URI}" alt="Reliable Packaging Industries Limited"></div>
                   <div>
                     <div class="v90-card-kicker">Reliable Workforce Cloud</div>
                     <div class="v90-card-title">Welcome back</div>
@@ -7086,9 +7157,9 @@ if st.session_state.get("auth_user") is None:
             st.markdown(
                 """
                 <div class="v82-card-footer v103-footer">
-                  <span>◈ Role-based secure access</span>
-                  <b>Reliable Packaging Industries Limited</b>
-                  <small>Built in India 🇮🇳 · Created by Sourav Majumder</small>
+                  <span>Role-based secure access</span>
+                  <span>Reliable Packaging Industries Limited</span>
+                  <span>Built in India 🇮🇳 · Created by Sourav Majumder</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
