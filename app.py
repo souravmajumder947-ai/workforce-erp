@@ -10636,64 +10636,11 @@ elif page == "Management":
         unsafe_allow_html=True,
     )
 
-    # V9.3 MANAGEMENT MIS CENTRE
-    # A modern report hub inspired by mature ERP navigation patterns, while
-    # keeping Reliable HRMS modules and permissions as the source of truth.
-    st.markdown("### Management MIS Centre")
-    st.caption(
-        "One-click management access to workforce, payroll, contractor, production and analytical views. "
-        "The selected Division and Payroll Month remain your live management context."
-    )
-
-    def _v93_open_module(_module, _title):
-        """Update the navigation widget in its callback before the next rerun."""
-        st.session_state["v5_navigation"] = _module
-        st.session_state["v93_last_mis"] = _title
-
-    def _v93_mis_card(_icon, _title, _subtitle, _module, _key):
-        st.markdown(
-            f"""
-            <div style="min-height:118px;border:1px solid #22344a;border-radius:16px;"
-                 "padding:16px;background:linear-gradient(145deg,#0c1725,#101f31);margin-bottom:8px;">
-                <div style="font-size:22px;margin-bottom:8px;">{_icon}</div>
-                <div style="font-size:15px;font-weight:800;color:#f5f8fc;">{html.escape(_title)}</div>
-                <div style="font-size:11px;color:#8fa4ba;margin-top:5px;line-height:1.35;">{html.escape(_subtitle)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if _module in available_modules:
-            st.button(
-                f"Open {_title}",
-                key=_key,
-                use_container_width=True,
-                on_click=_v93_open_module,
-                args=(_module, _title),
-            )
-        else:
-            st.caption("Access restricted for this user role.")
-
-    _mis1, _mis2, _mis3, _mis4 = st.columns(4)
-    with _mis1:
-        _v93_mis_card("◷", "Daily Attendance MIS", "Open the daily register when a specific attendance date is required.", "Attendance", "v93_mis_daily_att")
-    with _mis2:
-        _v93_mis_card("▦", "Monthly Attendance MIS", "Monthly attendance pattern, missing punches and employee history.", "Attendance", "v93_mis_month_att")
-    with _mis3:
-        _v93_mis_card("₹", "Payroll Cost MIS", "Salary, paid days, OT, deductions, PF/ESIC and net payable.", "Payroll", "v93_mis_payroll")
-    with _mis4:
-        _v93_mis_card("👥", "Employee 360", "Open employee history, master details, attendance and salary context.", "Employees", "v93_mis_emp360")
-
-    _mis5, _mis6, _mis7, _mis8 = st.columns(4)
-    with _mis5:
-        _v93_mis_card("🏗", "Operations MIS", "Production, machine manpower, targets, waste and operational performance.", "Operations", "v93_mis_ops")
-    with _mis6:
-        _v93_mis_card("🧾", "Contractor Cost MIS", "Vendor/thekedar work, quantity, rate and contractor cost visibility.", "Contractors", "v93_mis_contractor")
-    with _mis7:
-        _v93_mis_card("▤", "Executive Reports", "Management reports, exports and consolidated summaries.", "Reports", "v93_mis_reports")
-    with _mis8:
-        _v93_mis_card("✦", "AI Management Insights", "Use AI-assisted analysis on workforce and operational questions.", "AI Tools", "v93_mis_ai")
-
-    st.markdown("---")
+    # V15.5 CLEAN MANAGEMENT STRUCTURE
+    # Navigation already exists in the sidebar.  The former eight-card MIS
+    # launcher duplicated that navigation and caused stale Streamlit elements
+    # to overlap this page.  Management now opens directly on live KPIs,
+    # division performance and salary reporting.
 
     total_emp=len(emp_all)
     att_status=_v153_status
