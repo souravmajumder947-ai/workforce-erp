@@ -7013,14 +7013,30 @@ if st.session_state.get("auth_user") is None:
             st.markdown('<div class="v82-login-card-marker"></div>', unsafe_allow_html=True)
             st.markdown(
                 f"""
+                <div class="v103-right-top">
+                  <div class="v103-secure-state"><i></i><span><b>SYSTEM ONLINE</b><small>Secure HRMS access</small></span></div>
+                  <div class="v103-right-time"><small>IST · 24H</small><b>{_login_verified_time}</b></div>
+                </div>
+
                 <div class="v90-auth-head v103-auth-head">
-                  <div class="v90-auth-orb">RP</div>
+                  <div class="v90-auth-orb">AI</div>
                   <div>
-                    <div class="v90-card-kicker">Reliable Packaging Industries Limited</div>
-                    <div class="v90-card-title">Sign in</div>
+                    <div class="v90-card-kicker">Reliable Workforce Cloud</div>
+                    <div class="v90-card-title">Welcome back</div>
                   </div>
                 </div>
-                <div class="v90-card-sub">Secure HRMS access</div>
+                <div class="v90-card-sub">Sign in to your secure HRMS workspace for workforce intelligence, attendance, payroll and operations.</div>
+
+                <div class="v103-company-block">
+                  <div class="v103-company-name">Reliable Packaging Industries Limited</div>
+                  <div class="v103-company-line">Smart HRMS · People · Process · Performance</div>
+                </div>
+
+                <div class="v90-status-grid v103-status-grid">
+                  <div class="v90-status active"><b><i class="v90-status-dot"></i>LIVE DATABASE</b><span>PostgreSQL connected</span><small>Real-time source</small></div>
+                  <div class="v90-status"><b>✦ AI READY</b><span>HR intelligence online</span><small>Decision support</small></div>
+                  <div class="v90-status"><b>◈ SECURE</b><span>Role-based access</span><small>Protected session</small></div>
+                </div>
 
                 """,
                 unsafe_allow_html=True,
@@ -7070,7 +7086,9 @@ if st.session_state.get("auth_user") is None:
             st.markdown(
                 """
                 <div class="v82-card-footer v103-footer">
-                  <span>Secure access · Built in India 🇮🇳</span>
+                  <span>◈ Role-based secure access</span>
+                  <b>Reliable Packaging Industries Limited</b>
+                  <small>Built in India 🇮🇳 · Created by Sourav Majumder</small>
                 </div>
                 """,
                 unsafe_allow_html=True,
