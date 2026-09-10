@@ -5089,11 +5089,7 @@ def apply_greater_noida_august_2026_present_resolution():
                     e.division,
                     e.designation,
                     COALESCE(NULLIF(TRIM(e.shift), ''), 'General') AS shift,
-                    CASE
-                        WHEN COALESCE(e.joining_date, '') ~ '^\\d{4}-\\d{2}-\\d{2}$'
-                        THEN GREATEST(DATE '2026-08-01', e.joining_date::date)
-                        ELSE DATE '2026-08-01'
-                    END AS eligible_start
+                    DATE '2026-08-01' AS eligible_start
                 FROM employees e
                 WHERE e.status = 'Active'
                   AND COALESCE(e.salary_active, TRUE) = TRUE
