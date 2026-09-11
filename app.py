@@ -9436,6 +9436,27 @@ def _v138_ensure_consumption_summary_schema():
             "CREATE INDEX IF NOT EXISTS idx_consumption_summary_month "
             "ON production_consumption_summary(period_month)"
         )
+        # Business rule confirmed by management:
+        # Reel Consumption = Reel Issue - Reel Return.
+        # Repair legacy/monthly rows that previously stored consumption as 0
+        # (or any value different from the calculated net issue).
+        cur.execute(
+            """
+            UPDATE production_consumption_summary
+            SET net_issue_kg = GREATEST(
+                    COALESCE(reel_issue_kg,0) - COALESCE(reel_return_kg,0), 0
+                ),
+                reel_consumption_kg = GREATEST(
+                    COALESCE(reel_issue_kg,0) - COALESCE(reel_return_kg,0), 0
+                )
+            WHERE net_issue_kg IS DISTINCT FROM GREATEST(
+                      COALESCE(reel_issue_kg,0) - COALESCE(reel_return_kg,0), 0
+                  )
+               OR reel_consumption_kg IS DISTINCT FROM GREATEST(
+                      COALESCE(reel_issue_kg,0) - COALESCE(reel_return_kg,0), 0
+                  )
+            """
+        )
         conn.commit()
         return True
     except Exception:
@@ -14241,7 +14262,7 @@ elif page == "Operations":
         _v160_month_date=date(_v160_month.year,_v160_month.month,1)
         _v160_template=pd.DataFrame(columns=[
             "ERP Code","Item Name","Reel Size","Reel Issue Ton",
-            "Reel Return Ton","Actual Consumption Ton","Unit","Remark"
+            "Reel Return Ton","Unit","Remark"
         ])
         _v160_template_bytes=BytesIO()
         _v160_template.to_excel(_v160_template_bytes,index=False)
@@ -14263,8 +14284,8 @@ elif page == "Operations":
                       reel_size AS "Reel Size",
                       reel_issue_kg/1000.0 AS "Reel Issue Ton",
                       reel_return_kg/1000.0 AS "Reel Return Ton",
-                      reel_consumption_kg/1000.0 AS "Actual Consumption Ton",
-                      COALESCE(unit,'Ton') AS "Unit",
+                      (reel_issue_kg-reel_return_kg)/1000.0 AS "Consumption Ton",
+                      'TON' AS "Unit",
                       COALESCE(item_group,'') AS "Remark"
                FROM production_consumption_summary
                WHERE period_month=?
@@ -14294,9 +14315,6 @@ elif page == "Operations":
                     "Reel Size":_v160_pick("reel size","size"),
                     "Reel Issue Ton":_v160_pick("reel issue ton","issue ton","reel issue","issue"),
                     "Reel Return Ton":_v160_pick("reel return ton","return ton","reel return","return"),
-                    "Actual Consumption Ton":_v160_pick(
-                        "actual consumption ton","consumption ton","reel consumption","consumption"
-                    ),
                     "Unit":_v160_pick("unit","uom"),
                     "Remark":_v160_pick("remark","remarks"),
                 })
@@ -14304,9 +14322,27 @@ elif page == "Operations":
             except Exception as _v160_upload_exc:
                 st.error(f"Unable to read this file: {_v160_upload_exc}")
 
+        # Consumption is system-calculated; users never need to type it.
+        if not _v160_seed.empty:
+            _v160_seed["Reel Issue Ton"]=pd.to_numeric(
+                _v160_seed.get("Reel Issue Ton",0),errors="coerce"
+            ).fillna(0.0)
+            _v160_seed["Reel Return Ton"]=pd.to_numeric(
+                _v160_seed.get("Reel Return Ton",0),errors="coerce"
+            ).fillna(0.0)
+            _v160_seed["Consumption Ton"]=(
+                _v160_seed["Reel Issue Ton"]-_v160_seed["Reel Return Ton"]
+            ).clip(lower=0.0)
+            _v160_seed["Unit"]="TON"
+        elif "Consumption Ton" not in _v160_seed.columns:
+            _v160_seed["Consumption Ton"]=pd.Series(dtype=float)
+
+        st.info("Consumption is calculated automatically: Reel Issue − Reel Return.")
+
         _v160_editor=st.data_editor(
             _v160_seed,
             hide_index=True,use_container_width=True,num_rows="dynamic",
+            disabled=["Consumption Ton","Unit"],
             key=f"v160_reel_editor_{_v160_month_date.isoformat()}_{getattr(_v160_upload,'name','manual')}",
             column_config={
                 "ERP Code":st.column_config.TextColumn("ERP Code"),
@@ -14314,20 +14350,19 @@ elif page == "Operations":
                 "Reel Size":st.column_config.TextColumn("Reel Size"),
                 "Reel Issue Ton":st.column_config.NumberColumn("Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"),
                 "Reel Return Ton":st.column_config.NumberColumn("Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"),
-                "Actual Consumption Ton":st.column_config.NumberColumn("Actual Consumption Ton",min_value=0.0,step=0.001,format="%.3f"),
+                "Consumption Ton":st.column_config.NumberColumn("Consumption Ton",min_value=0.0,step=0.001,format="%.3f"),
                 "Unit":st.column_config.TextColumn("Unit"),
                 "Remark":st.column_config.TextColumn("Remark"),
             },
         )
         _v160_work=_v160_editor.copy()
-        for _v160_col in ["Reel Issue Ton","Reel Return Ton","Actual Consumption Ton"]:
+        for _v160_col in ["Reel Issue Ton","Reel Return Ton"]:
             _v160_work[_v160_col]=pd.to_numeric(_v160_work[_v160_col],errors="coerce").fillna(0.0)
         _v160_work["ERP Code"]=_v160_work["ERP Code"].fillna("").astype(str).str.strip()
         _v160_work["Item Name"]=_v160_work["Item Name"].fillna("").astype(str).str.strip()
         _v160_work=_v160_work[
             (_v160_work["ERP Code"]!="")|(_v160_work["Item Name"]!="")|
-            (_v160_work["Reel Issue Ton"]>0)|(_v160_work["Reel Return Ton"]>0)|
-            (_v160_work["Actual Consumption Ton"]>0)
+            (_v160_work["Reel Issue Ton"]>0)|(_v160_work["Reel Return Ton"]>0)
         ].copy()
         # A full-month statement can repeat the same reel/item on many dates.
         # Consolidate those rows before saving the monthly summary.
@@ -14342,19 +14377,20 @@ elif page == "Operations":
                 .agg({
                     "Reel Issue Ton":"sum",
                     "Reel Return Ton":"sum",
-                    "Actual Consumption Ton":"sum",
                     "Remark":"first",
                 })
             )
         _v160_work["Net Issue Ton"]=_v160_work["Reel Issue Ton"]-_v160_work["Reel Return Ton"]
+        _v160_work["Consumption Ton"]=_v160_work["Net Issue Ton"]
+        _v160_work["Unit"]="TON"
         _v160_issue=float(_v160_work["Reel Issue Ton"].sum()) if not _v160_work.empty else 0.0
         _v160_return=float(_v160_work["Reel Return Ton"].sum()) if not _v160_work.empty else 0.0
-        _v160_consumption=float(_v160_work["Actual Consumption Ton"].sum()) if not _v160_work.empty else 0.0
+        _v160_consumption=float(_v160_work["Consumption Ton"].sum()) if not _v160_work.empty else 0.0
         _v160_a,_v160_b,_v160_c,_v160_d=st.columns(4)
         _v160_a.metric("Rows",f"{len(_v160_work):,}")
         _v160_b.metric("Reel Issue",f"{_v160_issue:,.3f} T")
         _v160_c.metric("Reel Return",f"{_v160_return:,.3f} T")
-        _v160_d.metric("Net Issue",f"{(_v160_issue-_v160_return):,.3f} T")
+        _v160_d.metric("Consumption",f"{_v160_consumption:,.3f} T")
 
         if st.button("Save Monthly Reel Data",type="primary",use_container_width=True,key="v160_save_reel"):
             _v160_invalid=_v160_work[
@@ -14388,8 +14424,8 @@ elif page == "Operations":
                             float(_v160_r["Net Issue Ton"])*1000.0,
                             str(_v160_r.get("Reel Size") or "").strip(),
                             _v160_code,
-                            float(_v160_r["Actual Consumption Ton"])*1000.0,
-                            str(_v160_r.get("Unit") or "Ton").strip() or "Ton",
+                            float(_v160_r["Consumption Ton"])*1000.0,
+                            "TON",
                             getattr(_v160_upload,"name","Manual Entry"),
                             _current_user["username"],
                         ))
@@ -14411,7 +14447,7 @@ elif page == "Operations":
                     st.success(
                         f"{_v160_month.strftime('%b %Y')} reel data saved: "
                         f"Issue {_v160_issue:,.3f} T · Return {_v160_return:,.3f} T · "
-                        f"Net {_v160_issue-_v160_return:,.3f} T."
+                        f"Consumption {_v160_consumption:,.3f} T."
                     )
                     st.rerun()
                 except Exception as _v160_save_exc:
