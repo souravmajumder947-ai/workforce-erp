@@ -14631,6 +14631,72 @@ elif page == "Reports":
                     "Cost / Ton":_cost_rows["cost_per_ton"].round(2),
                 })
 
+    if report_type=="Manpower Cost vs Tonnage" and not report_df.empty:
+        _md_cost=report_df.copy()
+        for _col in ["Actual Headcount","Production Ton","Total Manpower Cost","Cost / Ton"]:
+            _md_cost[_col]=pd.to_numeric(_md_cost[_col],errors="coerce").fillna(0)
+        _md_total_ton=float(_md_cost["Production Ton"].sum())
+        _md_total_cost=float(_md_cost["Total Manpower Cost"].sum())
+        _md_person_shifts=float(_md_cost["Actual Headcount"].sum())
+        _md_cost_per_ton=(_md_total_cost/_md_total_ton) if _md_total_ton else 0.0
+        _md_ton_per_person=(_md_total_ton/_md_person_shifts) if _md_person_shifts else 0.0
+        _md_avg_headcount=float(_md_cost["Actual Headcount"].mean()) if len(_md_cost) else 0.0
+        v5_kpis([
+            ("Production",f"{_md_total_ton:,.2f} Ton","Selected month","blue"),
+            ("Manpower Cost",v5_money(_md_total_cost),"Employee + contractor",""),
+            ("Cost / Ton",v5_money(_md_cost_per_ton),"Management efficiency","good" if _md_total_ton else "warn"),
+            ("Ton / Person",f"{_md_ton_per_person:,.2f}","Per person-shift","good" if _md_person_shifts else "warn"),
+            ("Average Headcount",f"{_md_avg_headcount:,.1f}","Machine-shift average",""),
+        ])
+        _md_machine=(
+            _md_cost.groupby("Machine",as_index=False)
+            .agg({
+                "Production Ton":"sum",
+                "Total Manpower Cost":"sum",
+                "Actual Headcount":"sum",
+            })
+        )
+        _md_machine["Cost / Ton"]=_md_machine.apply(
+            lambda _r: (_r["Total Manpower Cost"]/_r["Production Ton"])
+            if _r["Production Ton"] else 0.0,
+            axis=1,
+        )
+        _md_left,_md_right=st.columns(2)
+        with _md_left:
+            st.markdown("#### Production by Machine")
+            _md_prod_chart=(
+                alt.Chart(_md_machine)
+                .mark_bar(cornerRadiusTopRight=4,cornerRadiusBottomRight=4,color="#49a5ff")
+                .encode(
+                    y=alt.Y("Machine:N",sort="-x",title=None),
+                    x=alt.X("Production Ton:Q",title="Production (Ton)"),
+                    tooltip=[
+                        alt.Tooltip("Machine:N",title="Machine"),
+                        alt.Tooltip("Production Ton:Q",title="Production Ton",format=",.2f"),
+                        alt.Tooltip("Actual Headcount:Q",title="Person-Shifts",format=",.0f"),
+                    ],
+                )
+                .properties(height=max(220,min(420,34*len(_md_machine))))
+            )
+            st.altair_chart(_md_prod_chart,use_container_width=True)
+        with _md_right:
+            st.markdown("#### Manpower Cost per Ton")
+            _md_cpt_chart=(
+                alt.Chart(_md_machine)
+                .mark_bar(cornerRadiusTopRight=4,cornerRadiusBottomRight=4,color="#ff6b5f")
+                .encode(
+                    y=alt.Y("Machine:N",sort="-x",title=None),
+                    x=alt.X("Cost / Ton:Q",title="Cost per Ton (₹)"),
+                    tooltip=[
+                        alt.Tooltip("Machine:N",title="Machine"),
+                        alt.Tooltip("Cost / Ton:Q",title="Cost / Ton",format=",.2f"),
+                        alt.Tooltip("Total Manpower Cost:Q",title="Manpower Cost",format=",.2f"),
+                    ],
+                )
+                .properties(height=max(220,min(420,34*len(_md_machine))))
+            )
+            st.altair_chart(_md_cpt_chart,use_container_width=True)
+
     if report_df.empty:
         st.info("No data is available for this report and selected context.")
     else:
