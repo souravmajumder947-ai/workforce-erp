@@ -14712,6 +14712,7 @@ elif page == "Reports":
         "Employee Master",
         "Contractor Payable",
         "Production Performance",
+        "Reel Consumption - Day Wise",
         "Manpower Allocation",
         "Manpower Cost vs Tonnage",
     ]
@@ -14722,6 +14723,7 @@ elif page == "Reports":
     first,last=_month_range(report_month)
     report_df=pd.DataFrame()
     report_title=report_type
+    report_note=""
 
     if report_type=="Attendance Register":
         clause,params=v5_division_clause(report_div,"a.")
@@ -14773,6 +14775,64 @@ elif page == "Reports":
                                        p.breakdown_hours AS "Breakdown Hours",p.remark AS "Remark"
                                 FROM production p LEFT JOIN machines m ON m.machine=p.machine
                                 WHERE p.work_date BETWEEN ? AND ? ORDER BY p.work_date,p.shift,p.machine""",(first.isoformat(),last.isoformat()))
+    elif report_type=="Reel Consumption - Day Wise":
+        if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
+            report_df=pd.DataFrame()
+        else:
+            # Day-wise reel report uses only genuine dated reel movements.
+            # Never fabricate daily values from a monthly consolidated upload.
+            try:
+                _reel_day_raw=read_df(
+                    """SELECT work_date AS "Date",
+                              COALESCE(reel_issue_ton,0) AS "Reel Issue Ton",
+                              COALESCE(reel_return_ton,0) AS "Reel Return Ton",
+                              CASE
+                                  WHEN COALESCE(consumption_ton,0)>0
+                                      THEN COALESCE(consumption_ton,0)
+                                  ELSE GREATEST(
+                                      COALESCE(reel_issue_ton,0)-COALESCE(reel_return_ton,0),0
+                                  )
+                              END AS "Consumption Ton"
+                       FROM production_reel_consumption
+                       WHERE work_date BETWEEN ? AND ?
+                       ORDER BY work_date""",
+                    (first.isoformat(),last.isoformat())
+                )
+            except Exception:
+                _reel_day_raw=pd.DataFrame()
+
+            if not _reel_day_raw.empty:
+                for _rc in ["Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
+                    _reel_day_raw[_rc]=pd.to_numeric(
+                        _reel_day_raw[_rc],errors="coerce"
+                    ).fillna(0.0)
+                report_df=(
+                    _reel_day_raw.groupby("Date",as_index=False)[
+                        ["Reel Issue Ton","Reel Return Ton","Consumption Ton"]
+                    ].sum()
+                )
+                report_df["Reel Issue Ton"]=report_df["Reel Issue Ton"].round(2)
+                report_df["Reel Return Ton"]=report_df["Reel Return Ton"].round(2)
+                report_df["Consumption Ton"]=report_df["Consumption Ton"].round(2)
+            else:
+                _reel_month_check=read_df(
+                    """SELECT COUNT(*) AS rows
+                       FROM production_consumption_summary
+                       WHERE period_month=?""",
+                    (date(report_month.year,report_month.month,1).isoformat(),)
+                )
+                _has_monthly=(
+                    (not _reel_month_check.empty)
+                    and int(pd.to_numeric(_reel_month_check.iloc[0]["rows"],errors="coerce") or 0)>0
+                )
+                if _has_monthly:
+                    report_note=(
+                        f"{report_month.strftime('%b %Y')} has monthly Reel Issue/Return data, "
+                        "but that monthly upload was saved as a consolidated statement without transaction dates. "
+                        "Exact day-wise Issue, Return and Consumption cannot be reconstructed from monthly totals. "
+                        "Day-wise reporting will show data entered through Daily Production Entry."
+                    )
+
     elif report_type=="Manpower Allocation":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
@@ -14959,6 +15019,17 @@ elif page == "Reports":
                     "Cost / Ton":_cost_rows["cost_per_ton"].round(2),
                 })
 
+    if report_type=="Reel Consumption - Day Wise" and not report_df.empty:
+        _rd_issue=float(pd.to_numeric(report_df["Reel Issue Ton"],errors="coerce").fillna(0).sum())
+        _rd_return=float(pd.to_numeric(report_df["Reel Return Ton"],errors="coerce").fillna(0).sum())
+        _rd_consumption=float(pd.to_numeric(report_df["Consumption Ton"],errors="coerce").fillna(0).sum())
+        v5_kpis([
+            ("Days",f"{len(report_df):,}","Dated reel movement days","blue"),
+            ("Reel Issue",f"{_rd_issue:,.2f} T","Selected month",""),
+            ("Reel Return",f"{_rd_return:,.2f} T","Selected month",""),
+            ("Consumption",f"{_rd_consumption:,.2f} T","Issue - Return","good"),
+        ])
+
     if report_type=="Manpower Cost vs Tonnage" and not report_df.empty:
         _md_cost=report_df.copy()
         for _col in ["Actual Headcount","Production Ton","Total Manpower Cost","Cost / Ton"]:
@@ -15026,7 +15097,10 @@ elif page == "Reports":
             st.altair_chart(_md_cpt_chart,use_container_width=True)
 
     if report_df.empty:
-        st.info("No data is available for this report and selected context.")
+        if report_note:
+            st.warning(report_note)
+        else:
+            st.info("No data is available for this report and selected context.")
     else:
         st.success(
             f"{report_type} is ready · {len(report_df):,} rows · "
