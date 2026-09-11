@@ -14314,24 +14314,87 @@ elif page == "Reports":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
         else:
+            # Read source tables separately. Older live databases can contain
+            # legacy column types; normalising in pandas avoids PostgreSQL
+            # undefined-operator errors without modifying any stored data.
             _cost_rows=read_df(
-                """SELECT h.work_date,h.shift,h.machine,m.department,
-                          COALESCE(t.standard_manpower,0) AS required_headcount,
-                          h.employee_headcount,h.contractor_headcount,
-                          (h.employee_headcount+h.contractor_headcount) AS actual_headcount,
-                          COALESCE(p.good_output_ton,p.production_ton,0) AS production_ton,
-                          COALESCE(p.target_ton,0) AS target_ton
-                   FROM manpower_headcount_entries h
-                   LEFT JOIN machines m ON m.machine=h.machine
-                   LEFT JOIN machine_shift_targets t ON t.machine=h.machine AND t.shift=h.shift
-                   LEFT JOIN production p
-                     ON p.work_date=h.work_date AND p.shift=h.shift AND p.machine=h.machine
-                   WHERE h.work_date BETWEEN ? AND ?
-                     AND h.division='Greater Noida Plant'
-                   ORDER BY h.work_date,h.shift,h.machine""",
+                """SELECT work_date,shift,machine,employee_headcount,contractor_headcount
+                   FROM manpower_headcount_entries
+                   WHERE work_date::text BETWEEN ? AND ?
+                     AND division='Greater Noida Plant'
+                   ORDER BY work_date,shift,machine""",
                 (first.isoformat(),last.isoformat())
             )
             if not _cost_rows.empty:
+                _cost_machine=read_df(
+                    """SELECT machine,department FROM machines"""
+                )
+                _cost_target=read_df(
+                    """SELECT machine,shift,standard_manpower FROM machine_shift_targets"""
+                )
+                _cost_production=read_df(
+                    """SELECT work_date,shift,machine,production_ton,target_ton,good_output_ton
+                       FROM production
+                       WHERE work_date::text BETWEEN ? AND ?""",
+                    (first.isoformat(),last.isoformat())
+                )
+                _cost_rows["work_date"]=_cost_rows["work_date"].astype(str)
+                _cost_rows["shift"]=_cost_rows["shift"].astype(str)
+                _cost_rows["machine"]=_cost_rows["machine"].astype(str)
+                if not _cost_machine.empty:
+                    _cost_machine=_cost_machine.drop_duplicates(subset=["machine"])
+                    _cost_rows=_cost_rows.merge(_cost_machine,on="machine",how="left")
+                else:
+                    _cost_rows["department"]=""
+                if not _cost_target.empty:
+                    _cost_target["shift"]=_cost_target["shift"].astype(str)
+                    _cost_target["machine"]=_cost_target["machine"].astype(str)
+                    _cost_target=_cost_target.drop_duplicates(subset=["machine","shift"])
+                    _cost_rows=_cost_rows.merge(_cost_target,on=["machine","shift"],how="left")
+                else:
+                    _cost_rows["standard_manpower"]=0
+                if not _cost_production.empty:
+                    _cost_production["work_date"]=_cost_production["work_date"].astype(str)
+                    _cost_production["shift"]=_cost_production["shift"].astype(str)
+                    _cost_production["machine"]=_cost_production["machine"].astype(str)
+                    for _pc in ["production_ton","target_ton","good_output_ton"]:
+                        _cost_production[_pc]=pd.to_numeric(
+                            _cost_production[_pc],errors="coerce"
+                        ).fillna(0)
+                    _cost_production["report_production_ton"]=_cost_production[
+                        "good_output_ton"
+                    ].where(
+                        _cost_production["good_output_ton"]>0,
+                        _cost_production["production_ton"],
+                    )
+                    _cost_production=_cost_production[
+                        ["work_date","shift","machine","report_production_ton","target_ton"]
+                    ].drop_duplicates(subset=["work_date","shift","machine"])
+                    _cost_rows=_cost_rows.merge(
+                        _cost_production,on=["work_date","shift","machine"],how="left"
+                    )
+                    _cost_rows["production_ton"]=_cost_rows["report_production_ton"]
+                else:
+                    _cost_rows["production_ton"]=0
+                    _cost_rows["target_ton"]=0
+                _cost_rows["required_headcount"]=pd.to_numeric(
+                    _cost_rows.get("standard_manpower",0),errors="coerce"
+                ).fillna(0)
+                _cost_rows["production_ton"]=pd.to_numeric(
+                    _cost_rows.get("production_ton",0),errors="coerce"
+                ).fillna(0)
+                _cost_rows["target_ton"]=pd.to_numeric(
+                    _cost_rows.get("target_ton",0),errors="coerce"
+                ).fillna(0)
+                _cost_rows["employee_headcount"]=pd.to_numeric(
+                    _cost_rows["employee_headcount"],errors="coerce"
+                ).fillna(0)
+                _cost_rows["contractor_headcount"]=pd.to_numeric(
+                    _cost_rows["contractor_headcount"],errors="coerce"
+                ).fillna(0)
+                _cost_rows["actual_headcount"]=(
+                    _cost_rows["employee_headcount"]+_cost_rows["contractor_headcount"]
+                )
                 _month_key_value=_month_key(report_month)
                 _final_cost=read_df(
                     """SELECT COALESCE(SUM(total_payable),0) AS employee_cost
