@@ -9691,6 +9691,127 @@ def _v150_final_payroll_summary(payroll_month, division=ALL_DIVISIONS):
 
 
 # ============================================================
+# V15.4 GLOBAL LIVE READINESS SIGNALS
+# Fixes the shared V9.4 readiness variables used by Home + AI Tools.
+# These signals must exist before page routing, otherwise Streamlit raises
+# NameError when Home/AI pages reference _v94_* values.
+# ============================================================
+_v94_upload_pending = False
+_v94_missing = 0
+_v94_review = 0
+_v94_master_pending = 0
+_v94_payroll_pending = False
+_v94_notification_total = 0
+
+if page in ("Home", "AI Tools"):
+    try:
+        _v94_emp = v5_active_employees(global_division)
+        _v94_day_att = v5_attendance_for_date(global_work_date, global_division)
+
+        _v94_active_ids = (
+            set(_v94_emp["employee_id"].fillna("").astype(str).str.strip())
+            if not _v94_emp.empty and "employee_id" in _v94_emp.columns else set()
+        )
+        _v94_active_ids.discard("")
+
+        _v94_day_ids = (
+            set(_v94_day_att["employee_id"].fillna("").astype(str).str.strip())
+            if not _v94_day_att.empty and "employee_id" in _v94_day_att.columns else set()
+        )
+        _v94_day_ids.discard("")
+
+        _v94_upload_pending = bool(_v94_active_ids) and _v94_day_att.empty
+        _v94_missing = len(_v94_active_ids - _v94_day_ids) if _v94_active_ids else 0
+
+        # Review signals for the selected working month.
+        _v94_month_start = global_work_date.replace(day=1)
+        _v94_month_end = (
+            (_v94_month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            - timedelta(days=1)
+        )
+        _v94_att_sql = """
+            SELECT employee_id, status
+            FROM attendance
+            WHERE work_date BETWEEN ? AND ?
+        """
+        _v94_att_params = [_v94_month_start.isoformat(), _v94_month_end.isoformat()]
+        if global_division != ALL_DIVISIONS:
+            _v94_att_sql += " AND division=?"
+            _v94_att_params.append(global_division)
+        _v94_month_att = read_df(_v94_att_sql, tuple(_v94_att_params))
+        if not _v94_month_att.empty and "status" in _v94_month_att.columns:
+            _v94_review = int(
+                (_v94_month_att["status"].fillna("").astype(str).str.strip() == "HR Review").sum()
+            )
+
+        # Employee-master readiness = active employees whose department is not
+        # mapped to an active department master.
+        _v94_dep_master = read_df("SELECT department FROM departments WHERE active='Yes'")
+        _v94_dep_set = (
+            set(_v94_dep_master["department"].fillna("").astype(str).str.strip())
+            if not _v94_dep_master.empty else set()
+        )
+        if _v94_active_ids and not _v94_emp.empty and "department" in _v94_emp.columns:
+            if _v94_dep_set:
+                _v94_master_pending = int(
+                    (~_v94_emp["department"].fillna("").astype(str).str.strip().isin(_v94_dep_set)).sum()
+                )
+            else:
+                _v94_master_pending = len(_v94_active_ids)
+
+        # Payroll readiness = every salary-active employee in the selected
+        # scope has a finalized/imported payroll record for the selected month.
+        if not _v94_emp.empty:
+            if "salary_active" in _v94_emp.columns:
+                _v94_salary_mask = _v94_emp["salary_active"].apply(
+                    lambda x: True if pd.isna(x) else str(x).strip().lower() not in ("false", "0", "no", "n")
+                )
+                _v94_payroll_ids = set(
+                    _v94_emp.loc[_v94_salary_mask, "employee_id"].fillna("").astype(str).str.strip()
+                )
+            else:
+                _v94_payroll_ids = set(
+                    _v94_emp["employee_id"].fillna("").astype(str).str.strip()
+                )
+            _v94_payroll_ids.discard("")
+        else:
+            _v94_payroll_ids = set()
+
+        _v94_final_sql = """
+            SELECT employee_id
+            FROM payroll_records
+            WHERE payroll_month=?
+        """
+        _v94_final_params = [_month_key(global_payroll_month)]
+        if global_division != ALL_DIVISIONS:
+            _v94_final_sql += " AND division=?"
+            _v94_final_params.append(global_division)
+        _v94_final = read_df(_v94_final_sql, tuple(_v94_final_params))
+        _v94_final_ids = (
+            set(_v94_final["employee_id"].fillna("").astype(str).str.strip())
+            if not _v94_final.empty and "employee_id" in _v94_final.columns else set()
+        )
+        _v94_final_ids.discard("")
+        _v94_payroll_pending = bool(_v94_payroll_ids - _v94_final_ids)
+
+        _v94_notification_total = int(
+            int(_v94_upload_pending)
+            + int(_v94_missing)
+            + int(_v94_review)
+            + int(_v94_master_pending)
+            + int(_v94_payroll_pending)
+        )
+    except Exception:
+        # Never allow dashboard readiness diagnostics to take the ERP offline.
+        _v94_upload_pending = False
+        _v94_missing = 0
+        _v94_review = 0
+        _v94_master_pending = 0
+        _v94_payroll_pending = False
+        _v94_notification_total = 0
+
+
+# ============================================================
 # HOME — HR OPERATIONAL WORKSPACE
 # ============================================================
 if page == "Home":
