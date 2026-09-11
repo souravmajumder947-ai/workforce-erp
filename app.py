@@ -6859,11 +6859,18 @@ if st.session_state.get("auth_user") is None:
 
               const updateSyncClock = () => {
                 try {
-                  const node = window.parent.document.querySelector("[data-v92-live-sync]");
-                  if (!node) return;
                   const now = new Date();
-                  node.textContent = `SYNC ${clock.format(now)}`;
-                  node.classList.toggle("v92-tick", now.getSeconds() % 2 === 0);
+                  const timeText = clock.format(now);
+                  const syncNodes = window.parent.document.querySelectorAll("[data-v92-live-sync]");
+                  syncNodes.forEach((node) => {
+                    node.textContent = `SYNC ${timeText}`;
+                    node.classList.toggle("v92-tick", now.getSeconds() % 2 === 0);
+                  });
+                  const loginClockNodes = window.parent.document.querySelectorAll("[data-v116-login-clock]");
+                  loginClockNodes.forEach((node) => {
+                    node.textContent = timeText;
+                    node.classList.toggle("v116-clock-tick", now.getSeconds() % 2 === 0);
+                  });
                 } catch (_) {
                   // Keep the server-rendered fallback time if the parent DOM is unavailable.
                 }
@@ -7091,10 +7098,7 @@ body:has(.v82-login-root) .v103-auth-head{
              linear-gradient(145deg,#14293f,#091625)!important;
   box-shadow:0 20px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06)!important
 }
-body:has(.v82-login-root) .v103-auth-head:before{
-  content:"RELIABLE"!important;position:absolute!important;right:10px!important;bottom:-12px!important;
-  color:rgba(255,255,255,.045)!important;font-size:54px!important;font-weight:950!important;letter-spacing:3px!important
-}
+body:has(.v82-login-root) .v103-auth-head:before{display:none!important;content:none!important}
 body:has(.v82-login-root) .v103-auth-head:after{
   content:""!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:5px!important;
   background:linear-gradient(180deg,#ff7568,#e74336,#8e1d19)!important;box-shadow:0 0 22px rgba(231,67,54,.72)!important
@@ -7198,7 +7202,7 @@ body:has(.v82-login-root) .v116-brand-sub{
                 f"""
                 <div class="v103-right-top">
                   <div class="v103-secure-state"><i></i><b>SYSTEM ONLINE</b><small>Secure HRMS access</small></div>
-                  <div class="v103-right-time"><small>IST · 24H</small><b>{_login_verified_time}</b></div>
+                  <div class="v103-right-time"><small>IST · 24H</small><b data-v116-login-clock>{_login_verified_time}</b></div>
                 </div>
 
                 <div class="v90-auth-head v103-auth-head">
@@ -17909,7 +17913,13 @@ body:has(.v82-login-root) .v103-secure-state b{
 }
 body:has(.v82-login-root) .v103-secure-state small,
 body:has(.v82-login-root) .v103-right-time small{color:#8fa4b9!important;font-size:8px!important}
-body:has(.v82-login-root) .v103-right-time b{color:#ffffff!important;font-size:12px!important}
+body:has(.v82-login-root) .v103-right-time b{
+  color:#ffffff!important;font-size:12px!important;min-width:58px!important;
+  font-variant-numeric:tabular-nums!important;transition:color .18s ease,text-shadow .18s ease!important
+}
+body:has(.v82-login-root) .v103-right-time b.v116-clock-tick{
+  color:#ffded9!important;text-shadow:0 0 12px rgba(255,103,89,.55)!important
+}
 body:has(.v82-login-root) .v103-auth-head{gap:16px!important;margin:4px 0 6px!important}
 body:has(.v82-login-root) .v103-auth-logo{
   width:96px!important;height:72px!important;padding:7px!important;border-radius:14px!important;
