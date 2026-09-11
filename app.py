@@ -14373,9 +14373,9 @@ elif page == "Operations":
                     "ERP Code":st.column_config.TextColumn("ERP Code"),
                     "Item Name":st.column_config.TextColumn("Item Name"),
                     "Reel Size":st.column_config.TextColumn("Reel Size"),
-                    "Reel Issue Ton":st.column_config.NumberColumn("Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"),
-                    "Reel Return Ton":st.column_config.NumberColumn("Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"),
-                    "Consumption Ton":st.column_config.NumberColumn("Consumption Ton",min_value=0.0,step=0.001,format="%.3f"),
+                    "Reel Issue Ton":st.column_config.NumberColumn("Reel Issue Ton",min_value=0.0,step=0.01,format="%.2f"),
+                    "Reel Return Ton":st.column_config.NumberColumn("Reel Return Ton",min_value=0.0,step=0.01,format="%.2f"),
+                    "Consumption Ton":st.column_config.NumberColumn("Consumption Ton",min_value=0.0,step=0.01,format="%.2f"),
                     "Unit":st.column_config.TextColumn("Unit"),
                     "Remark":st.column_config.TextColumn("Remark"),
                 },
@@ -14424,9 +14424,9 @@ elif page == "Operations":
                     f"<td>{html.escape(str(_v160_r.get('ERP Code') or ''))}</td>"
                     f"<td class='item'>{html.escape(str(_v160_r.get('Item Name') or ''))}</td>"
                     f"<td>{html.escape(str(_v160_r.get('Reel Size') or ''))}</td>"
-                    f"<td class='qty'>{float(_v160_r.get('Reel Issue Ton') or 0):,.3f}</td>"
-                    f"<td class='qty'>{float(_v160_r.get('Reel Return Ton') or 0):,.3f}</td>"
-                    f"<td class='qty'>{float(_v160_r.get('Consumption Ton') or 0):,.3f}</td>"
+                    f"<td class='qty'>{float(_v160_r.get('Reel Issue Ton') or 0):,.2f}</td>"
+                    f"<td class='qty'>{float(_v160_r.get('Reel Return Ton') or 0):,.2f}</td>"
+                    f"<td class='qty'>{float(_v160_r.get('Consumption Ton') or 0):,.2f}</td>"
                     "<td>TON</td>"
                     f"<td>{html.escape(str(_v160_r.get('Remark') or ''))}</td>"
                     "</tr>"
@@ -14494,9 +14494,9 @@ elif page == "Operations":
                     <tfoot>
                       <tr>
                         <td></td><td></td><td class="total-label">TOTAL</td><td></td>
-                        <td class="qty">{_v160_issue:,.3f}</td>
-                        <td class="qty">{_v160_return:,.3f}</td>
-                        <td class="qty total-cons">{_v160_consumption:,.3f}</td>
+                        <td class="qty">{_v160_issue:,.2f}</td>
+                        <td class="qty">{_v160_return:,.2f}</td>
+                        <td class="qty total-cons">{_v160_consumption:,.2f}</td>
                         <td>TON</td><td></td>
                       </tr>
                     </tfoot>
@@ -14517,9 +14517,9 @@ elif page == "Operations":
 
         _v160_a,_v160_b,_v160_c,_v160_d=st.columns(4)
         _v160_a.metric("Rows",f"{len(_v160_work):,}")
-        _v160_b.metric("Reel Issue",f"{_v160_issue:,.3f} T")
-        _v160_c.metric("Reel Return",f"{_v160_return:,.3f} T")
-        _v160_d.metric("Consumption",f"{_v160_consumption:,.3f} T")
+        _v160_b.metric("Reel Issue",f"{_v160_issue:,.2f} T")
+        _v160_c.metric("Reel Return",f"{_v160_return:,.2f} T")
+        _v160_d.metric("Consumption",f"{_v160_consumption:,.2f} T")
 
         if (not _v160_saved_view) and st.button("Save Monthly Reel Data",type="primary",use_container_width=True,key="v160_save_reel"):
             _v160_invalid=_v160_work[
@@ -14575,8 +14575,8 @@ elif page == "Operations":
                     )
                     st.success(
                         f"{_v160_month.strftime('%b %Y')} reel data saved: "
-                        f"Issue {_v160_issue:,.3f} T · Return {_v160_return:,.3f} T · "
-                        f"Consumption {_v160_consumption:,.3f} T."
+                        f"Issue {_v160_issue:,.2f} T · Return {_v160_return:,.2f} T · "
+                        f"Consumption {_v160_consumption:,.2f} T."
                     )
                     st.session_state[_v160_edit_key]=False
                     st.rerun()
