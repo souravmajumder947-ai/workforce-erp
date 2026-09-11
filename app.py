@@ -1133,6 +1133,25 @@ def migrate_postgres():
             )
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS manpower_headcount_entries(
+                entry_id BIGSERIAL PRIMARY KEY,
+                work_date TEXT NOT NULL,
+                division TEXT NOT NULL DEFAULT 'Greater Noida Plant',
+                shift TEXT NOT NULL,
+                machine TEXT NOT NULL,
+                employee_headcount INTEGER NOT NULL DEFAULT 0,
+                contractor_headcount INTEGER NOT NULL DEFAULT 0,
+                remark TEXT,
+                entered_by TEXT,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(work_date, division, shift, machine)
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_headcount_date_division
+            ON manpower_headcount_entries(work_date, division)
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS production(
                 id BIGSERIAL PRIMARY KEY,
                 work_date TEXT NOT NULL,
@@ -14311,49 +14330,108 @@ elif page == "Operations":
         machine_df=get_machine_list_cached()
         machine_options=machine_df["machine"].astype(str).tolist() if not machine_df.empty else []
         mmachine=c3.selectbox("Machine",machine_options,key="v5_mp_machine") if machine_options else None
-        if mmachine:
-            gn_emps=read_df("""SELECT employee_id,employee_name,department,designation FROM employees
-                               WHERE status='Active' AND division='Greater Noida Plant' ORDER BY employee_name""")
-            existing_alloc=read_df("""SELECT ma.id,ma.employee_id,e.employee_name,ma.role,e.department,e.designation
-                                      FROM manpower_allocation ma LEFT JOIN employees e ON e.employee_id=ma.employee_id
-                                      WHERE ma.work_date=? AND ma.shift=? AND ma.machine=? ORDER BY e.employee_name""",
-                                   (mdate.isoformat(),mshift,mmachine))
-            if not gn_emps.empty:
-                emap={str(r["employee_id"]):f"{r['employee_name']} · {r['employee_id']} · {r['department']}" for _,r in gn_emps.iterrows()}
-                c1,c2=st.columns([1.5,1])
-                emp_id=c1.selectbox("Employee",list(emap),format_func=lambda x:emap[x],key="v5_mp_emp")
-                role=c2.selectbox("Role",["Operator","Helper","Supervisor","Skilled","Other"],key="v5_mp_role")
-                if st.button("Add Allocation",type="primary",use_container_width=True,key="v5_add_alloc"):
-                    try:
-                        upsert("""INSERT INTO manpower_allocation(work_date,shift,machine,employee_id,role)
-                                  VALUES (?,?,?,?,?) ON CONFLICT(work_date,shift,machine,employee_id) DO UPDATE SET role=excluded.role""",
-                               (mdate.isoformat(),mshift,mmachine,emp_id,role))
-                        st.success("Employee allocated.");st.rerun()
-                    except Exception as exc: st.error(str(exc))
-            if existing_alloc.empty:
-                st.info("No employees allocated yet.")
-            else:
-                st.dataframe(existing_alloc.rename(columns={"id":"ID","employee_id":"Employee ID","employee_name":"Employee Name","role":"Role","department":"Department","designation":"Designation"}),hide_index=True,use_container_width=True)
-                remove_id=st.selectbox(
-                    "Remove Allocation",
-                    existing_alloc["id"].astype(int).tolist(),
-                    format_func=lambda x:f"{existing_alloc[existing_alloc['id']==x].iloc[0]['employee_name']} · {existing_alloc[existing_alloc['id']==x].iloc[0]['role']}",
-                    key="v5_remove_alloc",
-                    disabled=not _v5_is_admin
+
+        if not mmachine:
+            st.info("Create active machines in Machine & Shift Master first.")
+        else:
+            standard_df=read_df(
+                """SELECT standard_manpower
+                   FROM machine_shift_targets
+                   WHERE machine=? AND shift=? LIMIT 1""",
+                (mmachine,mshift)
+            )
+            standard_manpower=(
+                int(pd.to_numeric(standard_df.iloc[0]["standard_manpower"],errors="coerce") or 0)
+                if not standard_df.empty else 0
+            )
+            existing_headcount=read_df(
+                """SELECT entry_id,employee_headcount,contractor_headcount,remark
+                   FROM manpower_headcount_entries
+                   WHERE work_date=? AND division='Greater Noida Plant'
+                     AND shift=? AND machine=? LIMIT 1""",
+                (mdate.isoformat(),mshift,mmachine)
+            )
+            existing_row=existing_headcount.iloc[0].to_dict() if not existing_headcount.empty else {}
+            h1,h2,h3=st.columns(3)
+            employee_headcount=h1.number_input(
+                "Employee Headcount",min_value=0,step=1,
+                value=int(existing_row.get("employee_headcount") or 0),
+                key="v120_employee_headcount"
+            )
+            contractor_headcount=h2.number_input(
+                "Contractor Headcount",min_value=0,step=1,
+                value=int(existing_row.get("contractor_headcount") or 0),
+                key="v120_contractor_headcount"
+            )
+            actual_headcount=int(employee_headcount)+int(contractor_headcount)
+            variance=actual_headcount-standard_manpower
+            h3.metric(
+                "Required / Actual",
+                f"{standard_manpower} / {actual_headcount}",
+                f"{variance:+d}"
+            )
+            headcount_remark=st.text_input(
+                "Remark",value=str(existing_row.get("remark") or ""),
+                key="v120_headcount_remark"
+            )
+            if st.button("Save Headcount",type="primary",use_container_width=True,key="v120_save_headcount"):
+                upsert(
+                    """INSERT INTO manpower_headcount_entries(
+                           work_date,division,shift,machine,employee_headcount,
+                           contractor_headcount,remark,entered_by,updated_at
+                       ) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                       ON CONFLICT(work_date,division,shift,machine) DO UPDATE SET
+                           employee_headcount=excluded.employee_headcount,
+                           contractor_headcount=excluded.contractor_headcount,
+                           remark=excluded.remark,
+                           entered_by=excluded.entered_by,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (
+                        mdate.isoformat(),"Greater Noida Plant",mshift,mmachine,
+                        int(employee_headcount),int(contractor_headcount),
+                        headcount_remark.strip(),str(_current_user.get("full_name") or _current_user.get("username") or "User")
+                    )
                 )
-                if not _v5_is_admin:
-                    v5_admin_only_message("Allocation deletion")
-                if st.button(
-                    "Remove Selected Allocation",
-                    use_container_width=True,
-                    key="v5_remove_alloc_btn",
-                    disabled=not _v5_is_admin
-                ):
-                    if not _v5_is_admin:
-                        st.error("Owner / Admin access is required to remove allocations.")
-                    else:
-                        upsert("DELETE FROM manpower_allocation WHERE id=?",(remove_id,))
-                        st.success("Allocation removed.");st.rerun()
+                st.success("Headcount saved.")
+                st.rerun()
+
+        day_headcount=read_df(
+            """SELECT h.entry_id AS "ID",h.work_date AS "Date",h.shift AS "Shift",
+                      h.machine AS "Machine",m.department AS "Department",
+                      COALESCE(t.standard_manpower,0) AS "Required Headcount",
+                      h.employee_headcount AS "Employee Headcount",
+                      h.contractor_headcount AS "Contractor Headcount",
+                      (h.employee_headcount+h.contractor_headcount) AS "Actual Headcount",
+                      (h.employee_headcount+h.contractor_headcount-COALESCE(t.standard_manpower,0)) AS "Variance",
+                      h.remark AS "Remark"
+               FROM manpower_headcount_entries h
+               LEFT JOIN machines m ON m.machine=h.machine
+               LEFT JOIN machine_shift_targets t ON t.machine=h.machine AND t.shift=h.shift
+               WHERE h.work_date=? AND h.division='Greater Noida Plant'
+               ORDER BY h.shift,h.machine""",
+            (mdate.isoformat(),)
+        )
+        if day_headcount.empty:
+            st.info("No headcount entered for this date.")
+        else:
+            st.dataframe(day_headcount,hide_index=True,use_container_width=True)
+            remove_headcount_id=st.selectbox(
+                "Remove Headcount Entry",
+                day_headcount["ID"].astype(int).tolist(),
+                format_func=lambda x:(
+                    f"{day_headcount[day_headcount['ID']==x].iloc[0]['Shift']} · "
+                    f"{day_headcount[day_headcount['ID']==x].iloc[0]['Machine']}"
+                ),
+                key="v120_remove_headcount",
+                disabled=not _v5_is_admin
+            )
+            if st.button(
+                "Remove Selected Headcount",use_container_width=True,
+                key="v120_remove_headcount_btn",disabled=not _v5_is_admin
+            ):
+                upsert("DELETE FROM manpower_headcount_entries WHERE entry_id=?",(remove_headcount_id,))
+                st.success("Headcount entry removed.")
+                st.rerun()
 
 # ============================================================
 # REPORT CENTRE — ONE SOURCE OF TRUTH
@@ -14370,6 +14448,7 @@ elif page == "Reports":
         "Contractor Payable",
         "Production Performance",
         "Manpower Allocation",
+        "Manpower Cost vs Tonnage",
     ]
     r1,r2,r3=st.columns([1.3,1,1])
     report_type=r1.selectbox("Report",report_types,key="v5_report_type")
@@ -14433,10 +14512,124 @@ elif page == "Reports":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
         else:
-            report_df=read_df("""SELECT ma.work_date AS "Date",ma.shift AS "Shift",ma.machine AS "Machine",ma.employee_id AS "Employee ID",
-                                       e.employee_name AS "Employee Name",e.department AS "Department",ma.role AS "Role"
-                                FROM manpower_allocation ma LEFT JOIN employees e ON e.employee_id=ma.employee_id
-                                WHERE ma.work_date BETWEEN ? AND ? ORDER BY ma.work_date,ma.shift,ma.machine,e.employee_name""",(first.isoformat(),last.isoformat()))
+            report_df=read_df(
+                """SELECT h.work_date AS "Date",h.shift AS "Shift",h.machine AS "Machine",
+                          m.department AS "Department",
+                          COALESCE(t.standard_manpower,0) AS "Required Headcount",
+                          h.employee_headcount AS "Employee Headcount",
+                          h.contractor_headcount AS "Contractor Headcount",
+                          (h.employee_headcount+h.contractor_headcount) AS "Actual Headcount",
+                          (h.employee_headcount+h.contractor_headcount-COALESCE(t.standard_manpower,0)) AS "Variance",
+                          h.remark AS "Remark"
+                   FROM manpower_headcount_entries h
+                   LEFT JOIN machines m ON m.machine=h.machine
+                   LEFT JOIN machine_shift_targets t ON t.machine=h.machine AND t.shift=h.shift
+                   WHERE h.work_date BETWEEN ? AND ?
+                     AND h.division='Greater Noida Plant'
+                   ORDER BY h.work_date,h.shift,h.machine""",
+                (first.isoformat(),last.isoformat())
+            )
+    elif report_type=="Manpower Cost vs Tonnage":
+        if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
+            report_df=pd.DataFrame()
+        else:
+            _cost_rows=read_df(
+                """SELECT h.work_date,h.shift,h.machine,m.department,
+                          COALESCE(t.standard_manpower,0) AS required_headcount,
+                          h.employee_headcount,h.contractor_headcount,
+                          (h.employee_headcount+h.contractor_headcount) AS actual_headcount,
+                          COALESCE(p.good_output_ton,p.production_ton,0) AS production_ton,
+                          COALESCE(p.target_ton,0) AS target_ton
+                   FROM manpower_headcount_entries h
+                   LEFT JOIN machines m ON m.machine=h.machine
+                   LEFT JOIN machine_shift_targets t ON t.machine=h.machine AND t.shift=h.shift
+                   LEFT JOIN production p
+                     ON p.work_date=h.work_date AND p.shift=h.shift AND p.machine=h.machine
+                   WHERE h.work_date BETWEEN ? AND ?
+                     AND h.division='Greater Noida Plant'
+                   ORDER BY h.work_date,h.shift,h.machine""",
+                (first.isoformat(),last.isoformat())
+            )
+            if not _cost_rows.empty:
+                _month_key_value=_month_key(report_month)
+                _final_cost=read_df(
+                    """SELECT COALESCE(SUM(total_payable),0) AS employee_cost
+                       FROM payroll_records
+                       WHERE payroll_month=? AND division='Greater Noida Plant'""",
+                    (_month_key_value,)
+                )
+                _employee_month_cost=float(
+                    pd.to_numeric(_final_cost.iloc[0]["employee_cost"],errors="coerce") or 0
+                ) if not _final_cost.empty else 0.0
+                if _employee_month_cost<=0:
+                    _live_cost=calculate_live_payroll(report_month,"Greater Noida Plant")
+                    _employee_month_cost=float(
+                        pd.to_numeric(_live_cost.get("Total Payable",0),errors="coerce").fillna(0).sum()
+                    ) if not _live_cost.empty else 0.0
+                _daily_employee_cost=_employee_month_cost/max(1,(last-first).days+1)
+
+                _contractor_daily=read_df(
+                    """SELECT work_date,COALESCE(SUM(amount),0) AS contractor_cost
+                       FROM contractor_work_entries
+                       WHERE work_date BETWEEN ? AND ?
+                         AND division='Greater Noida Plant'
+                       GROUP BY work_date""",
+                    (first.isoformat(),last.isoformat())
+                )
+                _contractor_map={
+                    str(r["work_date"]):float(r["contractor_cost"] or 0)
+                    for _,r in _contractor_daily.iterrows()
+                } if not _contractor_daily.empty else {}
+
+                _cost_rows["work_date_key"]=_cost_rows["work_date"].astype(str)
+                _cost_rows["employee_headcount"]=pd.to_numeric(_cost_rows["employee_headcount"],errors="coerce").fillna(0)
+                _cost_rows["contractor_headcount"]=pd.to_numeric(_cost_rows["contractor_headcount"],errors="coerce").fillna(0)
+                _cost_rows["actual_headcount"]=pd.to_numeric(_cost_rows["actual_headcount"],errors="coerce").fillna(0)
+                _cost_rows["production_ton"]=pd.to_numeric(_cost_rows["production_ton"],errors="coerce").fillna(0)
+                _cost_rows["target_ton"]=pd.to_numeric(_cost_rows["target_ton"],errors="coerce").fillna(0)
+                _daily_emp_hc=_cost_rows.groupby("work_date_key")["employee_headcount"].transform("sum")
+                _daily_con_hc=_cost_rows.groupby("work_date_key")["contractor_headcount"].transform("sum")
+                _cost_rows["employee_cost"]=_cost_rows["employee_headcount"].div(
+                    _daily_emp_hc.where(_daily_emp_hc>0,1)
+                )*_daily_employee_cost
+                _cost_rows["contractor_day_cost"]=_cost_rows["work_date_key"].map(_contractor_map).fillna(0)
+                _cost_rows["contractor_cost"]=_cost_rows["contractor_headcount"].div(
+                    _daily_con_hc.where(_daily_con_hc>0,1)
+                )*_cost_rows["contractor_day_cost"]
+                _cost_rows["total_manpower_cost"]=_cost_rows["employee_cost"]+_cost_rows["contractor_cost"]
+                _cost_rows["ton_per_person"]=_cost_rows["production_ton"].div(
+                    _cost_rows["actual_headcount"].where(_cost_rows["actual_headcount"]>0,1)
+                )
+                _cost_rows["cost_per_person"]=_cost_rows["total_manpower_cost"].div(
+                    _cost_rows["actual_headcount"].where(_cost_rows["actual_headcount"]>0,1)
+                )
+                _cost_rows["cost_per_ton"]=_cost_rows["total_manpower_cost"].div(
+                    _cost_rows["production_ton"].where(_cost_rows["production_ton"]>0,1)
+                )
+                _cost_rows["headcount_variance"]=_cost_rows["actual_headcount"]-pd.to_numeric(
+                    _cost_rows["required_headcount"],errors="coerce"
+                ).fillna(0)
+                _cost_rows["tonnage_variance"]=_cost_rows["production_ton"]-_cost_rows["target_ton"]
+                report_df=pd.DataFrame({
+                    "Date":_cost_rows["work_date"],
+                    "Shift":_cost_rows["shift"],
+                    "Machine":_cost_rows["machine"],
+                    "Department":_cost_rows["department"],
+                    "Required Headcount":_cost_rows["required_headcount"],
+                    "Employee Headcount":_cost_rows["employee_headcount"],
+                    "Contractor Headcount":_cost_rows["contractor_headcount"],
+                    "Actual Headcount":_cost_rows["actual_headcount"],
+                    "Headcount Variance":_cost_rows["headcount_variance"],
+                    "Production Ton":_cost_rows["production_ton"].round(2),
+                    "Target Ton":_cost_rows["target_ton"].round(2),
+                    "Tonnage Variance":_cost_rows["tonnage_variance"].round(2),
+                    "Employee Cost":_cost_rows["employee_cost"].round(2),
+                    "Contractor Cost":_cost_rows["contractor_cost"].round(2),
+                    "Total Manpower Cost":_cost_rows["total_manpower_cost"].round(2),
+                    "Ton / Person":_cost_rows["ton_per_person"].round(2),
+                    "Cost / Person":_cost_rows["cost_per_person"].round(2),
+                    "Cost / Ton":_cost_rows["cost_per_ton"].round(2),
+                })
 
     if report_df.empty:
         st.info("No data is available for this report and selected context.")
