@@ -7215,9 +7215,8 @@ body:has(.v82-login-root) .v116-brand-sub{
                 </div>
                 <div class="v90-card-sub">Sign in to your secure HRMS workspace for workforce intelligence, attendance, payroll and operations.</div>
 
-                <div class="v103-company-block">
-                  <div class="v103-company-name">Reliable Packaging Industries Limited</div>
-                  <div class="v103-company-line">Smart HRMS · People · Process · Performance</div>
+                <div class="v103-company-block v117-capability-strip">
+                  <div class="v103-company-line"><b>Enterprise HRMS</b> · People · Attendance · Payroll · Operations</div>
                 </div>
 
                 <div class="v90-status-grid v103-status-grid">
@@ -17947,7 +17946,14 @@ body:has(.v82-login-root) .v103-company-block{
   box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important
 }
 body:has(.v82-login-root) .v103-company-name{font-size:11px!important;color:#ffffff!important}
-body:has(.v82-login-root) .v103-company-line{font-size:9px!important;color:#9fb2c6!important}
+body:has(.v82-login-root) .v103-company-line{font-size:9.5px!important;color:#aebed0!important}
+body:has(.v82-login-root) .v117-capability-strip{
+  padding:10px 14px!important;border-left:3px solid #e74336!important;
+  background:linear-gradient(90deg,rgba(231,67,54,.10),rgba(11,29,46,.58))!important
+}
+body:has(.v82-login-root) .v117-capability-strip b{
+  color:#ffffff!important;font-weight:900!important;letter-spacing:.35px!important
+}
 body:has(.v82-login-root) .v103-status-grid{gap:10px!important;margin-bottom:17px!important}
 body:has(.v82-login-root) .v103-status-grid .v90-status{
   min-height:70px!important;padding:11px 12px!important;
@@ -18005,10 +18011,7 @@ body:has(.v82-login-root) .v103-auth-head{
              linear-gradient(145deg,#14293f,#091625)!important;
   box-shadow:0 20px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06)!important
 }
-body:has(.v82-login-root) .v103-auth-head:before{
-  content:"RELIABLE"!important;position:absolute!important;right:10px!important;bottom:-12px!important;
-  color:rgba(255,255,255,.045)!important;font-size:54px!important;font-weight:950!important;letter-spacing:3px!important
-}
+body:has(.v82-login-root) .v103-auth-head:before{display:none!important;content:none!important}
 body:has(.v82-login-root) .v103-auth-head:after{
   content:""!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:5px!important;
   background:linear-gradient(180deg,#ff7568,#e74336,#8e1d19)!important;box-shadow:0 0 22px rgba(231,67,54,.72)!important
