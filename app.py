@@ -14386,6 +14386,74 @@ elif page == "Operations":
         _v160_issue=float(_v160_work["Reel Issue Ton"].sum()) if not _v160_work.empty else 0.0
         _v160_return=float(_v160_work["Reel Return Ton"].sum()) if not _v160_work.empty else 0.0
         _v160_consumption=float(_v160_work["Consumption Ton"].sum()) if not _v160_work.empty else 0.0
+
+        # Professional total line directly below the monthly reel grid.
+        # Keep the editable source rows untouched; this footer is display-only.
+        st.markdown(
+            f"""
+            <style>
+            .v160-total-row{{
+                display:grid;
+                grid-template-columns:4% 9% 22% 12% 11% 11% 11% 7% 13%;
+                align-items:center;
+                width:100%;
+                min-height:44px;
+                margin-top:-1px;
+                border:1px solid rgba(66,102,139,.58);
+                border-top:2px solid rgba(76,149,255,.78);
+                border-radius:0 0 10px 10px;
+                overflow:hidden;
+                background:linear-gradient(90deg,rgba(18,35,54,.98),rgba(12,27,43,.98));
+                box-shadow:0 8px 22px rgba(0,0,0,.16);
+            }}
+            .v160-total-row>div{{
+                min-height:44px;
+                display:flex;
+                align-items:center;
+                padding:0 10px;
+                border-right:1px solid rgba(58,83,110,.42);
+                color:#f4f8fc;
+                font-size:12px;
+                font-weight:850;
+                white-space:nowrap;
+            }}
+            .v160-total-row>div:last-child{{border-right:none}}
+            .v160-total-row .v160-total-label{{
+                color:#7db7ff;
+                letter-spacing:.08em;
+                font-weight:950;
+            }}
+            .v160-total-row .v160-total-num{{
+                justify-content:flex-end;
+                font-variant-numeric:tabular-nums;
+                color:#ffffff;
+            }}
+            .v160-total-row .v160-total-cons{{
+                justify-content:flex-end;
+                font-variant-numeric:tabular-nums;
+                color:#79e7bd;
+                font-weight:950;
+            }}
+            @media(max-width:900px){{
+                .v160-total-row{{grid-template-columns:1fr 1fr 1fr 1fr}}
+                .v160-total-row .v160-hide-mobile{{display:none}}
+            }}
+            </style>
+            <div class="v160-total-row">
+                <div></div>
+                <div></div>
+                <div class="v160-total-label">TOTAL</div>
+                <div></div>
+                <div class="v160-total-num">{_v160_issue:,.3f}</div>
+                <div class="v160-total-num">{_v160_return:,.3f}</div>
+                <div class="v160-total-cons">{_v160_consumption:,.3f}</div>
+                <div>TON</div>
+                <div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         _v160_a,_v160_b,_v160_c,_v160_d=st.columns(4)
         _v160_a.metric("Rows",f"{len(_v160_work):,}")
         _v160_b.metric("Reel Issue",f"{_v160_issue:,.3f} T")
