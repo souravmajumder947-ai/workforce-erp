@@ -14208,6 +14208,23 @@ elif page == "Operations":
             (_v160_work["Reel Issue Ton"]>0)|(_v160_work["Reel Return Ton"]>0)|
             (_v160_work["Actual Consumption Ton"]>0)
         ].copy()
+        # A full-month statement can repeat the same reel/item on many dates.
+        # Consolidate those rows before saving the monthly summary.
+        if not _v160_work.empty:
+            _v160_work["Reel Size"]=_v160_work["Reel Size"].fillna("").astype(str).str.strip()
+            _v160_work["Unit"]=_v160_work["Unit"].fillna("Ton").astype(str).str.strip()
+            _v160_work["Remark"]=_v160_work["Remark"].fillna("").astype(str).str.strip()
+            _v160_work=(
+                _v160_work.groupby(
+                    ["ERP Code","Item Name","Reel Size","Unit"],as_index=False,dropna=False
+                )
+                .agg({
+                    "Reel Issue Ton":"sum",
+                    "Reel Return Ton":"sum",
+                    "Actual Consumption Ton":"sum",
+                    "Remark":"first",
+                })
+            )
         _v160_work["Net Issue Ton"]=_v160_work["Reel Issue Ton"]-_v160_work["Reel Return Ton"]
         _v160_issue=float(_v160_work["Reel Issue Ton"].sum()) if not _v160_work.empty else 0.0
         _v160_return=float(_v160_work["Reel Return Ton"].sum()) if not _v160_work.empty else 0.0
