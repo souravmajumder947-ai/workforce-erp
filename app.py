@@ -7141,6 +7141,41 @@ body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v
   body:has(.v82-login-root) .v103-status-grid{grid-template-columns:1fr!important}
 }
 
+@keyframes v116BrandFlash{
+  0%,100%{
+    color:#ffffff;
+    text-shadow:0 0 6px rgba(255,255,255,.18),0 0 14px rgba(231,67,54,.24);
+    filter:brightness(1);
+  }
+  50%{
+    color:#fff4f2;
+    text-shadow:0 0 10px rgba(255,255,255,.42),0 0 24px rgba(255,81,65,.72),0 0 42px rgba(231,67,54,.35);
+    filter:brightness(1.12);
+  }
+}
+body:has(.v82-login-root) .v116-brand-flash{
+  font-size:clamp(28px,2.05vw,46px)!important;
+  letter-spacing:-.7px!important;
+  white-space:nowrap!important;
+  animation:v116BrandFlash 2.2s ease-in-out infinite!important;
+}
+body:has(.v82-login-root) .v116-brand-sub{
+  margin-top:5px!important;
+  color:#ff7b70!important;
+  font-size:clamp(10px,.62vw,15px)!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:2.2px!important;
+  text-transform:uppercase!important;
+  text-shadow:0 0 16px rgba(231,67,54,.36)!important;
+}
+@media(max-width:540px){
+  body:has(.v82-login-root) .v116-brand-flash{
+    font-size:clamp(22px,7vw,31px)!important;
+    white-space:normal!important;
+  }
+}
+
 /* Show a compact branded visual above the form on tablet/narrow layouts. */
 @media(min-width:541px) and (max-width:760px){
   body:has(.v82-login-root) .v82-ref-hero{
@@ -7169,8 +7204,9 @@ body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v
                 <div class="v90-auth-head v103-auth-head">
                   <div class="v103-auth-logo"><img src="{LOGO_FULL_DATA_URI}" alt="Reliable Packaging Industries Limited"></div>
                   <div>
-                    <div class="v90-card-kicker">Reliable Workforce Cloud</div>
-                    <div class="v90-card-title">Welcome back</div>
+                    <div class="v90-card-kicker">Smart Workforce ERP</div>
+                    <div class="v90-card-title v116-brand-flash">Reliable Packaging</div>
+                    <div class="v116-brand-sub">Industries Limited</div>
                   </div>
                 </div>
                 <div class="v90-card-sub">Sign in to your secure HRMS workspace for workforce intelligence, attendance, payroll and operations.</div>
