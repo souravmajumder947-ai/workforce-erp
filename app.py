@@ -13450,14 +13450,14 @@ elif page == "Operations":
     # Reporting is centralized in the main sidebar Reports Centre.
     _v141_ops_section=st.radio(
         "Operations View",
-        ["Production Entry","Manpower Allocation"],
+        ["Production Entry","Monthly Reel Entry","Manpower Allocation"],
         horizontal=True,
         key="v141_operations_section"
     )
 
     st.caption(
-        "Use Production Entry for daily machine data or Manpower Allocation for shift-wise employee deployment. "
-        "All reporting is available from the main Reports Centre."
+        "Use Production Entry for daily machine output, Monthly Reel Entry for a complete month's issue/return, "
+        "or Manpower Allocation for shift-wise headcount. Reports remain in the main Reports Centre."
     )
 
     if _v141_ops_section=="Production Entry":
@@ -14103,6 +14103,186 @@ elif page == "Operations":
             st.dataframe(display,hide_index=True,use_container_width=True)
         else:
             st.info(f"No production entry is saved for {pdate.strftime('%d/%m/%Y')} yet.")
+
+    if _v141_ops_section=="Monthly Reel Entry":
+        st.markdown("### Monthly Reel Issue & Return")
+        st.caption(
+            "Select one month, upload the full Excel/CSV file or enter rows manually. "
+            "Do not use Daily Production Entry for a complete month's reel statement."
+        )
+        _v160_ensure_ok=_v138_ensure_consumption_summary_schema()
+        _v160_month=st.selectbox(
+            "Reel Month",_month_opts,
+            index=next((i for i,d in enumerate(_month_opts) if d==global_payroll_month),0),
+            format_func=lambda d:d.strftime("%b %Y"),
+            key="v160_reel_month",
+        )
+        _v160_month_date=date(_v160_month.year,_v160_month.month,1)
+        _v160_template=pd.DataFrame(columns=[
+            "ERP Code","Item Name","Reel Size","Reel Issue Ton",
+            "Reel Return Ton","Actual Consumption Ton","Unit","Remark"
+        ])
+        _v160_template_bytes=BytesIO()
+        _v160_template.to_excel(_v160_template_bytes,index=False)
+        st.download_button(
+            "Download Reel Upload Template",
+            data=_v160_template_bytes.getvalue(),
+            file_name=f"Reel_Issue_Return_{_v160_month.strftime('%b_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        _v160_upload=st.file_uploader(
+            "Upload complete monthly Reel Issue/Return",
+            type=["xlsx","xls","csv"],
+            key=f"v160_reel_upload_{_v160_month_date.isoformat()}",
+        )
+
+        _v160_existing=read_df(
+            """SELECT erp_code AS "ERP Code",item_name AS "Item Name",
+                      reel_size AS "Reel Size",
+                      reel_issue_kg/1000.0 AS "Reel Issue Ton",
+                      reel_return_kg/1000.0 AS "Reel Return Ton",
+                      reel_consumption_kg/1000.0 AS "Actual Consumption Ton",
+                      COALESCE(unit,'Ton') AS "Unit",
+                      COALESCE(item_group,'') AS "Remark"
+               FROM production_consumption_summary
+               WHERE period_month=?
+               ORDER BY item_name,erp_code""",
+            (_v160_month_date.isoformat(),),
+        )
+        _v160_seed=_v160_existing.copy() if not _v160_existing.empty else _v160_template.copy()
+        if _v160_upload is not None:
+            try:
+                _v160_raw=(
+                    pd.read_csv(_v160_upload)
+                    if _v160_upload.name.lower().endswith(".csv")
+                    else pd.read_excel(_v160_upload)
+                )
+                _v160_norm={
+                    str(col).strip().lower().replace("_"," ").replace("-"," "):col
+                    for col in _v160_raw.columns
+                }
+                def _v160_pick(*aliases):
+                    for alias in aliases:
+                        if alias in _v160_norm:
+                            return _v160_raw[_v160_norm[alias]]
+                    return pd.Series([""]*len(_v160_raw))
+                _v160_seed=pd.DataFrame({
+                    "ERP Code":_v160_pick("erp code","item code","code","reel code"),
+                    "Item Name":_v160_pick("item name","paper name","description","paper description","gsm"),
+                    "Reel Size":_v160_pick("reel size","size"),
+                    "Reel Issue Ton":_v160_pick("reel issue ton","issue ton","reel issue","issue"),
+                    "Reel Return Ton":_v160_pick("reel return ton","return ton","reel return","return"),
+                    "Actual Consumption Ton":_v160_pick(
+                        "actual consumption ton","consumption ton","reel consumption","consumption"
+                    ),
+                    "Unit":_v160_pick("unit","uom"),
+                    "Remark":_v160_pick("remark","remarks"),
+                })
+                st.success(f"{len(_v160_seed):,} row(s) loaded from {_v160_upload.name}. Review before saving.")
+            except Exception as _v160_upload_exc:
+                st.error(f"Unable to read this file: {_v160_upload_exc}")
+
+        _v160_editor=st.data_editor(
+            _v160_seed,
+            hide_index=True,use_container_width=True,num_rows="dynamic",
+            key=f"v160_reel_editor_{_v160_month_date.isoformat()}_{getattr(_v160_upload,'name','manual')}",
+            column_config={
+                "ERP Code":st.column_config.TextColumn("ERP Code"),
+                "Item Name":st.column_config.TextColumn("Item Name"),
+                "Reel Size":st.column_config.TextColumn("Reel Size"),
+                "Reel Issue Ton":st.column_config.NumberColumn("Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"),
+                "Reel Return Ton":st.column_config.NumberColumn("Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"),
+                "Actual Consumption Ton":st.column_config.NumberColumn("Actual Consumption Ton",min_value=0.0,step=0.001,format="%.3f"),
+                "Unit":st.column_config.TextColumn("Unit"),
+                "Remark":st.column_config.TextColumn("Remark"),
+            },
+        )
+        _v160_work=_v160_editor.copy()
+        for _v160_col in ["Reel Issue Ton","Reel Return Ton","Actual Consumption Ton"]:
+            _v160_work[_v160_col]=pd.to_numeric(_v160_work[_v160_col],errors="coerce").fillna(0.0)
+        _v160_work["ERP Code"]=_v160_work["ERP Code"].fillna("").astype(str).str.strip()
+        _v160_work["Item Name"]=_v160_work["Item Name"].fillna("").astype(str).str.strip()
+        _v160_work=_v160_work[
+            (_v160_work["ERP Code"]!="")|(_v160_work["Item Name"]!="")|
+            (_v160_work["Reel Issue Ton"]>0)|(_v160_work["Reel Return Ton"]>0)|
+            (_v160_work["Actual Consumption Ton"]>0)
+        ].copy()
+        _v160_work["Net Issue Ton"]=_v160_work["Reel Issue Ton"]-_v160_work["Reel Return Ton"]
+        _v160_issue=float(_v160_work["Reel Issue Ton"].sum()) if not _v160_work.empty else 0.0
+        _v160_return=float(_v160_work["Reel Return Ton"].sum()) if not _v160_work.empty else 0.0
+        _v160_consumption=float(_v160_work["Actual Consumption Ton"].sum()) if not _v160_work.empty else 0.0
+        _v160_a,_v160_b,_v160_c,_v160_d=st.columns(4)
+        _v160_a.metric("Rows",f"{len(_v160_work):,}")
+        _v160_b.metric("Reel Issue",f"{_v160_issue:,.3f} T")
+        _v160_c.metric("Reel Return",f"{_v160_return:,.3f} T")
+        _v160_d.metric("Net Issue",f"{(_v160_issue-_v160_return):,.3f} T")
+
+        if st.button("Save Monthly Reel Data",type="primary",use_container_width=True,key="v160_save_reel"):
+            _v160_invalid=_v160_work[
+                (_v160_work["ERP Code"]=="")&(_v160_work["Item Name"]=="")
+            ]
+            if _v160_work.empty:
+                st.warning("Enter or upload at least one reel row.")
+            elif not _v160_invalid.empty:
+                st.error("Every row must contain ERP Code or Item Name.")
+            elif (_v160_work["Net Issue Ton"]<0).any():
+                st.error("Reel Return cannot be greater than Reel Issue for the same row.")
+            else:
+                _v160_conn=get_pg_conn()
+                _v160_cur=None
+                try:
+                    _v160_cur=_v160_conn.cursor()
+                    _v160_cur.execute(
+                        "DELETE FROM production_consumption_summary WHERE period_month=%s",
+                        (_v160_month_date,),
+                    )
+                    _v160_rows=[]
+                    for _,_v160_r in _v160_work.iterrows():
+                        _v160_code=str(_v160_r.get("ERP Code") or "").strip()
+                        _v160_name=str(_v160_r.get("Item Name") or "").strip()
+                        _v160_rows.append((
+                            _v160_month_date,
+                            str(_v160_r.get("Remark") or "").strip(),
+                            _v160_name,
+                            float(_v160_r["Reel Issue Ton"])*1000.0,
+                            float(_v160_r["Reel Return Ton"])*1000.0,
+                            float(_v160_r["Net Issue Ton"])*1000.0,
+                            str(_v160_r.get("Reel Size") or "").strip(),
+                            _v160_code,
+                            float(_v160_r["Actual Consumption Ton"])*1000.0,
+                            str(_v160_r.get("Unit") or "Ton").strip() or "Ton",
+                            getattr(_v160_upload,"name","Manual Entry"),
+                            _current_user["username"],
+                        ))
+                    execute_values(
+                        _v160_cur,
+                        """INSERT INTO production_consumption_summary(
+                               period_month,item_group,item_name,reel_issue_kg,reel_return_kg,
+                               net_issue_kg,reel_size,erp_code,reel_consumption_kg,unit,
+                               source_file,imported_by
+                           ) VALUES %s""",
+                        _v160_rows,
+                    )
+                    _v160_conn.commit()
+                    record_audit_event(
+                        _current_user["username"],"MONTHLY_REEL_SAVE","Operations",
+                        "production_consumption_summary",
+                        f"{_v160_month_date.isoformat()}|{len(_v160_rows)} rows",
+                    )
+                    st.success(
+                        f"{_v160_month.strftime('%b %Y')} reel data saved: "
+                        f"Issue {_v160_issue:,.3f} T · Return {_v160_return:,.3f} T · "
+                        f"Net {_v160_issue-_v160_return:,.3f} T."
+                    )
+                    st.rerun()
+                except Exception as _v160_save_exc:
+                    _v160_conn.rollback()
+                    st.error(f"Monthly reel data could not be saved: {_v160_save_exc}")
+                finally:
+                    if _v160_cur is not None:
+                        _v160_cur.close()
+                    _v160_conn.close()
 
     if _v141_ops_section=="Manpower Allocation":
         c1,c2,c3=st.columns(3)
