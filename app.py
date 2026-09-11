@@ -14339,22 +14339,48 @@ elif page == "Operations":
 
         st.info("Consumption is calculated automatically: Reel Issue − Reel Return.")
 
-        _v160_editor=st.data_editor(
-            _v160_seed,
-            hide_index=True,use_container_width=True,num_rows="dynamic",
-            disabled=["Consumption Ton","Unit"],
-            key=f"v160_reel_editor_{_v160_month_date.isoformat()}_{getattr(_v160_upload,'name','manual')}",
-            column_config={
-                "ERP Code":st.column_config.TextColumn("ERP Code"),
-                "Item Name":st.column_config.TextColumn("Item Name"),
-                "Reel Size":st.column_config.TextColumn("Reel Size"),
-                "Reel Issue Ton":st.column_config.NumberColumn("Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"),
-                "Reel Return Ton":st.column_config.NumberColumn("Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"),
-                "Consumption Ton":st.column_config.NumberColumn("Consumption Ton",min_value=0.0,step=0.001,format="%.3f"),
-                "Unit":st.column_config.TextColumn("Unit"),
-                "Remark":st.column_config.TextColumn("Remark"),
-            },
+        # Existing saved months open in a clean report-style grid.
+        # Editing is explicit so the normal monthly view looks like a finished ERP report,
+        # with the TOTAL row pinned inside the same table at the bottom.
+        _v160_edit_key=f"v160_reel_edit_mode_{_v160_month_date.isoformat()}"
+        if _v160_edit_key not in st.session_state:
+            st.session_state[_v160_edit_key]=False
+        _v160_saved_view=bool(
+            (not _v160_existing.empty)
+            and _v160_upload is None
+            and not st.session_state[_v160_edit_key]
         )
+
+        if _v160_saved_view:
+            _v160_editor=_v160_seed.copy()
+        else:
+            if not _v160_existing.empty and _v160_upload is None:
+                _v160_edit_bar1,_v160_edit_bar2=st.columns([1,5])
+                with _v160_edit_bar1:
+                    if st.button(
+                        "Cancel Editing",
+                        key=f"v160_cancel_edit_{_v160_month_date.isoformat()}",
+                        use_container_width=True,
+                    ):
+                        st.session_state[_v160_edit_key]=False
+                        st.rerun()
+            _v160_editor=st.data_editor(
+                _v160_seed,
+                hide_index=True,use_container_width=True,num_rows="dynamic",
+                disabled=["Consumption Ton","Unit"],
+                key=f"v160_reel_editor_{_v160_month_date.isoformat()}_{getattr(_v160_upload,'name','manual')}",
+                column_config={
+                    "ERP Code":st.column_config.TextColumn("ERP Code"),
+                    "Item Name":st.column_config.TextColumn("Item Name"),
+                    "Reel Size":st.column_config.TextColumn("Reel Size"),
+                    "Reel Issue Ton":st.column_config.NumberColumn("Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"),
+                    "Reel Return Ton":st.column_config.NumberColumn("Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"),
+                    "Consumption Ton":st.column_config.NumberColumn("Consumption Ton",min_value=0.0,step=0.001,format="%.3f"),
+                    "Unit":st.column_config.TextColumn("Unit"),
+                    "Remark":st.column_config.TextColumn("Remark"),
+                },
+            )
+
         _v160_work=_v160_editor.copy()
         for _v160_col in ["Reel Issue Ton","Reel Return Ton"]:
             _v160_work[_v160_col]=pd.to_numeric(_v160_work[_v160_col],errors="coerce").fillna(0.0)
@@ -14364,11 +14390,12 @@ elif page == "Operations":
             (_v160_work["ERP Code"]!="")|(_v160_work["Item Name"]!="")|
             (_v160_work["Reel Issue Ton"]>0)|(_v160_work["Reel Return Ton"]>0)
         ].copy()
+
         # A full-month statement can repeat the same reel/item on many dates.
-        # Consolidate those rows before saving the monthly summary.
+        # Consolidate those rows before display/save.
         if not _v160_work.empty:
             _v160_work["Reel Size"]=_v160_work["Reel Size"].fillna("").astype(str).str.strip()
-            _v160_work["Unit"]=_v160_work["Unit"].fillna("Ton").astype(str).str.strip()
+            _v160_work["Unit"]=_v160_work["Unit"].fillna("TON").astype(str).str.strip()
             _v160_work["Remark"]=_v160_work["Remark"].fillna("").astype(str).str.strip()
             _v160_work=(
                 _v160_work.groupby(
@@ -14380,6 +14407,7 @@ elif page == "Operations":
                     "Remark":"first",
                 })
             )
+
         _v160_work["Net Issue Ton"]=_v160_work["Reel Issue Ton"]-_v160_work["Reel Return Ton"]
         _v160_work["Consumption Ton"]=_v160_work["Net Issue Ton"]
         _v160_work["Unit"]="TON"
@@ -14387,72 +14415,105 @@ elif page == "Operations":
         _v160_return=float(_v160_work["Reel Return Ton"].sum()) if not _v160_work.empty else 0.0
         _v160_consumption=float(_v160_work["Consumption Ton"].sum()) if not _v160_work.empty else 0.0
 
-        # Professional total line directly below the monthly reel grid.
-        # Keep the editable source rows untouched; this footer is display-only.
-        st.markdown(
-            f"""
-            <style>
-            .v160-total-row{{
-                display:grid;
-                grid-template-columns:4% 9% 22% 12% 11% 11% 11% 7% 13%;
-                align-items:center;
-                width:100%;
-                min-height:44px;
-                margin-top:-1px;
-                border:1px solid rgba(66,102,139,.58);
-                border-top:2px solid rgba(76,149,255,.78);
-                border-radius:0 0 10px 10px;
-                overflow:hidden;
-                background:linear-gradient(90deg,rgba(18,35,54,.98),rgba(12,27,43,.98));
-                box-shadow:0 8px 22px rgba(0,0,0,.16);
-            }}
-            .v160-total-row>div{{
-                min-height:44px;
-                display:flex;
-                align-items:center;
-                padding:0 10px;
-                border-right:1px solid rgba(58,83,110,.42);
-                color:#f4f8fc;
-                font-size:12px;
-                font-weight:850;
-                white-space:nowrap;
-            }}
-            .v160-total-row>div:last-child{{border-right:none}}
-            .v160-total-row .v160-total-label{{
-                color:#7db7ff;
-                letter-spacing:.08em;
-                font-weight:950;
-            }}
-            .v160-total-row .v160-total-num{{
-                justify-content:flex-end;
-                font-variant-numeric:tabular-nums;
-                color:#ffffff;
-            }}
-            .v160-total-row .v160-total-cons{{
-                justify-content:flex-end;
-                font-variant-numeric:tabular-nums;
-                color:#79e7bd;
-                font-weight:950;
-            }}
-            @media(max-width:900px){{
-                .v160-total-row{{grid-template-columns:1fr 1fr 1fr 1fr}}
-                .v160-total-row .v160-hide-mobile{{display:none}}
-            }}
-            </style>
-            <div class="v160-total-row">
-                <div></div>
-                <div></div>
-                <div class="v160-total-label">TOTAL</div>
-                <div></div>
-                <div class="v160-total-num">{_v160_issue:,.3f}</div>
-                <div class="v160-total-num">{_v160_return:,.3f}</div>
-                <div class="v160-total-cons">{_v160_consumption:,.3f}</div>
-                <div>TON</div>
-                <div></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        if _v160_saved_view:
+            _v160_rows_html=[]
+            for _v160_no,(_, _v160_r) in enumerate(_v160_work.iterrows(),start=1):
+                _v160_rows_html.append(
+                    "<tr>"
+                    f"<td class='num'>{_v160_no:,}</td>"
+                    f"<td>{html.escape(str(_v160_r.get('ERP Code') or ''))}</td>"
+                    f"<td class='item'>{html.escape(str(_v160_r.get('Item Name') or ''))}</td>"
+                    f"<td>{html.escape(str(_v160_r.get('Reel Size') or ''))}</td>"
+                    f"<td class='qty'>{float(_v160_r.get('Reel Issue Ton') or 0):,.3f}</td>"
+                    f"<td class='qty'>{float(_v160_r.get('Reel Return Ton') or 0):,.3f}</td>"
+                    f"<td class='qty'>{float(_v160_r.get('Consumption Ton') or 0):,.3f}</td>"
+                    "<td>TON</td>"
+                    f"<td>{html.escape(str(_v160_r.get('Remark') or ''))}</td>"
+                    "</tr>"
+                )
+            _v160_rows_markup="".join(_v160_rows_html) if _v160_rows_html else (
+                "<tr><td colspan='9' class='empty'>No monthly reel data available.</td></tr>"
+            )
+            st.markdown(
+                f"""
+                <style>
+                .v160-grid-shell{{
+                    width:100%;max-height:430px;overflow:auto;
+                    border:1px solid #263a50;border-radius:10px;
+                    background:#07111c;box-shadow:0 7px 22px rgba(0,0,0,.12);
+                }}
+                .v160-grid{{
+                    width:100%;border-collapse:separate;border-spacing:0;
+                    table-layout:fixed;font-size:12px;color:#f4f7fb;
+                }}
+                .v160-grid col.c1{{width:5%}} .v160-grid col.c2{{width:10%}}
+                .v160-grid col.c3{{width:22%}} .v160-grid col.c4{{width:10%}}
+                .v160-grid col.c5{{width:11%}} .v160-grid col.c6{{width:11%}}
+                .v160-grid col.c7{{width:11%}} .v160-grid col.c8{{width:7%}}
+                .v160-grid col.c9{{width:13%}}
+                .v160-grid th{{
+                    position:sticky;top:0;z-index:4;height:40px;padding:0 10px;
+                    text-align:left;font-weight:700;color:#bfc9d5;
+                    background:#1b202a;border-right:1px solid #26313e;
+                    border-bottom:1px solid #344253;white-space:nowrap;
+                }}
+                .v160-grid td{{
+                    height:36px;padding:0 10px;border-right:1px solid #1d2c3b;
+                    border-bottom:1px solid #1c2b39;background:#07111c;
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                    font-weight:650;
+                }}
+                .v160-grid td.item{{font-weight:720}}
+                .v160-grid td.num,.v160-grid td.qty{{text-align:right;font-variant-numeric:tabular-nums}}
+                .v160-grid th:last-child,.v160-grid td:last-child{{border-right:none}}
+                .v160-grid tbody tr:hover td{{background:#0c1927}}
+                .v160-grid tfoot td{{
+                    position:sticky;bottom:0;z-index:5;height:42px;
+                    background:#121b26;border-top:1px solid #415064;
+                    border-bottom:none;font-weight:850;color:#f7f9fc;
+                    box-shadow:0 -3px 10px rgba(0,0,0,.18);
+                }}
+                .v160-grid tfoot td.total-label{{text-align:left;letter-spacing:.03em}}
+                .v160-grid tfoot td.total-cons{{font-weight:950}}
+                .v160-grid td.empty{{text-align:center;color:#8da0b4;height:80px}}
+                </style>
+                <div class="v160-grid-shell">
+                  <table class="v160-grid">
+                    <colgroup>
+                      <col class="c1"><col class="c2"><col class="c3"><col class="c4">
+                      <col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>S.No</th><th>ERP Code</th><th>Item Name</th><th>Reel Size</th>
+                        <th>Reel Issue Ton</th><th>Reel Return Ton</th><th>Consumption Ton</th>
+                        <th>Unit</th><th>Remark</th>
+                      </tr>
+                    </thead>
+                    <tbody>{_v160_rows_markup}</tbody>
+                    <tfoot>
+                      <tr>
+                        <td></td><td></td><td class="total-label">TOTAL</td><td></td>
+                        <td class="qty">{_v160_issue:,.3f}</td>
+                        <td class="qty">{_v160_return:,.3f}</td>
+                        <td class="qty total-cons">{_v160_consumption:,.3f}</td>
+                        <td>TON</td><td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            _v160_edit_col,_=st.columns([1.35,4.65])
+            with _v160_edit_col:
+                if st.button(
+                    "Edit Saved Reel Data",
+                    key=f"v160_enable_edit_{_v160_month_date.isoformat()}",
+                    use_container_width=True,
+                ):
+                    st.session_state[_v160_edit_key]=True
+                    st.rerun()
 
         _v160_a,_v160_b,_v160_c,_v160_d=st.columns(4)
         _v160_a.metric("Rows",f"{len(_v160_work):,}")
@@ -14460,7 +14521,7 @@ elif page == "Operations":
         _v160_c.metric("Reel Return",f"{_v160_return:,.3f} T")
         _v160_d.metric("Consumption",f"{_v160_consumption:,.3f} T")
 
-        if st.button("Save Monthly Reel Data",type="primary",use_container_width=True,key="v160_save_reel"):
+        if (not _v160_saved_view) and st.button("Save Monthly Reel Data",type="primary",use_container_width=True,key="v160_save_reel"):
             _v160_invalid=_v160_work[
                 (_v160_work["ERP Code"]=="")&(_v160_work["Item Name"]=="")
             ]
@@ -14517,6 +14578,7 @@ elif page == "Operations":
                         f"Issue {_v160_issue:,.3f} T · Return {_v160_return:,.3f} T · "
                         f"Consumption {_v160_consumption:,.3f} T."
                     )
+                    st.session_state[_v160_edit_key]=False
                     st.rerun()
                 except Exception as _v160_save_exc:
                     _v160_conn.rollback()
