@@ -14702,30 +14702,166 @@ elif page == "Operations":
 # REPORT CENTRE — ONE SOURCE OF TRUTH
 # ============================================================
 elif page == "Reports":
-    v5_page_header("Report Centre","Generate each report once from a single controlled location.",global_division,month_value=global_payroll_month)
-    report_types=[
-        "Attendance Register",
-        "Monthly Attendance Summary",
-        "Live Salary Register",
-        "Finalized Salary Register",
-        "PF / ESIC Summary",
-        "Employee Master",
-        "Contractor Payable",
-        "Production Performance",
-        "Reel Consumption - Day Wise",
-        "Manpower Allocation",
-        "Manpower Cost vs Tonnage",
-    ]
-    r1,r2,r3=st.columns([1.3,1,1])
-    report_type=r1.selectbox("Report",report_types,key="v5_report_type")
-    report_div=r2.selectbox("Division",[ALL_DIVISIONS]+DIVISIONS,index=([ALL_DIVISIONS]+DIVISIONS).index(global_division),key="v5_report_div")
-    report_month=r3.selectbox("Month",_month_opts,index=_month_opts.index(global_payroll_month),format_func=lambda d:d.strftime("%b %Y"),key="v5_report_month")
+    v5_page_header(
+        "Unified Report Centre",
+        "One controlled page for management, HR, payroll, production, material and manpower reports.",
+        global_division,
+        month_value=global_payroll_month,
+    )
+
+    # V17.0 UNIFIED REPORT LIBRARY
+    # One page + one filter bar + one report renderer. Only the selected report
+    # is queried/rendered, keeping page load lighter while giving MD one place
+    # to find every controlled report.
+    _v170_report_catalog={
+        "Executive": [
+            "MD Executive Overview",
+        ],
+        "HR & Attendance": [
+            "Attendance Register",
+            "Monthly Attendance Summary",
+            "Employee Master",
+        ],
+        "Payroll & Statutory": [
+            "Live Salary Register",
+            "Finalized Salary Register",
+            "PF / ESIC Summary",
+        ],
+        "Production & Material": [
+            "Production Performance",
+            "Reel Consumption - Monthly",
+            "Reel Consumption - Day Wise",
+        ],
+        "Manpower & Cost": [
+            "Manpower Allocation",
+            "Manpower Cost vs Tonnage",
+            "Contractor Payable",
+        ],
+    }
+
+    st.markdown(
+        """
+        <style>
+        .v170-report-strip{
+            display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;
+            margin:4px 0 14px;
+        }
+        .v170-report-strip div{
+            padding:10px 12px;border:1px solid rgba(69,111,151,.28);border-radius:10px;
+            background:linear-gradient(145deg,rgba(12,29,47,.88),rgba(8,21,35,.88));
+        }
+        .v170-report-strip b{display:block;color:#eef6ff;font-size:11px}
+        .v170-report-strip span{display:block;color:#7f96ab;font-size:8px;margin-top:2px}
+        @media(max-width:950px){.v170-report-strip{grid-template-columns:1fr 1fr}}
+        </style>
+        <div class="v170-report-strip">
+          <div><b>Executive</b><span>MD overview</span></div>
+          <div><b>HR & Attendance</b><span>People records</span></div>
+          <div><b>Payroll & Statutory</b><span>Salary · PF · ESIC</span></div>
+          <div><b>Production & Material</b><span>Output · Reel</span></div>
+          <div><b>Manpower & Cost</b><span>Headcount · Efficiency</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _v170_c1,_v170_c2,_v170_c3,_v170_c4=st.columns([1.0,1.45,1.0,1.0])
+    _v170_category=_v170_c1.selectbox(
+        "Report Group",
+        list(_v170_report_catalog.keys()),
+        key="v170_report_group",
+    )
+    report_type=_v170_c2.selectbox(
+        "Report",
+        _v170_report_catalog[_v170_category],
+        key="v170_report_type",
+    )
+    report_div=_v170_c3.selectbox(
+        "Division",
+        [ALL_DIVISIONS]+DIVISIONS,
+        index=([ALL_DIVISIONS]+DIVISIONS).index(global_division),
+        key="v170_report_div",
+    )
+    report_month=_v170_c4.selectbox(
+        "Month",
+        _month_opts,
+        index=_month_opts.index(global_payroll_month),
+        format_func=lambda d:d.strftime("%b %Y"),
+        key="v170_report_month",
+    )
     first,last=_month_range(report_month)
     report_df=pd.DataFrame()
     report_title=report_type
     report_note=""
 
-    if report_type=="Attendance Register":
+    if report_type=="MD Executive Overview":
+        # Lightweight management snapshot: aggregates only, not every detail table.
+        _md_active=v5_active_employees(report_div)
+        _md_att_clause,_md_att_params=v5_division_clause(report_div,"a.")
+        _md_att=read_df(
+            """SELECT a.status,COUNT(*) AS rows,COALESCE(SUM(a.ot_hours),0) AS ot_hours
+               FROM attendance a
+               WHERE a.work_date BETWEEN ? AND ? """+_md_att_clause+"""
+               GROUP BY a.status""",
+            (first.isoformat(),last.isoformat())+_md_att_params,
+        )
+        _md_att_rows=int(pd.to_numeric(_md_att.get("rows",0),errors="coerce").fillna(0).sum()) if not _md_att.empty else 0
+        _md_ot=float(pd.to_numeric(_md_att.get("ot_hours",0),errors="coerce").fillna(0).sum()) if not _md_att.empty else 0.0
+
+        _md_pay=_v150_final_payroll_summary(report_month,report_div)
+        _md_net=float(pd.to_numeric(_md_pay.get("net_payable",0),errors="coerce").fillna(0).sum()) if not _md_pay.empty else 0.0
+        _md_pay_emp=int(pd.to_numeric(_md_pay.get("employees",0),errors="coerce").fillna(0).sum()) if not _md_pay.empty else 0
+
+        _md_prod=read_df(
+            """SELECT COALESCE(SUM(CASE WHEN COALESCE(good_output_ton,0)>0
+                                      THEN good_output_ton ELSE production_ton END),0) AS production_ton,
+                      COALESCE(SUM(waste_ton),0) AS waste_ton
+               FROM production
+               WHERE work_date BETWEEN ? AND ?""",
+            (first.isoformat(),last.isoformat()),
+        )
+        _md_prod_ton=float(pd.to_numeric(_md_prod.iloc[0]["production_ton"],errors="coerce") or 0) if not _md_prod.empty else 0.0
+        _md_waste_ton=float(pd.to_numeric(_md_prod.iloc[0]["waste_ton"],errors="coerce") or 0) if not _md_prod.empty else 0.0
+
+        _md_reel=read_df(
+            """SELECT COALESCE(SUM(reel_issue_kg),0)/1000.0 AS issue_ton,
+                      COALESCE(SUM(reel_return_kg),0)/1000.0 AS return_ton,
+                      COALESCE(SUM(reel_consumption_kg),0)/1000.0 AS consumption_ton
+               FROM production_consumption_summary
+               WHERE period_month=?""",
+            (date(report_month.year,report_month.month,1).isoformat(),),
+        )
+        _md_issue=float(pd.to_numeric(_md_reel.iloc[0]["issue_ton"],errors="coerce") or 0) if not _md_reel.empty else 0.0
+        _md_return=float(pd.to_numeric(_md_reel.iloc[0]["return_ton"],errors="coerce") or 0) if not _md_reel.empty else 0.0
+        _md_consumption=float(pd.to_numeric(_md_reel.iloc[0]["consumption_ton"],errors="coerce") or 0) if not _md_reel.empty else 0.0
+
+        _md_con=contractor_month_summary(report_month)
+        _md_con_cost=0.0
+        if not _md_con.empty:
+            for _cc in ["Amount","amount","Total Amount","Payable","payable"]:
+                if _cc in _md_con.columns:
+                    _md_con_cost=float(pd.to_numeric(_md_con[_cc],errors="coerce").fillna(0).sum())
+                    break
+
+        v5_kpis([
+            ("Active Employees",f"{len(_md_active):,}","Selected division","blue"),
+            ("Attendance Rows",f"{_md_att_rows:,}",report_month.strftime("%b %Y"),""),
+            ("OT Hours",f"{_md_ot:,.2f}",report_month.strftime("%b %Y"),""),
+            ("Final Payroll",v5_money(_md_net),f"{_md_pay_emp:,} employee(s)","good" if _md_net else "warn"),
+            ("Production",f"{_md_prod_ton:,.2f} T","Greater Noida","blue"),
+            ("Reel Consumption",f"{_md_consumption:,.2f} T","Issue - Return","good" if _md_consumption else "warn"),
+        ])
+
+        report_df=pd.DataFrame([
+            {"Section":"HR & Attendance","Report":"Active Employee Master","Key Figure":f"{len(_md_active):,} employees","Status":"LIVE"},
+            {"Section":"HR & Attendance","Report":"Monthly Attendance","Key Figure":f"{_md_att_rows:,} rows · OT {_md_ot:,.2f} hrs","Status":"LIVE" if _md_att_rows else "NO DATA"},
+            {"Section":"Payroll & Statutory","Report":"Finalized Salary","Key Figure":f"{v5_money(_md_net)} · {_md_pay_emp:,} employees","Status":"FINAL" if _md_net else "PENDING"},
+            {"Section":"Production & Material","Report":"Production Performance","Key Figure":f"{_md_prod_ton:,.2f} T · Waste {_md_waste_ton:,.2f} T","Status":"LIVE" if _md_prod_ton else "NO DATA"},
+            {"Section":"Production & Material","Report":"Monthly Reel Consumption","Key Figure":f"Issue {_md_issue:,.2f} T · Return {_md_return:,.2f} T · Consumption {_md_consumption:,.2f} T","Status":"LIVE" if _md_issue or _md_return else "NO DATA"},
+            {"Section":"Manpower & Cost","Report":"Contractor Payable","Key Figure":v5_money(_md_con_cost),"Status":"LIVE" if _md_con_cost else "NO DATA"},
+        ])
+
+    elif report_type=="Attendance Register":
         clause,params=v5_division_clause(report_div,"a.")
         report_df=read_df("""SELECT a.division AS "Division",a.work_date AS "Date",a.employee_id AS "Employee ID",
                                    e.employee_name AS "Employee Name",e.department AS "Department",a.designation AS "Designation",
@@ -14775,6 +14911,28 @@ elif page == "Reports":
                                        p.breakdown_hours AS "Breakdown Hours",p.remark AS "Remark"
                                 FROM production p LEFT JOIN machines m ON m.machine=p.machine
                                 WHERE p.work_date BETWEEN ? AND ? ORDER BY p.work_date,p.shift,p.machine""",(first.isoformat(),last.isoformat()))
+    elif report_type=="Reel Consumption - Monthly":
+        if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
+            report_df=pd.DataFrame()
+        else:
+            report_df=read_df(
+                """SELECT erp_code AS "ERP Code",
+                          item_name AS "Item Name",
+                          reel_size AS "Reel Size",
+                          reel_issue_kg/1000.0 AS "Reel Issue Ton",
+                          reel_return_kg/1000.0 AS "Reel Return Ton",
+                          reel_consumption_kg/1000.0 AS "Consumption Ton",
+                          'TON' AS "Unit",
+                          COALESCE(item_group,'') AS "Remark"
+                   FROM production_consumption_summary
+                   WHERE period_month=?
+                   ORDER BY item_name,erp_code""",
+                (date(report_month.year,report_month.month,1).isoformat(),),
+            )
+            if not report_df.empty:
+                for _mc in ["Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
+                    report_df[_mc]=pd.to_numeric(report_df[_mc],errors="coerce").fillna(0).round(2)
+
     elif report_type=="Reel Consumption - Day Wise":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
@@ -15096,6 +15254,20 @@ elif page == "Reports":
             )
             st.altair_chart(_md_cpt_chart,use_container_width=True)
 
+    st.markdown(
+        f"""
+        <div style="margin:12px 0 8px;padding:11px 14px;border:1px solid rgba(68,112,155,.28);
+                    border-radius:11px;background:linear-gradient(145deg,rgba(11,28,46,.86),rgba(8,21,35,.86));">
+          <div style="font-size:9px;color:#708ba3;font-weight:850;letter-spacing:.12em;">CONTROLLED REPORT</div>
+          <div style="font-size:17px;color:#f4f8fc;font-weight:900;margin-top:2px;">{html.escape(report_type)}</div>
+          <div style="font-size:10px;color:#8fa5b9;margin-top:3px;">
+            {html.escape(str(report_div))} · {report_month.strftime('%b %Y')} · Live ERP source
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     if report_df.empty:
         if report_note:
             st.warning(report_note)
@@ -15103,7 +15275,7 @@ elif page == "Reports":
             st.info("No data is available for this report and selected context.")
     else:
         st.success(
-            f"{report_type} is ready · {len(report_df):,} rows · "
+            f"Report ready · {len(report_df):,} rows · "
             f"{report_div} · {report_month.strftime('%b %Y')} · Live database"
         )
         st.dataframe(
