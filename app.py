@@ -3126,6 +3126,80 @@ PAID_STATUS_FACTORS = {
     "HR Review": 0.0,
 }
 
+# V18.3 HIGH-VISIBILITY ATTENDANCE STATUS SYSTEM
+# One consistent visual language across Employee 360, Performance and Report Center.
+_V183_STATUS_COLORS = {
+    "Present": ("rgba(46,211,154,.28)", "#8ff0ca", "#2ed39a"),
+    "OD": ("rgba(53,213,255,.25)", "#8feaff", "#35d5ff"),
+    "WO": ("rgba(79,156,255,.25)", "#9dc8ff", "#4f9cff"),
+    "Holiday": ("rgba(155,108,255,.25)", "#d0b8ff", "#9b6cff"),
+    "Leave": ("rgba(246,184,76,.25)", "#ffd98d", "#f6b84c"),
+    "Half Day": ("rgba(255,159,67,.25)", "#ffc083", "#ff9f43"),
+    "Absent": ("rgba(255,107,115,.28)", "#ffabb0", "#ff6b73"),
+    "HR Review": ("rgba(255,209,102,.24)", "#ffe39b", "#ffd166"),
+}
+
+def _v183_status_group(value):
+    raw = str(value or "").strip()
+    key = raw.casefold()
+    if key in {"present", "present equivalent", "live", "final"}:
+        return "Present"
+    if key in {"od", "on duty", "on-duty"}:
+        return "OD"
+    if key in {"wo", "weekly off"}:
+        return "WO"
+    if key == "holiday":
+        return "Holiday"
+    if key in {"leave", "paid leave", "cl", "sl", "el"}:
+        return "Leave"
+    if key in {"half day", "halfday"}:
+        return "Half Day"
+    if key in {"absent", "lwp", "absent / lwp", "no data"}:
+        return "Absent"
+    if key in {"hr review", "pending"}:
+        return "HR Review"
+    return None
+
+def _v183_status_cell_css(value):
+    group = _v183_status_group(value)
+    if not group:
+        return ""
+    bg, fg, border = _V183_STATUS_COLORS[group]
+    return (
+        f"background-color:{bg};color:{fg};font-weight:900;"
+        f"border-left:4px solid {border};"
+    )
+
+def _v183_style_status_table(df, status_col=None):
+    if df is None or getattr(df, "empty", True):
+        return df
+    col = status_col
+    if not col:
+        col = next((c for c in ["Status","status","Attendance Status"] if c in df.columns), None)
+    if not col or col not in df.columns:
+        return df
+    try:
+        return df.style.applymap(_v183_status_cell_css, subset=[col])
+    except Exception:
+        return df
+
+def _v183_status_legend():
+    st.markdown(
+        """
+        <div class="v183-status-legend">
+          <span class="present">● Present</span>
+          <span class="od">● OD</span>
+          <span class="wo">● WO</span>
+          <span class="holiday">● Holiday</span>
+          <span class="leave">● Leave</span>
+          <span class="half">● Half Day</span>
+          <span class="absent">● Absent / LWP</span>
+          <span class="review">● HR Review</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 def can_edit_hr(role):
     return str(role) in {"Owner", "Admin", "HR"}
@@ -7913,11 +7987,26 @@ hr{border-color:#1b2a3d!important;margin:.65rem 0!important}
 }
 .v55-day .d{font-size:8px;color:#758aa3;font-weight:800}
 .v55-day .s{font-size:8px;color:#dce5ef;font-weight:800;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.v55-day.present{border-color:rgba(54,201,143,.30);background:rgba(54,201,143,.06)}
-.v55-day.absent{border-color:rgba(240,106,106,.30);background:rgba(240,106,106,.06)}
-.v55-day.leave{border-color:rgba(130,118,255,.30);background:rgba(130,118,255,.06)}
-.v55-day.review{border-color:rgba(242,184,75,.32);background:rgba(242,184,75,.07)}
-.v55-day.wo{border-color:rgba(94,164,255,.28);background:rgba(94,164,255,.06)}
+.v55-day.present{border-color:rgba(46,211,154,.72);background:linear-gradient(145deg,rgba(46,211,154,.28),rgba(46,211,154,.10));box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 18px rgba(46,211,154,.10)}
+.v55-day.od{border-color:rgba(53,213,255,.72);background:linear-gradient(145deg,rgba(53,213,255,.27),rgba(53,213,255,.09));box-shadow:0 0 18px rgba(53,213,255,.10)}
+.v55-day.absent{border-color:rgba(255,107,115,.76);background:linear-gradient(145deg,rgba(255,107,115,.30),rgba(255,107,115,.10));box-shadow:0 0 18px rgba(255,107,115,.10)}
+.v55-day.leave{border-color:rgba(246,184,76,.72);background:linear-gradient(145deg,rgba(246,184,76,.27),rgba(246,184,76,.09));box-shadow:0 0 18px rgba(246,184,76,.09)}
+.v55-day.review{border-color:rgba(255,209,102,.76);background:linear-gradient(145deg,rgba(255,209,102,.24),rgba(255,209,102,.08));box-shadow:0 0 18px rgba(255,209,102,.08)}
+.v55-day.wo{border-color:rgba(79,156,255,.72);background:linear-gradient(145deg,rgba(79,156,255,.26),rgba(79,156,255,.09));box-shadow:0 0 18px rgba(79,156,255,.09)}
+.v55-day.holiday{border-color:rgba(155,108,255,.76);background:linear-gradient(145deg,rgba(155,108,255,.28),rgba(155,108,255,.09));box-shadow:0 0 18px rgba(155,108,255,.10)}
+.v55-day.present .s{color:#8ff0ca}.v55-day.od .s{color:#8feaff}.v55-day.wo .s{color:#9dc8ff}
+.v55-day.holiday .s{color:#d0b8ff}.v55-day.leave .s{color:#ffd98d}.v55-day.absent .s{color:#ffabb0}
+.v55-day.review .s{color:#ffe39b}
+.v183-status-legend{display:flex;flex-wrap:wrap;gap:7px;margin:5px 0 11px}
+.v183-status-legend span{display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;font-size:8.5px;font-weight:900;letter-spacing:.02em;border:1px solid rgba(255,255,255,.12)}
+.v183-status-legend .present{background:rgba(46,211,154,.18);color:#8ff0ca;border-color:rgba(46,211,154,.48)}
+.v183-status-legend .od{background:rgba(53,213,255,.18);color:#8feaff;border-color:rgba(53,213,255,.48)}
+.v183-status-legend .wo{background:rgba(79,156,255,.18);color:#9dc8ff;border-color:rgba(79,156,255,.48)}
+.v183-status-legend .holiday{background:rgba(155,108,255,.18);color:#d0b8ff;border-color:rgba(155,108,255,.48)}
+.v183-status-legend .leave{background:rgba(246,184,76,.18);color:#ffd98d;border-color:rgba(246,184,76,.48)}
+.v183-status-legend .half{background:rgba(255,159,67,.18);color:#ffc083;border-color:rgba(255,159,67,.48)}
+.v183-status-legend .absent{background:rgba(255,107,115,.20);color:#ffabb0;border-color:rgba(255,107,115,.52)}
+.v183-status-legend .review{background:rgba(255,209,102,.17);color:#ffe39b;border-color:rgba(255,209,102,.48)}
 .v55-smart{
   border:1px solid #29415d;background:linear-gradient(135deg,#102239,#0d1b2d);
   border-radius:12px;padding:11px 12px;margin:7px 0 10px;
@@ -11875,6 +11964,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 if _v141_profile_section=="Attendance":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
+                    _v183_status_legend()
                     c1,c2=st.columns([1.35,1],gap="small")
                     with c1:
                         with st.container(border=True):
@@ -11885,10 +11975,10 @@ elif page == "Employees":
                                     if not pd.isna(r["work_date_dt"]):
                                         att_map[int(r["work_date_dt"].day)]=str(r["status"])
                             status_class={
-                                "Present":"present","OD":"present","Half Day":"present",
+                                "Present":"present","OD":"od","Half Day":"leave",
                                 "Absent":"absent","LWP":"absent",
                                 "Leave":"leave","CL":"leave","SL":"leave","EL":"leave",
-                                "HR Review":"review","WO":"wo","Holiday":"wo"
+                                "HR Review":"review","WO":"wo","Holiday":"holiday"
                             }
                             day_cards=[]
                             for day_num in range(1,monthrange(profile_month.year,profile_month.month)[1]+1):
@@ -11913,7 +12003,7 @@ elif page == "Employees":
                                 {"Status":"HR Review","Days":review_days},
                                 {"Status":"Records","Days":len(att)},
                             ])
-                            st.dataframe(summary_df,hide_index=True,use_container_width=True)
+                            st.dataframe(_v183_style_status_table(summary_df,"Status"),hide_index=True,use_container_width=True)
 
                     st.markdown('<div class="v5-section">Daily Punch Register</div>',unsafe_allow_html=True)
                     if att.empty:
@@ -11928,7 +12018,7 @@ elif page == "Employees":
                             "Status","OT Hrs","HR Remark","Review Required"
                         ]
                         st.dataframe(
-                            daily,hide_index=True,use_container_width=True,
+                            _v183_style_status_table(daily,"Status"),hide_index=True,use_container_width=True,
                             column_config={
                                 "Working Hrs":st.column_config.NumberColumn("Working Hrs",format="%.2f"),
                                 "OT Hrs":st.column_config.NumberColumn("OT Hrs",format="%.2f"),
@@ -11941,6 +12031,7 @@ elif page == "Employees":
                 # ------------------------------------------------
                 if _v141_profile_section=="Performance":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
+                    _v183_status_legend()
                     st.caption(
                         "Attendance & work-time performance for the selected month. "
                         "This view measures attendance discipline, leave/absence and working-time patterns; "
@@ -12076,7 +12167,13 @@ elif page == "Employees":
                                     .encode(
                                         x=alt.X("Date:T",title=None),
                                         y=alt.Y("Hours:Q",title="Hours"),
-                                        color=alt.Color("Metric:N",title=None),
+                                        color=alt.Color(
+                                            "Metric:N",title=None,
+                                            scale=alt.Scale(
+                                                domain=["Working Hrs","OT Hrs"],
+                                                range=["#4f9cff","#f6b84c"],
+                                            ),
+                                        ),
                                         tooltip=[
                                             alt.Tooltip("Date:T",title="Date"),
                                             alt.Tooltip("Status:N",title="Status"),
@@ -12103,6 +12200,14 @@ elif page == "Employees":
                                     .encode(
                                         y=alt.Y("Status:N",sort="-x",title=None),
                                         x=alt.X("Days:Q",title="Days"),
+                                        color=alt.Color(
+                                            "Status:N",title=None,
+                                            scale=alt.Scale(
+                                                domain=["Present","OD","WO","Holiday","Leave","CL","SL","EL","Half Day","Absent","LWP","HR Review"],
+                                                range=["#2ed39a","#35d5ff","#4f9cff","#9b6cff","#f6b84c","#f6b84c","#f6b84c","#f6b84c","#ff9f43","#ff6b73","#ff4d5a","#ffd166"],
+                                            ),
+                                            legend=None,
+                                        ),
                                         tooltip=[
                                             alt.Tooltip("Status:N",title="Status"),
                                             alt.Tooltip("Days:Q",title="Days",format=",.0f"),
@@ -12146,6 +12251,14 @@ elif page == "Employees":
                                     .encode(
                                         x=alt.X("Date:T",title=None),
                                         y=alt.Y("Compliance %:Q",title="Compliance %",scale=alt.Scale(domain=[0,100])),
+                                        color=alt.Color(
+                                            "Status:N",title=None,
+                                            scale=alt.Scale(
+                                                domain=["Present","OD","WO","Holiday","Leave","CL","SL","EL","Half Day","Absent","LWP","HR Review"],
+                                                range=["#2ed39a","#35d5ff","#4f9cff","#9b6cff","#f6b84c","#f6b84c","#f6b84c","#f6b84c","#ff9f43","#ff6b73","#ff4d5a","#ffd166"],
+                                            ),
+                                            legend=None,
+                                        ),
                                         tooltip=[
                                             alt.Tooltip("Date:T",title="Date"),
                                             alt.Tooltip("Status:N",title="Status"),
@@ -12166,7 +12279,7 @@ elif page == "Employees":
                             "Date","Day","Status","Time In","Time Out","Working Hrs","OT Hrs","Remark"
                         ]
                         st.dataframe(
-                            _v181_detail,
+                            _v183_style_status_table(_v181_detail,"Status"),
                             hide_index=True,
                             use_container_width=True,
                             column_config={
@@ -12803,6 +12916,7 @@ elif page == "Attendance":
                     st.error(f"Attendance pre-import check failed: {exc}")
 
     if _v141_att_section=="Daily Correction":
+        _v183_status_legend()
         register=v5_attendance_for_date(global_work_date,global_division)
         if register.empty:
             st.info("No attendance records for the selected date/division.")
@@ -12968,6 +13082,7 @@ elif page == "Attendance":
             ).dt.strftime("%d/%m/%Y").fillna("—")
 
         st.markdown("#### All HR Review / Pending Actions")
+        _v183_status_legend()
         st.caption(
             "This single view combines attendance exceptions, employee masters awaiting HR completion, "
             "and active employees missing from the BTS attendance source for the attendance-review date. "
@@ -15987,6 +16102,9 @@ elif page == "Reports":
         unsafe_allow_html=True,
     )
 
+    if report_type in {"Attendance Register","Monthly Attendance Summary"}:
+        _v183_status_legend()
+
     if report_df.empty:
         if report_note:
             st.warning(report_note)
@@ -15998,7 +16116,7 @@ elif page == "Reports":
             f"{report_div} · {report_month.strftime('%b %Y')} · Live database"
         )
         st.dataframe(
-            report_df,
+            _v183_style_status_table(report_df),
             hide_index=True,
             use_container_width=True,
             height=min(620, max(260, 38 * min(len(report_df) + 1, 16))),
