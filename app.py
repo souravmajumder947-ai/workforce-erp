@@ -7419,11 +7419,85 @@ body:has(.v82-login-root) .v116-brand-sub{
 
 
 _current_user = st.session_state["auth_user"]
+
+# V18.4 LIVE USER IDENTITY SYNC
+# Login/session data is only an authentication snapshot. Display name, role and
+# active state are always refreshed from app_users so edits appear everywhere
+# (sidebar, Home profile, permissions and User Management) on the next rerun.
+try:
+    _v184_live_user = read_df(
+        """SELECT user_id,username,full_name,role,is_active,created_at,last_login
+           FROM app_users WHERE user_id=? LIMIT 1""",
+        (int(_current_user["user_id"]),),
+    )
+    if not _v184_live_user.empty:
+        _v184_live_dict = _v184_live_user.iloc[0].to_dict()
+        st.session_state["auth_user"].update(_v184_live_dict)
+        _current_user = st.session_state["auth_user"]
+except Exception:
+    # A transient DB read must not destroy an already authenticated session.
+    pass
+
 _current_role = str(_current_user.get("role", "Viewer"))
 # V10.9 FINAL PRODUCTION ACTIVATION
 _v109_production_mode = str(get_setting_value("production_mode", "SETUP") or "SETUP").upper()
 _v109_production_live = _v109_production_mode == "LIVE"
 st.markdown('<div class="v104-app-quality-marker"></div>', unsafe_allow_html=True)
+
+# ============================================================
+# V18.4 — COMPACT ERP DENSITY / EMPTY-GAP FIX
+# Style-only Streamlit blocks previously accumulated vertical flex gaps.
+# display:contents removes those invisible layout boxes while preserving CSS.
+# ============================================================
+st.markdown(
+    """
+    <style>
+    body:has(.v104-app-quality-marker) div[data-testid="stElementContainer"]:has(style){
+      display:contents!important;
+    }
+    body:has(.v104-app-quality-marker) main [data-testid="stVerticalBlock"]{
+      gap:.52rem!important;
+    }
+    body:has(.v104-app-quality-marker) .block-container{
+      padding-top:.38rem!important;
+      padding-bottom:.85rem!important;
+    }
+    body:has(.v104-app-quality-marker) .v83-live-strip{
+      margin-bottom:5px!important;
+      padding:6px 9px!important;
+    }
+    body:has(.v104-app-quality-marker) .v8-topbar{
+      margin-bottom:6px!important;
+    }
+    body:has(.v104-app-quality-marker) h1,
+    body:has(.v104-app-quality-marker) h2,
+    body:has(.v104-app-quality-marker) h3{
+      margin-top:.38rem!important;
+      margin-bottom:.28rem!important;
+    }
+    body:has(.v104-app-quality-marker) [data-testid="stWidgetLabel"]{
+      margin-bottom:.12rem!important;
+    }
+    body:has(.v104-app-quality-marker) div[data-testid="stVerticalBlockBorderWrapper"]>div{
+      row-gap:.46rem!important;
+      padding-top:.72rem!important;
+      padding-bottom:.72rem!important;
+    }
+    body:has(.v10-live-home-marker) div[data-testid="stHorizontalBlock"]:has(.v10-product-line){
+      margin-top:0!important;
+      margin-bottom:0!important;
+      align-items:center!important;
+    }
+    body:has(.v10-live-home-marker) .v10-hero{
+      margin-top:2px!important;
+    }
+    @media(max-width:900px){
+      body:has(.v104-app-quality-marker) main [data-testid="stVerticalBlock"]{gap:.62rem!important}
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ============================================================
 # V18.0 — ADVANCED 3D GLASS APPLICATION THEME
@@ -17763,6 +17837,7 @@ elif page == "Master Centre":
 # USER MANAGEMENT — USERS AND MODULE ACCESS ONLY
 # ============================================================
 elif page == "User Management":
+    st.markdown('<div class="v184-user-management-page"></div>', unsafe_allow_html=True)
     v5_page_header(
         "User Management",
         "Create users, assign roles and control module visibility. Business master work is kept in Master Centre."
@@ -17816,6 +17891,19 @@ elif page == "User Management":
             .v8-summary-stat b{display:block;color:#f8fbff;font-size:18px;line-height:1;margin-bottom:5px}
             .v8-summary-stat span{color:#8096b0;font-size:8px;line-height:1.25}
             .v8-summary-note{color:#748ba6;font-size:8px;line-height:1.5;margin-top:12px}
+
+            /* V18.4 compact User Management workspace */
+            body:has(.v184-user-management-page) main [data-testid="stVerticalBlock"]{gap:.42rem!important}
+            body:has(.v184-user-management-page) h3{margin:.28rem 0 .16rem!important}
+            body:has(.v184-user-management-page) [data-testid="stTextInput"],
+            body:has(.v184-user-management-page) [data-testid="stSelectbox"],
+            body:has(.v184-user-management-page) [data-testid="stMultiSelect"]{margin-bottom:0!important}
+            body:has(.v184-user-management-page) .v8-compact-table{margin-top:4px!important}
+            body:has(.v184-user-management-page) .v8-summary-card{margin-top:4px!important}
+            body:has(.v184-user-management-page) div[data-testid="stVerticalBlockBorderWrapper"]>div{
+              padding:.62rem .72rem!important;
+              row-gap:.40rem!important;
+            }
             </style>
             """,
             unsafe_allow_html=True,
@@ -17957,23 +18045,34 @@ elif page == "User Management":
                 m for m in V5_ASSIGNABLE_MODULES
                 if V5_MODULE_BACKEND[m] & current_backend
             ]
-            c1,c2,c3=st.columns(3)
-            edit_name=c1.text_input(
-                "Full Name",value=str(u["full_name"]),key="v54_edit_name"
-            )
             role_options=["Owner","Admin","HR","Manager","Viewer"]
+
+            # Streamlit widget keys retain their previous value. Reload the form
+            # whenever Edit User changes so one user's name/role/modules can never
+            # leak into another selected account.
+            if st.session_state.get("v184_loaded_edit_user") != selected_user:
+                st.session_state["v54_edit_name"] = str(u["full_name"] or "")
+                st.session_state["v54_edit_role"] = (
+                    str(u["role"]) if str(u["role"]) in role_options else "Manager"
+                )
+                st.session_state["v54_edit_active"] = bool(u["is_active"])
+                st.session_state["v54_modules"] = list(module_defaults)
+                st.session_state["v54_reset_pw"] = ""
+                st.session_state["v184_loaded_edit_user"] = selected_user
+
+            c1,c2,c3=st.columns([1.05,1.0,.65],gap="small")
+            edit_name=c1.text_input(
+                "Full Name",key="v54_edit_name"
+            )
             edit_role=c2.selectbox(
-                "Role",role_options,
-                index=role_options.index(str(u["role"])) if str(u["role"]) in role_options else 3,
-                key="v54_edit_role"
+                "Role",role_options,key="v54_edit_role"
             )
             active=c3.checkbox(
-                "Active",value=bool(u["is_active"]),key="v54_edit_active"
+                "Active",key="v54_edit_active"
             )
             modules=st.multiselect(
                 "Operational Module Access",
                 V5_ASSIGNABLE_MODULES,
-                default=module_defaults,
                 disabled=edit_role in FULL_CONTROL_ROLES,
                 key="v54_modules"
             )
@@ -18017,6 +18116,18 @@ elif page == "User Management":
                         "User", selected_user,
                         f"Role={edit_role}; Active={active}; Modules={','.join(sorted(modules))}"
                     )
+
+                    # If the signed-in account edits itself, refresh its session
+                    # snapshot immediately so every header/sidebar uses the same details.
+                    if selected_user == str(_current_user.get("username","")):
+                        _v184_self = read_df(
+                            """SELECT user_id,username,full_name,role,is_active,created_at,last_login
+                               FROM app_users WHERE user_id=? LIMIT 1""",
+                            (uid,),
+                        )
+                        if not _v184_self.empty:
+                            st.session_state["auth_user"].update(_v184_self.iloc[0].to_dict())
+
                     st.success("User access updated.")
                     st.rerun()
 
