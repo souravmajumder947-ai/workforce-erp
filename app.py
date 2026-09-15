@@ -16844,7 +16844,6 @@ elif page == "Reports":
                 """SELECT erp_code AS "ERP Code",
                           item_name AS "Item Name",
                           reel_size AS "Reel Size",
-                          source_f3_qty_kg/1000.0 AS "Finsys F3 Qty Ton",
                           reel_issue_kg/1000.0 AS "Reel Issue Ton",
                           reel_return_kg/1000.0 AS "Reel Return Ton",
                           reel_consumption_kg/1000.0 AS "Consumption Ton",
@@ -16856,7 +16855,7 @@ elif page == "Reports":
                 (date(report_month.year,report_month.month,1).isoformat(),),
             )
             if not report_df.empty:
-                for _mc in ["Finsys F3 Qty Ton","Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
+                for _mc in ["Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
                     report_df[_mc]=pd.to_numeric(report_df[_mc],errors="coerce").fillna(0).round(2)
 
     elif report_type=="Reel Consumption - Day Wise":
