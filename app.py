@@ -7452,14 +7452,26 @@ st.markdown('<div class="v104-app-quality-marker"></div>', unsafe_allow_html=Tru
 st.markdown(
     """
     <style>
-    body:has(.v104-app-quality-marker) div[data-testid="stElementContainer"]:has(style){
-      display:contents!important;
+    /* Root Streamlit layout contains many CSS-only markdown nodes.
+       They must not create flex gaps before the first real ERP component. */
+    body:has(.v104-app-quality-marker) .main .block-container > div[data-testid="stVerticalBlock"],
+    body:has(.v104-app-quality-marker) main .block-container > div[data-testid="stVerticalBlock"]{
+      gap:0!important;
     }
-    body:has(.v104-app-quality-marker) main [data-testid="stVerticalBlock"]{
-      gap:.52rem!important;
+    body:has(.v104-app-quality-marker)
+      div[data-testid="stElementContainer"]:has(
+        div[data-testid="stMarkdownContainer"] > style:only-child
+      ){
+      display:none!important;
+      height:0!important;
+      min-height:0!important;
+      margin:0!important;
+      padding:0!important;
+      flex:0 0 0!important;
+      overflow:hidden!important;
     }
     body:has(.v104-app-quality-marker) .block-container{
-      padding-top:.38rem!important;
+      padding-top:.18rem!important;
       padding-bottom:.85rem!important;
     }
     body:has(.v104-app-quality-marker) .v83-live-strip{
@@ -19852,8 +19864,17 @@ st.markdown("""
    GLOBAL LOGGED-IN VIEW QUALITY
    ------------------------------------------------------------ */
 body:has(.v104-app-quality-marker) .block-container{
-  padding-top:.7rem!important;
+  padding-top:.18rem!important;
   padding-bottom:1.25rem!important;
+}
+/* Final root density lock: style-only nodes never create a top spacer. */
+body:has(.v104-app-quality-marker) .main .block-container > div[data-testid="stVerticalBlock"],
+body:has(.v104-app-quality-marker) main .block-container > div[data-testid="stVerticalBlock"]{
+  gap:0!important;
+}
+body:has(.v104-app-quality-marker) .v83-live-strip{
+  margin-top:0!important;
+  margin-bottom:5px!important;
 }
 body:has(.v104-app-quality-marker) h1,
 body:has(.v104-app-quality-marker) h2,
