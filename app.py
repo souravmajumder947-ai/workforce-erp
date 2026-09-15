@@ -8111,7 +8111,6 @@ div[data-testid="stHorizontalBlock"]:has(.login-v8-marker) .login-subtitle-final
 """, unsafe_allow_html=True)
 
 V5_MODULE_BACKEND = {
-    "Management": {"Dashboard"},
     "Employees": {"Employee Master"},
     "Attendance": {"Attendance"},
     "Payroll": {"Payroll / Salary"},
@@ -8123,11 +8122,10 @@ V5_MODULE_BACKEND = {
     "User Management": {"Settings"},
 }
 V5_ASSIGNABLE_MODULES = [
-    "Management","Employees","Attendance","Payroll","Contractors","Operations","Reports"
+    "Employees","Attendance","Payroll","Contractors","Operations","Reports"
 ]
 V5_NAV_ICONS = {
     "Home":"⌂",
-    "Management":"◫",
     "Employees":"👥",
     "Attendance":"◷",
     "Payroll":"₹",
@@ -9283,10 +9281,15 @@ st.sidebar.markdown(
 
 available_modules = [
     m for m in [
-        "Home","Management","Employees","Attendance","Payroll","Contractors",
+        "Home","Employees","Attendance","Payroll","Contractors",
         "Operations","Reports","AI Tools","Master Centre","User Management"
     ] if v5_module_allowed(m)
 ]
+
+# V17.1: Management reporting is now consolidated into Unified Report Centre.
+# Redirect stale sessions/bookmarks safely instead of exposing a duplicate page.
+if st.session_state.get("v5_navigation") == "Management":
+    st.session_state["v5_navigation"] = "Reports"
 
 # V8.3 safe navigation:
 # buttons write to a separate request key; the request is applied
@@ -9948,7 +9951,6 @@ if page == "Home":
         _v10_ql = _v10_q.lower()
         _v10_alias = {
             "Home": "home dashboard overview command centre",
-            "Management": "management executive mis dashboard",
             "Employees": "employee master history employee 360",
             "Attendance": "attendance biometric punch hr review upload monthly",
             "Payroll": "payroll salary wages pf esic deduction net",
@@ -10747,13 +10749,12 @@ if page == "Home":
     # V10.5 DIRECT ACTION CARDS + CLEAN LOGIN
     # One control = one action. No separate decorative card + Open button.
     st.markdown('<div class="v105-direct-action-marker"></div>', unsafe_allow_html=True)
-    _v10_u1, _v10_u2, _v10_u3, _v10_u4, _v10_u5 = st.columns(5, gap="small")
+    _v10_u1, _v10_u2, _v10_u3, _v10_u4 = st.columns(4, gap="small")
     _v10_utils = [
         (_v10_u1, "✦  AI Assistant", "Ask anything about HR data", "AI Tools", "v10_util_ai"),
         (_v10_u2, "⚙  Automation Hub", "Readiness & repetitive-work routing", "AI Tools", "v10_util_auto"),
-        (_v10_u3, "▥  Smart Reports", "Interactive MIS & insights", "Reports", "v10_util_reports"),
-        (_v10_u4, "⇩  Data Export", "Excel / PDF / report exports", "Reports", "v10_util_export"),
-        (_v10_u5, "♥  System Health", "Database and HR controls", "Management", "v10_util_health"),
+        (_v10_u3, "▥  Unified Reports", "All controlled reports in one place", "Reports", "v10_util_reports"),
+        (_v10_u4, "⇩  Data Export", "Excel report exports", "Reports", "v10_util_export"),
     ]
     for _v10_col, _v10_label, _v10_sub, _v10_target, _v10_key in _v10_utils:
         with _v10_col:
@@ -11770,8 +11771,8 @@ elif page == "Attendance":
     st.markdown('<div class="v104-attendance-page"></div>', unsafe_allow_html=True)
     v5_page_header("Attendance","Upload once, review exceptions, correct HR remarks and monitor monthly attendance.",global_division,global_work_date)
     _v141_att_section=st.radio(
-        "Attendance View",
-        ["Upload Attendance","Daily Register","HR Review","Monthly Summary"],
+        "Attendance Work",
+        ["Upload Attendance","Daily Correction","HR Review"],
         horizontal=True,
         key="v141_attendance_section"
     )
@@ -12161,7 +12162,7 @@ elif page == "Attendance":
                         pass
                     st.error(f"Attendance pre-import check failed: {exc}")
 
-    if _v141_att_section=="Daily Register":
+    if _v141_att_section=="Daily Correction":
         register=v5_attendance_for_date(global_work_date,global_division)
         if register.empty:
             st.info("No attendance records for the selected date/division.")
@@ -13449,13 +13450,9 @@ elif page == "Contractors":
         "Greater Noida Plant",
         month_value=global_payroll_month
     )
-    _v141_con_section=st.radio(
-        "Contractor View",
-        ["Overview","Work Entry"],
-        horizontal=True,
-        key="v141_contractor_section"
-    )
+    _v141_con_section="Work Entry"
 
+    # Contractor payable/summary reporting is centralized in Unified Report Centre.
     if _v141_con_section=="Overview":
         summary=contractor_month_summary(global_payroll_month)
         if summary.empty:
@@ -15728,7 +15725,7 @@ elif page == "Master Centre":
                     {"Step":5, "Area":"Master Centre → Machine & Shift Master", "Action":"Verify manpower and targets"},
                     {"Step":6, "Area":"Employees → Employee 360", "Action":"Verify each employee profile"},
                     {"Step":7, "Area":"Payroll", "Action":"Check live salary calculations before finalization"},
-                    {"Step":8, "Area":"Management / Reports", "Action":"Validate dashboards and reports"},
+                    {"Step":8, "Area":"Reports", "Action":"Validate MD overview and all controlled reports"},
                 ])
                 st.dataframe(setup, hide_index=True, use_container_width=True)
 
