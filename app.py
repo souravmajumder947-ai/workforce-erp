@@ -14699,11 +14699,75 @@ elif page == "Operations":
 # REPORT CENTRE — ONE SOURCE OF TRUTH
 # ============================================================
 elif page == "Reports":
+    # V17.2: Make Report Center unmistakable in the navigation/workspace.
+    st.markdown(
+        """
+        <div class="v172-report-center-page"></div>
+        <style>
+        body:has(.v172-report-center-page) .v8-topbar{
+            border-color:rgba(66,153,255,.42)!important;
+            box-shadow:0 0 0 1px rgba(66,153,255,.08),0 10px 28px rgba(0,0,0,.16)!important;
+            background:linear-gradient(100deg,rgba(12,31,51,.98),rgba(11,24,40,.98))!important;
+        }
+        body:has(.v172-report-center-page) .v8-page-title{
+            color:#f8fbff!important;
+            font-size:28px!important;
+            font-weight:950!important;
+            letter-spacing:.03em!important;
+            text-shadow:0 0 18px rgba(76,158,255,.28)!important;
+        }
+        body:has(.v172-report-center-page) .v8-page-title::before{
+            content:"▤";
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            width:34px;
+            height:34px;
+            margin-right:10px;
+            border-radius:9px;
+            color:#78b8ff;
+            background:rgba(48,123,215,.14);
+            border:1px solid rgba(88,163,255,.34);
+            vertical-align:2px;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+        }
+        .v172-report-center-tag{
+            display:flex;
+            align-items:center;
+            gap:9px;
+            width:max-content;
+            max-width:100%;
+            margin:-3px 0 13px 2px;
+            padding:7px 11px;
+            border-radius:9px;
+            border:1px solid rgba(76,158,255,.30);
+            background:rgba(33,94,161,.11);
+            color:#9fcaff;
+            font-size:10px;
+            font-weight:850;
+            letter-spacing:.08em;
+            text-transform:uppercase;
+        }
+        .v172-report-center-tag span{
+            color:#738aa1;
+            font-weight:650;
+            letter-spacing:0;
+            text-transform:none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     v5_page_header(
-        "Unified Report Centre",
+        "REPORT CENTER",
         "One controlled page for management, HR, payroll, production, material and manpower reports.",
         global_division,
         month_value=global_payroll_month,
+    )
+    st.markdown(
+        '<div class="v172-report-center-tag">UNIFIED MANAGEMENT REPORTING'
+        '<span>All controlled reports · one place · one format</span></div>',
+        unsafe_allow_html=True,
     )
 
     # V17.0 UNIFIED REPORT LIBRARY
