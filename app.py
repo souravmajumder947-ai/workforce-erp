@@ -11778,7 +11778,7 @@ elif page == "Employees":
 
                 _v141_profile_section=st.radio(
                     "Employee View",
-                    ["Overview","Attendance","Payroll","Work History","Statutory & Bank","Timeline"],
+                    ["Overview","Attendance","Performance","Payroll","Work History","Statutory & Bank","Timeline"],
                     horizontal=True,
                     key=f"v141_employee_profile_{emp_id}"
                 )
@@ -11892,6 +11892,235 @@ elif page == "Employees":
                                 "OT Hrs":st.column_config.NumberColumn("OT Hrs",format="%.2f"),
                             }
                         )
+                    st.markdown("</div>",unsafe_allow_html=True)
+
+                # ------------------------------------------------
+                # PERFORMANCE — ATTENDANCE & WORK-TIME ANALYTICS
+                # ------------------------------------------------
+                if _v141_profile_section=="Performance":
+                    st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
+                    st.caption(
+                        "Attendance & work-time performance for the selected month. "
+                        "This view measures attendance discipline, leave/absence and working-time patterns; "
+                        "it is not a job-quality or appraisal score."
+                    )
+
+                    if att.empty:
+                        st.info("No attendance data is available for this employee/month.")
+                    else:
+                        _v181_perf=att.copy()
+                        _v181_perf["Status"]=_v181_perf["status"].fillna("").astype(str).str.strip()
+                        _v181_perf["Date"]=pd.to_datetime(_v181_perf["work_date"],errors="coerce")
+                        _v181_perf["Working Hrs"]=pd.to_numeric(
+                            _v181_perf["working_hours"],errors="coerce"
+                        ).fillna(0.0)
+                        _v181_perf["OT Hrs"]=pd.to_numeric(
+                            _v181_perf["ot_hours"],errors="coerce"
+                        ).fillna(0.0)
+
+                        _v181_paid_leave={"Leave","CL","SL","EL"}
+                        _v181_week_off={"WO","Holiday"}
+                        _v181_status=_v181_perf["Status"]
+                        _v181_present=float((_v181_status=="Present").sum())
+                        _v181_half=float((_v181_status=="Half Day").sum())
+                        _v181_present_eq=_v181_present+(0.5*_v181_half)
+                        _v181_leave=float(_v181_status.isin(_v181_paid_leave).sum())
+                        _v181_absent=float(_v181_status.isin(["Absent","LWP"]).sum())
+                        _v181_review=float((_v181_status=="HR Review").sum())
+                        _v181_off=float(_v181_status.isin(_v181_week_off).sum())
+                        _v181_eligible=max(float(len(_v181_perf))-_v181_off,0.0)
+
+                        # Approved paid leave counts as compliant attendance;
+                        # weekly off / holiday are excluded from the denominator.
+                        _v181_compliance=(
+                            ((_v181_present_eq+_v181_leave)/_v181_eligible)*100.0
+                            if _v181_eligible>0 else 0.0
+                        )
+                        _v181_presence=(
+                            (_v181_present_eq/_v181_eligible)*100.0
+                            if _v181_eligible>0 else 0.0
+                        )
+                        _v181_work_rows=_v181_perf[_v181_perf["Working Hrs"]>0]
+                        _v181_avg_hours=float(_v181_work_rows["Working Hrs"].mean()) if not _v181_work_rows.empty else 0.0
+                        _v181_ot=float(_v181_perf["OT Hrs"].sum())
+
+                        def _v181_clock_minutes(_value):
+                            if _value is None or pd.isna(_value):
+                                return None
+                            try:
+                                if hasattr(_value,"hour") and hasattr(_value,"minute"):
+                                    return int(_value.hour)*60+int(_value.minute)
+                            except Exception:
+                                pass
+                            _text=str(_value).strip()
+                            if not _text or _text.lower() in {"none","nan","nat","--"}:
+                                return None
+                            try:
+                                _parts=_text.split(":")
+                                if len(_parts)>=2:
+                                    _h=int(float(_parts[0]))
+                                    _m=int(float(_parts[1][:2]))
+                                    if 0<=_h<=23 and 0<=_m<=59:
+                                        return _h*60+_m
+                            except Exception:
+                                pass
+                            try:
+                                _dt=pd.to_datetime(_text,errors="coerce")
+                                if not pd.isna(_dt):
+                                    return int(_dt.hour)*60+int(_dt.minute)
+                            except Exception:
+                                pass
+                            return None
+
+                        def _v181_clock_text(_minutes):
+                            if _minutes is None or pd.isna(_minutes):
+                                return "—"
+                            _mins=int(round(float(_minutes)))%(24*60)
+                            return f"{_mins//60:02d}:{_mins%60:02d}"
+
+                        _v181_in_vals=[
+                            _v181_clock_minutes(v) for v in _v181_perf["time_in"].tolist()
+                        ] if "time_in" in _v181_perf.columns else []
+                        _v181_out_vals=[
+                            _v181_clock_minutes(v) for v in _v181_perf["time_out"].tolist()
+                        ] if "time_out" in _v181_perf.columns else []
+                        _v181_in_vals=[v for v in _v181_in_vals if v is not None]
+                        _v181_out_vals=[v for v in _v181_out_vals if v is not None]
+                        _v181_avg_in=(sum(_v181_in_vals)/len(_v181_in_vals)) if _v181_in_vals else None
+                        _v181_avg_out=(sum(_v181_out_vals)/len(_v181_out_vals)) if _v181_out_vals else None
+
+                        v5_kpis([
+                            ("Attendance Compliance",f"{_v181_compliance:.1f}%","Present + approved leave","good" if _v181_compliance>=90 else ("warn" if _v181_compliance>=75 else "bad")),
+                            ("Presence Rate",f"{_v181_presence:.1f}%","Present-equivalent / work days","blue"),
+                            ("Approved Leave",f"{_v181_leave:g}","CL / SL / EL / Leave",""),
+                            ("Absent / LWP",f"{_v181_absent:g}","Unpaid attendance","bad" if _v181_absent else "good"),
+                            ("Avg Work Hrs",f"{_v181_avg_hours:.2f}","Days with worked hours","blue"),
+                            ("OT Hours",f"{_v181_ot:.2f}","Selected month","warn" if _v181_ot else ""),
+                        ])
+
+                        _v181_t1,_v181_t2,_v181_t3,_v181_t4=st.columns(4)
+                        _v181_t1.metric("Average In Time",_v181_clock_text(_v181_avg_in))
+                        _v181_t2.metric("Average Out Time",_v181_clock_text(_v181_avg_out))
+                        _v181_t3.metric("HR Review",f"{int(_v181_review):,}")
+                        _v181_t4.metric("Weekly Off / Holiday",f"{int(_v181_off):,}")
+
+                        _v181_left,_v181_right=st.columns([1.45,1],gap="small")
+                        with _v181_left:
+                            with st.container(border=True):
+                                v5_panel("Daily Working Hours","Working hours and overtime by attendance date.")
+                                _v181_hours=_v181_perf[
+                                    ["Date","Working Hrs","OT Hrs","Status"]
+                                ].dropna(subset=["Date"]).copy()
+                                _v181_hours_long=_v181_hours.melt(
+                                    id_vars=["Date","Status"],
+                                    value_vars=["Working Hrs","OT Hrs"],
+                                    var_name="Metric",
+                                    value_name="Hours",
+                                )
+                                _v181_hours_chart=(
+                                    alt.Chart(_v181_hours_long)
+                                    .mark_line(point=True,strokeWidth=2)
+                                    .encode(
+                                        x=alt.X("Date:T",title=None),
+                                        y=alt.Y("Hours:Q",title="Hours"),
+                                        color=alt.Color("Metric:N",title=None),
+                                        tooltip=[
+                                            alt.Tooltip("Date:T",title="Date"),
+                                            alt.Tooltip("Status:N",title="Status"),
+                                            alt.Tooltip("Metric:N",title="Metric"),
+                                            alt.Tooltip("Hours:Q",title="Hours",format=".2f"),
+                                        ],
+                                    )
+                                    .properties(height=300)
+                                )
+                                st.altair_chart(_v181_hours_chart,use_container_width=True)
+
+                        with _v181_right:
+                            with st.container(border=True):
+                                v5_panel("Attendance Mix","Distribution of attendance status for the selected month.")
+                                _v181_mix=(
+                                    _v181_perf.groupby("Status",dropna=False)
+                                    .size()
+                                    .reset_index(name="Days")
+                                    .sort_values("Days",ascending=False)
+                                )
+                                _v181_mix_chart=(
+                                    alt.Chart(_v181_mix)
+                                    .mark_bar(cornerRadiusEnd=5)
+                                    .encode(
+                                        y=alt.Y("Status:N",sort="-x",title=None),
+                                        x=alt.X("Days:Q",title="Days"),
+                                        tooltip=[
+                                            alt.Tooltip("Status:N",title="Status"),
+                                            alt.Tooltip("Days:Q",title="Days",format=",.0f"),
+                                        ],
+                                    )
+                                    .properties(height=300)
+                                )
+                                st.altair_chart(_v181_mix_chart,use_container_width=True)
+
+                        with st.container(border=True):
+                            v5_panel(
+                                "Daily Attendance Compliance",
+                                "100 = Present / approved paid leave · 50 = Half Day · 0 = Absent / LWP / HR Review. "
+                                "WO and Holiday are excluded."
+                            )
+                            _v181_score_map={
+                                "Present":100.0,
+                                "Half Day":50.0,
+                                "Leave":100.0,
+                                "CL":100.0,
+                                "SL":100.0,
+                                "EL":100.0,
+                                "Absent":0.0,
+                                "LWP":0.0,
+                                "HR Review":0.0,
+                            }
+                            _v181_daily_score=_v181_perf[
+                                ["Date","Status","Working Hrs","OT Hrs"]
+                            ].copy()
+                            _v181_daily_score["Compliance %"]=_v181_daily_score["Status"].map(_v181_score_map)
+                            _v181_daily_score=_v181_daily_score.dropna(
+                                subset=["Date","Compliance %"]
+                            )
+                            if _v181_daily_score.empty:
+                                st.info("No work-day attendance rows are available for the compliance graph.")
+                            else:
+                                _v181_score_chart=(
+                                    alt.Chart(_v181_daily_score)
+                                    .mark_bar(cornerRadiusTopLeft=4,cornerRadiusTopRight=4)
+                                    .encode(
+                                        x=alt.X("Date:T",title=None),
+                                        y=alt.Y("Compliance %:Q",title="Compliance %",scale=alt.Scale(domain=[0,100])),
+                                        tooltip=[
+                                            alt.Tooltip("Date:T",title="Date"),
+                                            alt.Tooltip("Status:N",title="Status"),
+                                            alt.Tooltip("Compliance %:Q",title="Compliance",format=".0f"),
+                                            alt.Tooltip("Working Hrs:Q",title="Working Hrs",format=".2f"),
+                                            alt.Tooltip("OT Hrs:Q",title="OT Hrs",format=".2f"),
+                                        ],
+                                    )
+                                    .properties(height=250)
+                                )
+                                st.altair_chart(_v181_score_chart,use_container_width=True)
+
+                        st.markdown('<div class="v5-section">Daily Performance Detail</div>',unsafe_allow_html=True)
+                        _v181_detail=_v181_perf[
+                            ["Date","day_name","Status","time_in","time_out","Working Hrs","OT Hrs","remark"]
+                        ].copy()
+                        _v181_detail.columns=[
+                            "Date","Day","Status","Time In","Time Out","Working Hrs","OT Hrs","Remark"
+                        ]
+                        st.dataframe(
+                            _v181_detail,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "Working Hrs":st.column_config.NumberColumn("Working Hrs",format="%.2f"),
+                                "OT Hrs":st.column_config.NumberColumn("OT Hrs",format="%.2f"),
+                            },
+                        )
+
                     st.markdown("</div>",unsafe_allow_html=True)
 
                 # ------------------------------------------------
