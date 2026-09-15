@@ -7594,7 +7594,6 @@ body:has(.v82-login-root) .v116-brand-sub{
             white-space:normal!important;
           }
         }
-        <style>
         html body:has(.v82-login-root) .v187-premium-brand{
           display:grid!important;
           grid-template-columns:64px 1px minmax(0,1fr)!important;
@@ -7659,7 +7658,6 @@ body:has(.v82-login-root) .v116-brand-sub{
           html body:has(.v82-login-root) .v187-brand-name{font-size:clamp(22px,6.8vw,32px)!important;white-space:normal!important}
           html body:has(.v82-login-root) .v187-brand-company{font-size:9px!important;letter-spacing:2px!important}
         }
-        </style>
         </style>
         """,
         unsafe_allow_html=True,
