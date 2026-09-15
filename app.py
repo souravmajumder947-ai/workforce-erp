@@ -10503,6 +10503,28 @@ def _v138_ensure_consumption_summary_schema():
             "CREATE INDEX IF NOT EXISTS idx_consumption_summary_month "
             "ON production_consumption_summary(period_month)"
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS production_reel_movement_daily(
+                id BIGSERIAL PRIMARY KEY,
+                movement_date DATE NOT NULL,
+                erp_code TEXT,
+                item_name TEXT,
+                reel_size TEXT,
+                reel_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                reel_return_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                net_issue_kg NUMERIC(16,3) NOT NULL DEFAULT 0,
+                source_file TEXT,
+                imported_by TEXT,
+                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(movement_date,erp_code,item_name,reel_size)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reel_movement_daily_date "
+            "ON production_reel_movement_daily(movement_date)"
+        )
         # Business rule confirmed by management:
         # Reel Consumption = Reel Issue - Reel Return.
         # Repair legacy/monthly rows that previously stored consumption as 0
@@ -15639,6 +15661,135 @@ elif page == "Operations":
             key=f"v160_reel_upload_{_v160_month_date.isoformat()}",
         )
 
+        st.markdown("#### Finsys Raw Reel Files")
+        st.caption(
+            "You can also upload the original Finsys Reel Wise Issue and Reel Wise Return CSV files directly. "
+            "The ERP will match ICODE + ITEM + REEL_SIZE, convert KG to Ton and preserve transaction dates."
+        )
+        _v190_raw_issue,_v190_raw_return=st.columns(2,gap="small")
+        with _v190_raw_issue:
+            _v190_issue_file=st.file_uploader(
+                "Reel Wise Issue CSV",
+                type=["csv"],
+                key=f"v190_issue_raw_{_v160_month_date.isoformat()}",
+            )
+        with _v190_raw_return:
+            _v190_return_file=st.file_uploader(
+                "Reel Wise Return CSV",
+                type=["csv"],
+                key=f"v190_return_raw_{_v160_month_date.isoformat()}",
+            )
+
+        _v190_finsys_daily=pd.DataFrame()
+        _v190_pair_loaded=False
+        _v190_pair_error=""
+
+        if (_v190_issue_file is None) ^ (_v190_return_file is None):
+            st.info("Upload both Finsys files together: Reel Wise Issue + Reel Wise Return.")
+
+        if _v190_issue_file is not None and _v190_return_file is not None:
+            try:
+                _v190_issue=pd.read_csv(_v190_issue_file,dtype=str,keep_default_na=False)
+                _v190_return=pd.read_csv(_v190_return_file,dtype=str,keep_default_na=False)
+                _v190_issue.columns=[str(x).strip().upper() for x in _v190_issue.columns]
+                _v190_return.columns=[str(x).strip().upper() for x in _v190_return.columns]
+
+                _v190_issue_required={"VCH_DT","ITEM","QTY_OUT","REEL_SIZE","ICODE"}
+                _v190_return_required={"VCH_DT","ITEM","QTY_RETURN","REEL_SIZE","ICODE"}
+                _v190_issue_missing=_v190_issue_required-set(_v190_issue.columns)
+                _v190_return_missing=_v190_return_required-set(_v190_return.columns)
+                if _v190_issue_missing or _v190_return_missing:
+                    raise ValueError(
+                        "Invalid Finsys reel file format. "
+                        f"Issue missing: {', '.join(sorted(_v190_issue_missing)) or 'none'}; "
+                        f"Return missing: {', '.join(sorted(_v190_return_missing)) or 'none'}."
+                    )
+
+                def _v190_prepare(_df,_qty_col,_out_name):
+                    _w=_df.copy()
+                    _w["Date"]=pd.to_datetime(
+                        _w["VCH_DT"].astype(str).str.strip(),
+                        format="%d/%m/%Y",errors="coerce"
+                    )
+                    _w=_w[_w["Date"].notna()].copy()
+                    _w["ERP Code"]=_w["ICODE"].astype(str).str.strip()
+                    _w["Item Name"]=_w["ITEM"].astype(str).str.strip()
+                    _w["Reel Size"]=_w["REEL_SIZE"].astype(str).str.strip()
+                    _w[_out_name]=pd.to_numeric(
+                        _w[_qty_col].astype(str).str.replace(",","",regex=False).str.strip(),
+                        errors="coerce",
+                    ).fillna(0.0)
+                    return _w[["Date","ERP Code","Item Name","Reel Size",_out_name]]
+
+                _v190_i=_v190_prepare(_v190_issue,"QTY_OUT","Issue KG")
+                _v190_r=_v190_prepare(_v190_return,"QTY_RETURN","Return KG")
+
+                _v190_valid_dates=pd.concat(
+                    [_v190_i["Date"],_v190_r["Date"]],ignore_index=True
+                ).dropna()
+                _v190_wrong_month=_v190_valid_dates[
+                    (_v190_valid_dates.dt.year!=_v160_month.year)
+                    | (_v190_valid_dates.dt.month!=_v160_month.month)
+                ]
+                if not _v190_wrong_month.empty:
+                    raise ValueError(
+                        f"These files contain dates outside {_v160_month.strftime('%b %Y')}. "
+                        "Select the matching Reel Month before saving."
+                    )
+
+                _v190_ig=(
+                    _v190_i.groupby(
+                        ["Date","ERP Code","Item Name","Reel Size"],as_index=False
+                    )["Issue KG"].sum()
+                )
+                _v190_rg=(
+                    _v190_r.groupby(
+                        ["Date","ERP Code","Item Name","Reel Size"],as_index=False
+                    )["Return KG"].sum()
+                )
+                _v190_finsys_daily=_v190_ig.merge(
+                    _v190_rg,
+                    on=["Date","ERP Code","Item Name","Reel Size"],
+                    how="outer",
+                )
+                _v190_finsys_daily["Issue KG"]=pd.to_numeric(
+                    _v190_finsys_daily["Issue KG"],errors="coerce"
+                ).fillna(0.0)
+                _v190_finsys_daily["Return KG"]=pd.to_numeric(
+                    _v190_finsys_daily["Return KG"],errors="coerce"
+                ).fillna(0.0)
+                _v190_finsys_daily["Net Issue KG"]=(
+                    _v190_finsys_daily["Issue KG"]-_v190_finsys_daily["Return KG"]
+                )
+
+                _v190_monthly=(
+                    _v190_finsys_daily.groupby(
+                        ["ERP Code","Item Name","Reel Size"],as_index=False
+                    )[["Issue KG","Return KG"]].sum()
+                )
+                _v190_monthly["Reel Issue Ton"]=_v190_monthly["Issue KG"]/1000.0
+                _v190_monthly["Reel Return Ton"]=_v190_monthly["Return KG"]/1000.0
+                _v190_monthly["Unit"]="TON"
+                _v190_monthly["Remark"]="Finsys Reel Wise Issue + Return"
+                _v160_seed=_v190_monthly[[
+                    "ERP Code","Item Name","Reel Size",
+                    "Reel Issue Ton","Reel Return Ton","Unit","Remark"
+                ]].copy()
+                _v190_pair_loaded=True
+
+                _v190_issue_t=float(_v190_finsys_daily["Issue KG"].sum())/1000.0
+                _v190_return_t=float(_v190_finsys_daily["Return KG"].sum())/1000.0
+                _v190_net_t=_v190_issue_t-_v190_return_t
+                _v190_days=int(_v190_finsys_daily["Date"].dt.date.nunique())
+                st.success(
+                    f"Finsys files loaded · {_v190_days} transaction day(s) · "
+                    f"Issue {_v190_issue_t:,.3f} T · Return {_v190_return_t:,.3f} T · "
+                    f"Net Consumption {_v190_net_t:,.3f} T."
+                )
+            except Exception as _v190_exc:
+                _v190_pair_error=str(_v190_exc)
+                st.error(f"Unable to read the Finsys reel files: {_v190_pair_error}")
+
         _v160_existing=read_df(
             """SELECT erp_code AS "ERP Code",item_name AS "Item Name",
                       reel_size AS "Reel Size",
@@ -15652,8 +15803,9 @@ elif page == "Operations":
                ORDER BY item_name,erp_code""",
             (_v160_month_date.isoformat(),),
         )
-        _v160_seed=_v160_existing.copy() if not _v160_existing.empty else _v160_template.copy()
-        if _v160_upload is not None:
+        if not _v190_pair_loaded:
+            _v160_seed=_v160_existing.copy() if not _v160_existing.empty else _v160_template.copy()
+        if _v160_upload is not None and not _v190_pair_loaded:
             try:
                 _v160_raw=(
                     pd.read_csv(_v160_upload)
@@ -15708,6 +15860,7 @@ elif page == "Operations":
         _v160_saved_view=bool(
             (not _v160_existing.empty)
             and _v160_upload is None
+            and not _v190_pair_loaded
             and not st.session_state[_v160_edit_key]
         )
 
@@ -15900,6 +16053,18 @@ elif page == "Operations":
                         "DELETE FROM production_consumption_summary WHERE period_month=%s",
                         (_v160_month_date,),
                     )
+                    if _v190_pair_loaded and not _v190_finsys_daily.empty:
+                        _v160_month_start=_v160_month_date
+                        _v160_month_end=(
+                            date(_v160_month.year+1,1,1)-timedelta(days=1)
+                            if _v160_month.month==12
+                            else date(_v160_month.year,_v160_month.month+1,1)-timedelta(days=1)
+                        )
+                        _v160_cur.execute(
+                            """DELETE FROM production_reel_movement_daily
+                               WHERE movement_date BETWEEN %s AND %s""",
+                            (_v160_month_start,_v160_month_end),
+                        )
                     _v160_rows=[]
                     for _,_v160_r in _v160_work.iterrows():
                         _v160_code=str(_v160_r.get("ERP Code") or "").strip()
@@ -15927,6 +16092,39 @@ elif page == "Operations":
                            ) VALUES %s""",
                         _v160_rows,
                     )
+
+                    if _v190_pair_loaded and not _v190_finsys_daily.empty:
+                        _v190_daily_rows=[]
+                        for _,_v190_d in _v190_finsys_daily.iterrows():
+                            _v190_daily_rows.append((
+                                _v190_d["Date"].date(),
+                                str(_v190_d.get("ERP Code") or "").strip(),
+                                str(_v190_d.get("Item Name") or "").strip(),
+                                str(_v190_d.get("Reel Size") or "").strip(),
+                                float(_v190_d.get("Issue KG") or 0),
+                                float(_v190_d.get("Return KG") or 0),
+                                float(_v190_d.get("Net Issue KG") or 0),
+                                f"{getattr(_v190_issue_file,'name','Issue CSV')} + {getattr(_v190_return_file,'name','Return CSV')}",
+                                _current_user["username"],
+                            ))
+                        execute_values(
+                            _v160_cur,
+                            """INSERT INTO production_reel_movement_daily(
+                                   movement_date,erp_code,item_name,reel_size,
+                                   reel_issue_kg,reel_return_kg,net_issue_kg,
+                                   source_file,imported_by
+                               ) VALUES %s
+                               ON CONFLICT(movement_date,erp_code,item_name,reel_size)
+                               DO UPDATE SET
+                                   reel_issue_kg=excluded.reel_issue_kg,
+                                   reel_return_kg=excluded.reel_return_kg,
+                                   net_issue_kg=excluded.net_issue_kg,
+                                   source_file=excluded.source_file,
+                                   imported_by=excluded.imported_by,
+                                   imported_at=CURRENT_TIMESTAMP""",
+                            _v190_daily_rows,
+                        )
+
                     _v160_conn.commit()
                     record_audit_event(
                         _current_user["username"],"MONTHLY_REEL_SAVE","Operations",
@@ -16361,26 +16559,40 @@ elif page == "Reports":
             report_df=pd.DataFrame()
         else:
             # Day-wise reel report uses only genuine dated reel movements.
-            # Never fabricate daily values from a monthly consolidated upload.
+            # Prefer raw Finsys dated Issue/Return imports. Fall back to Daily
+            # Production Entry reel rows when no raw movement import exists.
             try:
                 _reel_day_raw=read_df(
-                    """SELECT work_date AS "Date",
-                              COALESCE(reel_issue_ton,0) AS "Reel Issue Ton",
-                              COALESCE(reel_return_ton,0) AS "Reel Return Ton",
-                              CASE
-                                  WHEN COALESCE(consumption_ton,0)>0
-                                      THEN COALESCE(consumption_ton,0)
-                                  ELSE GREATEST(
-                                      COALESCE(reel_issue_ton,0)-COALESCE(reel_return_ton,0),0
-                                  )
-                              END AS "Consumption Ton"
-                       FROM production_reel_consumption
-                       WHERE work_date BETWEEN ? AND ?
-                       ORDER BY work_date""",
+                    """SELECT movement_date AS "Date",
+                              COALESCE(reel_issue_kg,0)/1000.0 AS "Reel Issue Ton",
+                              COALESCE(reel_return_kg,0)/1000.0 AS "Reel Return Ton",
+                              COALESCE(net_issue_kg,0)/1000.0 AS "Consumption Ton"
+                       FROM production_reel_movement_daily
+                       WHERE movement_date BETWEEN ? AND ?
+                       ORDER BY movement_date""",
                     (first.isoformat(),last.isoformat())
                 )
             except Exception:
                 _reel_day_raw=pd.DataFrame()
+
+            if _reel_day_raw.empty:
+                try:
+                    _reel_day_raw=read_df(
+                        """SELECT work_date AS "Date",
+                                  COALESCE(reel_issue_ton,0) AS "Reel Issue Ton",
+                                  COALESCE(reel_return_ton,0) AS "Reel Return Ton",
+                                  CASE
+                                      WHEN COALESCE(consumption_ton,0)>0
+                                          THEN COALESCE(consumption_ton,0)
+                                      ELSE COALESCE(reel_issue_ton,0)-COALESCE(reel_return_ton,0)
+                                  END AS "Consumption Ton"
+                           FROM production_reel_consumption
+                           WHERE work_date BETWEEN ? AND ?
+                           ORDER BY work_date""",
+                        (first.isoformat(),last.isoformat())
+                    )
+                except Exception:
+                    _reel_day_raw=pd.DataFrame()
 
             if not _reel_day_raw.empty:
                 for _rc in ["Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
