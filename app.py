@@ -7340,11 +7340,13 @@ body:has(.v82-login-root) .v116-brand-sub{
                   <div class="v103-right-time"><small>IST · 24H</small><b data-v116-login-clock>{_login_verified_time}</b></div>
                 </div>
 
-                <div class="v90-auth-head v103-auth-head v186-single-brand">
-                  <div class="v186-brand-copy">
-                    <div class="v90-card-kicker">Smart Workforce ERP</div>
-                    <div class="v90-card-title v116-brand-flash">Reliable Packaging</div>
-                    <div class="v116-brand-sub">Industries Limited</div>
+                <div class="v90-auth-head v103-auth-head v187-premium-brand">
+                  <div class="v187-emblem-box"><img src="{LOGO_ICON_DATA_URI}" alt="Reliable Packaging emblem"></div>
+                  <div class="v187-brand-rule"></div>
+                  <div class="v187-brand-copy">
+                    <div class="v187-brand-kicker">SMART WORKFORCE ERP</div>
+                    <div class="v187-brand-name">RELIABLE PACKAGING</div>
+                    <div class="v187-brand-company">INDUSTRIES LIMITED</div>
                   </div>
                 </div>
                 <div class="v90-card-sub">Sign in to your secure HRMS workspace for workforce intelligence, attendance, payroll and operations.</div>
@@ -7592,6 +7594,72 @@ body:has(.v82-login-root) .v116-brand-sub{
             white-space:normal!important;
           }
         }
+        <style>
+        html body:has(.v82-login-root) .v187-premium-brand{
+          display:grid!important;
+          grid-template-columns:64px 1px minmax(0,1fr)!important;
+          align-items:center!important;
+          gap:18px!important;
+          min-height:132px!important;
+          padding:22px 28px!important;
+          border:1px solid rgba(100,170,238,.34)!important;
+          border-radius:18px!important;
+          background:linear-gradient(145deg,#112a44 0%,#0b2035 50%,#081725 100%)!important;
+          box-shadow:0 18px 42px rgba(0,0,0,.27),inset 0 1px 0 rgba(255,255,255,.06)!important;
+        }
+        html body:has(.v82-login-root) .v187-premium-brand:after{
+          content:""!important;
+          position:absolute!important;
+          left:0!important;top:0!important;bottom:0!important;width:4px!important;
+          background:linear-gradient(180deg,#78dcff,#4f9cff,#315fd2)!important;
+        }
+        html body:has(.v82-login-root) .v187-emblem-box{
+          width:64px!important;height:72px!important;
+          display:grid!important;place-items:center!important;
+          border-radius:16px!important;
+          background:rgba(255,255,255,.055)!important;
+          border:1px solid rgba(162,211,255,.22)!important;
+          box-shadow:0 12px 26px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.07)!important;
+        }
+        html body:has(.v82-login-root) .v187-emblem-box img{
+          width:34px!important;height:58px!important;object-fit:contain!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-rule{
+          width:1px!important;height:68px!important;
+          background:linear-gradient(180deg,transparent,rgba(128,192,255,.34),transparent)!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-copy{
+          display:flex!important;flex-direction:column!important;
+          align-items:flex-start!important;justify-content:center!important;gap:5px!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-kicker{
+          color:#76d0ff!important;font-size:11px!important;font-weight:950!important;
+          letter-spacing:2.5px!important;line-height:1!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-name{
+          color:#ffffff!important;font-size:clamp(30px,2.25vw,48px)!important;
+          font-weight:950!important;letter-spacing:.8px!important;line-height:.96!important;
+          white-space:nowrap!important;
+          text-shadow:0 0 18px rgba(81,166,255,.18)!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-company{
+          color:#a8d8ff!important;font-size:clamp(11px,.78vw,15px)!important;
+          font-weight:900!important;letter-spacing:4px!important;line-height:1!important;
+          white-space:nowrap!important;
+        }
+        @media(max-width:540px){
+          html body:has(.v82-login-root) .v187-premium-brand{
+            grid-template-columns:44px minmax(0,1fr)!important;
+            gap:12px!important;padding:18px!important;min-height:112px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-rule{display:none!important}
+          html body:has(.v82-login-root) .v187-emblem-box{width:44px!important;height:54px!important}
+          html body:has(.v82-login-root) .v187-emblem-box img{width:25px!important;height:44px!important}
+          html body:has(.v82-login-root) .v187-brand-kicker{font-size:8px!important;letter-spacing:1.5px!important}
+          html body:has(.v82-login-root) .v187-brand-name{font-size:clamp(22px,6.8vw,32px)!important;white-space:normal!important}
+          html body:has(.v82-login-root) .v187-brand-company{font-size:9px!important;letter-spacing:2px!important}
+        }
+        </style>
         </style>
         """,
         unsafe_allow_html=True,
