@@ -7190,8 +7190,8 @@ if st.session_state.get("auth_user") is None:
       display:grid!important;
       place-items:center!important;
       background:#ffffff!important;
-      border:1px solid rgba(231,67,54,.48)!important;
-      box-shadow:0 10px 28px rgba(231,67,54,.16)!important;
+      border:1px solid rgba(96,170,238,.34)!important;
+      box-shadow:0 10px 28px rgba(47,111,235,.12)!important;
       overflow:hidden!important;
     }
     .v103-auth-logo img{
@@ -7200,8 +7200,8 @@ if st.session_state.get("auth_user") is None:
       object-fit:contain!important;
       display:block!important;
     }
-    .v103-auth-head .v90-card-kicker{color:#ef665b!important}
-    .v103-company-block{border-left:3px solid #e74336!important}
+    .v103-auth-head .v90-card-kicker{color:#78cfff!important}
+    .v103-company-block{border-left:3px solid #4f9cff!important}
     .v103-status-grid .v90-status.active{border-color:rgba(46,211,154,.35)!important}
     div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
       background:linear-gradient(135deg,#e74336,#b92520)!important;
@@ -7282,14 +7282,14 @@ body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v
 
 @keyframes v116BrandFlash{
   0%,100%{
-    color:#ffffff;
-    text-shadow:0 0 6px rgba(255,255,255,.18),0 0 14px rgba(231,67,54,.24);
+    color:#f8fbff;
+    text-shadow:0 0 7px rgba(255,255,255,.14),0 0 14px rgba(89,170,255,.18);
     filter:brightness(1);
   }
   50%{
-    color:#fff4f2;
-    text-shadow:0 0 10px rgba(255,255,255,.42),0 0 24px rgba(255,81,65,.72),0 0 42px rgba(231,67,54,.35);
-    filter:brightness(1.12);
+    color:#ffffff;
+    text-shadow:0 0 10px rgba(255,255,255,.30),0 0 24px rgba(81,166,255,.36),0 0 38px rgba(69,135,230,.20);
+    filter:brightness(1.08);
   }
 }
 body:has(.v82-login-root) .v116-brand-flash{
@@ -7300,13 +7300,13 @@ body:has(.v82-login-root) .v116-brand-flash{
 }
 body:has(.v82-login-root) .v116-brand-sub{
   margin-top:5px!important;
-  color:#ff7b70!important;
+  color:#8ecbff!important;
   font-size:clamp(10px,.62vw,15px)!important;
   line-height:1!important;
   font-weight:950!important;
   letter-spacing:2.2px!important;
   text-transform:uppercase!important;
-  text-shadow:0 0 16px rgba(231,67,54,.36)!important;
+  text-shadow:0 0 14px rgba(80,166,255,.22)!important;
 }
 @media(max-width:540px){
   body:has(.v82-login-root) .v116-brand-flash{
@@ -19798,16 +19798,18 @@ body:has(.v82-login-root) .v103-footer span+span:before{color:#e74336!important}
 /* FINAL RESPONSIVE RELIABLE LOGIN — keep the visual design on every screen. */
 body:has(.v82-login-root) .v103-auth-head{
   position:relative!important;overflow:hidden!important;padding:22px 24px!important;
-  margin:8px 0 16px!important;border:1px solid rgba(255,105,91,.38)!important;border-radius:18px!important;
-  background:linear-gradient(115deg,rgba(231,67,54,.24),rgba(231,67,54,.04) 44%,transparent 64%),
-             radial-gradient(circle at 92% 12%,rgba(255,92,77,.22),transparent 29%),
-             linear-gradient(145deg,#14293f,#091625)!important;
-  box-shadow:0 20px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06)!important
+  margin:8px 0 16px!important;border:1px solid rgba(91,159,229,.34)!important;border-radius:18px!important;
+  background:
+    radial-gradient(circle at 88% 12%,rgba(72,151,255,.18),transparent 30%),
+    radial-gradient(circle at 20% 115%,rgba(56,207,255,.08),transparent 34%),
+    linear-gradient(145deg,rgba(18,43,69,.98),rgba(8,23,40,.98))!important;
+  box-shadow:0 20px 46px rgba(0,0,0,.30),0 0 28px rgba(67,144,230,.06),inset 0 1px 0 rgba(255,255,255,.06)!important
 }
 body:has(.v82-login-root) .v103-auth-head:before{display:none!important;content:none!important}
 body:has(.v82-login-root) .v103-auth-head:after{
-  content:""!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:5px!important;
-  background:linear-gradient(180deg,#ff7568,#e74336,#8e1d19)!important;box-shadow:0 0 22px rgba(231,67,54,.72)!important
+  content:""!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:4px!important;
+  background:linear-gradient(180deg,#6fd6ff,#3f84e6,#2f6feb)!important;
+  box-shadow:0 0 22px rgba(63,132,230,.48)!important
 }
 body:has(.v82-login-root) .v103-auth-logo{
   position:relative!important;z-index:2!important;width:112px!important;height:82px!important;padding:8px!important
@@ -19815,18 +19817,33 @@ body:has(.v82-login-root) .v103-auth-logo{
 body:has(.v82-login-root) .v103-auth-head>div:last-child{position:relative!important;z-index:2!important}
 body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:42px!important;line-height:1!important}
 body:has(.v82-login-root) .v103-company-block{
-  padding:13px 15px!important;border-radius:13px!important;border-left:5px solid #e74336!important;
-  background:linear-gradient(90deg,rgba(231,67,54,.18),rgba(11,29,46,.82))!important
+  padding:13px 15px!important;border-radius:13px!important;
+  border:1px solid rgba(86,154,224,.24)!important;
+  border-left:4px solid #4f9cff!important;
+  background:linear-gradient(90deg,rgba(29,72,116,.34),rgba(9,26,44,.86))!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important
 }
 body:has(.v82-login-root) .v103-status-grid .v90-status{
-  min-height:72px!important;padding:12px!important;box-shadow:0 12px 28px rgba(0,0,0,.20)!important
+  min-height:72px!important;padding:12px!important;
+  background:linear-gradient(145deg,rgba(10,29,49,.92),rgba(7,20,35,.90))!important;
+  border:1px solid rgba(83,145,207,.20)!important;
+  box-shadow:0 12px 28px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.025)!important
 }
 body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(1){border-top:3px solid #39d99f!important}
 body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(2){border-top:3px solid #5ba8ff!important}
-body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){border-top:3px solid #ff665c!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){border-top:3px solid #8f6bff!important}
+body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+  border-color:rgba(86,156,228,.28)!important;
+  background:
+    radial-gradient(circle at 92% 0%,rgba(69,139,232,.10),transparent 28%),
+    radial-gradient(circle at 8% 100%,rgba(53,213,255,.05),transparent 30%),
+    linear-gradient(155deg,rgba(8,24,41,.97),rgba(5,15,28,.99))!important;
+  box-shadow:0 24px 66px rgba(0,0,0,.30),0 0 30px rgba(49,118,205,.05),inset 0 1px 0 rgba(255,255,255,.035)!important
+}
 body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
-  background:linear-gradient(100deg,#8f1c19,#e74336 52%,#ff7165)!important;
-  border:1px solid #ff887d!important;box-shadow:0 12px 28px rgba(231,67,54,.32)!important
+  background:linear-gradient(100deg,#245aaa,#3f84e6 52%,#58a7ff)!important;
+  border:1px solid rgba(134,196,255,.72)!important;
+  box-shadow:0 12px 28px rgba(42,107,190,.28),inset 0 1px 0 rgba(255,255,255,.16)!important
 }
 @media(max-width:760px){
   body:has(.v82-login-root) .block-container{width:100%!important;max-width:780px!important;padding:20px 16px!important}
