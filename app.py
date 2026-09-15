@@ -1491,6 +1491,40 @@ def migrate_postgres():
                 (key, value),
             )
 
+        # V18.2 ATTENDANCE CORRECTION — Independence Day 2026.
+        # Correct only non-working / unresolved imported statuses. A genuine Present
+        # punch is preserved so employees who actually worked on the holiday are not erased.
+        cur.execute("""
+            INSERT INTO app_settings(setting_key, setting_value)
+            VALUES ('v182_independence_day_2026_attendance_fix', 'pending')
+            ON CONFLICT(setting_key) DO NOTHING
+        """)
+        cur.execute("""
+            SELECT setting_value FROM app_settings
+            WHERE setting_key='v182_independence_day_2026_attendance_fix'
+        """)
+        _v182_holiday_state = cur.fetchone()
+        if _v182_holiday_state and _v182_holiday_state[0] == 'pending':
+            cur.execute("""
+                UPDATE attendance
+                SET status='Holiday',
+                    review_required=FALSE,
+                    reviewed_by=COALESCE(NULLIF(reviewed_by,''),'SYSTEM'),
+                    remark=CASE
+                        WHEN COALESCE(TRIM(remark),'')='' THEN 'Independence Day - official holiday'
+                        WHEN POSITION('Independence Day' IN remark)=0
+                            THEN remark || ' · Independence Day - official holiday'
+                        ELSE remark
+                    END,
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE work_date='2026-08-15'
+                  AND status IN ('Half Day','Absent','LWP','WO','HR Review')
+            """)
+            cur.execute("""
+                UPDATE app_settings SET setting_value='completed'
+                WHERE setting_key='v182_independence_day_2026_attendance_fix'
+            """)
+
 
         # Performance indexes for daily operational queries.
         cur.execute("""
@@ -3075,10 +3109,11 @@ def _normalize_department_value(value, mapping=None):
 
 
 PAYROLL_STATUS_OPTIONS = [
-    "Present", "Absent", "Half Day", "WO", "Holiday", "CL", "SL", "EL", "LWP", "Leave", "HR Review"
+    "Present", "OD", "Absent", "Half Day", "WO", "Holiday", "CL", "SL", "EL", "LWP", "Leave", "HR Review"
 ]
 PAID_STATUS_FACTORS = {
     "Present": 1.0,
+    "OD": 1.0,
     "Half Day": 0.5,
     "WO": 1.0,
     "Holiday": 1.0,
@@ -3507,6 +3542,7 @@ def _map_attendance_status(raw_status, working_hours=0.0, time_in_value=None, ti
     raw = _clean_text(raw_status).upper().replace(" ", "")
     mapping = {
         "PP": "Present", "P": "Present", "PRESENT": "Present",
+        "OD": "OD", "ONDUTY": "OD", "ON-DUTY": "OD",
         "AA": "Absent", "A": "Absent", "ABSENT": "Absent",
         "WO": "WO", "W/O": "WO", "OFF": "WO",
         "H": "Holiday", "PH": "Holiday", "HOLIDAY": "Holiday", "PUBLICHOLIDAY": "Holiday",
@@ -3883,6 +3919,10 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
         status = _map_attendance_status(
             raw_status, working_hours, time_in_value, time_out_value, day_name
         )
+        # Company-confirmed holiday: 15 Aug 2026 (Independence Day).
+        # Preserve a genuine Present record when both punches show the employee worked.
+        if work_date == "2026-08-15" and status != "Present":
+            status = "Holiday"
 
         shift_value = _clean_text(row.get(cmap["shift"])) if "shift" in cmap else ""
         if shift_value.upper() in {"A", "B"}:
@@ -4002,6 +4042,8 @@ def import_dhaulana_attendance_excel(uploaded_file, target_date=None, dry_run=Fa
                 working_hours = _time_difference_hours(time_in_value, time_out_value)
                 day_name = sheet_day or work_date.strftime("%a")
                 status = _map_attendance_status("", working_hours, time_in_value, time_out_value, day_name)
+                if work_date == date(2026, 8, 15) and status != "Present":
+                    status = "Holiday"
                 ot_hours = max(0.0, working_hours - get_setting_float("ot_threshold_hours", 12.0)) if status == "Present" else 0.0
                 records.append({
                     "division": "Dhaulana Glass Plant",
@@ -4440,7 +4482,7 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
             missing_days = 0.0
         else:
             paid_days = float(sum(PAID_STATUS_FACTORS.get(str(s), 0.0) for s in emp_att["status"].astype(str))) if not emp_att.empty else 0.0
-            present_days = float(status_counts.get("Present", 0)) + 0.5 * float(status_counts.get("Half Day", 0))
+            present_days = float(status_counts.get("Present", 0)) + float(status_counts.get("OD", 0)) + 0.5 * float(status_counts.get("Half Day", 0))
             weekly_off_days = float(status_counts.get("WO", 0))
             paid_leave_days = float(status_counts.get("CL", 0) + status_counts.get("SL", 0) + status_counts.get("EL", 0) + status_counts.get("Leave", 0))
             lwp_days = float(status_counts.get("LWP", 0) + status_counts.get("Absent", 0))
@@ -11677,7 +11719,7 @@ elif page == "Employees":
 
                 # Month snapshot metrics.
                 status_counts=att["status"].astype(str).value_counts().to_dict() if not att.empty else {}
-                present_days=float(status_counts.get("Present",0))+0.5*float(status_counts.get("Half Day",0))
+                present_days=float(status_counts.get("Present",0))+float(status_counts.get("OD",0))+0.5*float(status_counts.get("Half Day",0))
                 absent_days=float(status_counts.get("Absent",0))+float(status_counts.get("LWP",0))
                 leave_days=float(
                     status_counts.get("Leave",0)+status_counts.get("CL",0)+
@@ -11843,10 +11885,10 @@ elif page == "Employees":
                                     if not pd.isna(r["work_date_dt"]):
                                         att_map[int(r["work_date_dt"].day)]=str(r["status"])
                             status_class={
-                                "Present":"present","Half Day":"present",
+                                "Present":"present","OD":"present","Half Day":"present",
                                 "Absent":"absent","LWP":"absent",
                                 "Leave":"leave","CL":"leave","SL":"leave","EL":"leave",
-                                "HR Review":"review","WO":"wo"
+                                "HR Review":"review","WO":"wo","Holiday":"wo"
                             }
                             day_cards=[]
                             for day_num in range(1,monthrange(profile_month.year,profile_month.month)[1]+1):
@@ -11921,7 +11963,8 @@ elif page == "Employees":
                         _v181_paid_leave={"Leave","CL","SL","EL"}
                         _v181_week_off={"WO","Holiday"}
                         _v181_status=_v181_perf["Status"]
-                        _v181_present=float((_v181_status=="Present").sum())
+                        _v181_od=float((_v181_status=="OD").sum())
+                        _v181_present=float((_v181_status=="Present").sum())+_v181_od
                         _v181_half=float((_v181_status=="Half Day").sum())
                         _v181_present_eq=_v181_present+(0.5*_v181_half)
                         _v181_leave=float(_v181_status.isin(_v181_paid_leave).sum())
@@ -11978,20 +12021,26 @@ elif page == "Employees":
                             _mins=int(round(float(_minutes)))%(24*60)
                             return f"{_mins//60:02d}:{_mins%60:02d}"
 
-                        _v181_in_vals=[
-                            _v181_clock_minutes(v) for v in _v181_perf["time_in"].tolist()
-                        ] if "time_in" in _v181_perf.columns else []
-                        _v181_out_vals=[
-                            _v181_clock_minutes(v) for v in _v181_perf["time_out"].tolist()
-                        ] if "time_out" in _v181_perf.columns else []
-                        _v181_in_vals=[v for v in _v181_in_vals if v is not None]
-                        _v181_out_vals=[v for v in _v181_out_vals if v is not None]
+                        # Average punch times must use only valid biometric work punches.
+                        # 00:00 placeholders, WO/Holiday/Leave/OD and incomplete punch rows are excluded.
+                        _v181_valid_punch_rows=_v181_perf[
+                            _v181_perf["Status"].isin(["Present","Half Day"])
+                        ].copy()
+                        _v181_in_vals=[]
+                        _v181_out_vals=[]
+                        if "time_in" in _v181_valid_punch_rows.columns and "time_out" in _v181_valid_punch_rows.columns:
+                            for _,_v181_pr in _v181_valid_punch_rows.iterrows():
+                                _v181_tin=_v181_clock_minutes(_v181_pr.get("time_in"))
+                                _v181_tout=_v181_clock_minutes(_v181_pr.get("time_out"))
+                                if _v181_tin not in (None,0) and _v181_tout not in (None,0):
+                                    _v181_in_vals.append(_v181_tin)
+                                    _v181_out_vals.append(_v181_tout)
                         _v181_avg_in=(sum(_v181_in_vals)/len(_v181_in_vals)) if _v181_in_vals else None
                         _v181_avg_out=(sum(_v181_out_vals)/len(_v181_out_vals)) if _v181_out_vals else None
 
                         v5_kpis([
-                            ("Attendance Compliance",f"{_v181_compliance:.1f}%","Present + approved leave","good" if _v181_compliance>=90 else ("warn" if _v181_compliance>=75 else "bad")),
-                            ("Presence Rate",f"{_v181_presence:.1f}%","Present-equivalent / work days","blue"),
+                            ("Attendance Compliance",f"{_v181_compliance:.1f}%","Present / OD + approved leave","good" if _v181_compliance>=90 else ("warn" if _v181_compliance>=75 else "bad")),
+                            ("Presence Rate",f"{_v181_presence:.1f}%","Present / OD equivalent / work days","blue"),
                             ("Approved Leave",f"{_v181_leave:g}","CL / SL / EL / Leave",""),
                             ("Absent / LWP",f"{_v181_absent:g}","Unpaid attendance","bad" if _v181_absent else "good"),
                             ("Avg Work Hrs",f"{_v181_avg_hours:.2f}","Days with worked hours","blue"),
@@ -12003,6 +12052,10 @@ elif page == "Employees":
                         _v181_t2.metric("Average Out Time",_v181_clock_text(_v181_avg_out))
                         _v181_t3.metric("HR Review",f"{int(_v181_review):,}")
                         _v181_t4.metric("Weekly Off / Holiday",f"{int(_v181_off):,}")
+                        st.caption(
+                            f"OD days: {_v181_od:g} · Average In/Out uses only {len(_v181_in_vals):,} complete, non-zero biometric punch pair(s). "
+                            "00:00 placeholders, holidays, weekly off, leave, OD and missing punches are excluded."
+                        )
 
                         _v181_left,_v181_right=st.columns([1.45,1],gap="small")
                         with _v181_left:
@@ -12067,6 +12120,7 @@ elif page == "Employees":
                             )
                             _v181_score_map={
                                 "Present":100.0,
+                                "OD":100.0,
                                 "Half Day":50.0,
                                 "Leave":100.0,
                                 "CL":100.0,
@@ -12753,7 +12807,7 @@ elif page == "Attendance":
         if register.empty:
             st.info("No attendance records for the selected date/division.")
         else:
-            statuses=["Present","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"]
+            statuses=["Present","OD","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"]
             show=register[["id","division","employee_id","employee_name","designation","time_in","time_out","working_hours","status","remark","review_required"]].copy()
             show.columns=["ID","Division","Employee ID","Employee Name","Designation","Time In","Time Out","Working Hrs","Status","Remark","Review Required"]
             if can_edit_hr(_current_role):
@@ -13128,7 +13182,7 @@ elif page == "Attendance":
                 )
                 bulk_missing_status = a2.selectbox(
                     "Bulk Attendance Status",
-                    ["Keep Each Row Status","WO","Absent","Leave","Holiday","LWP","Present","Half Day","CL","SL","EL"],
+                    ["Keep Each Row Status","WO","Absent","Leave","Holiday","LWP","Present","OD","Half Day","CL","SL","EL"],
                     key="v84_bulk_missing_status"
                 )
                 bulk_missing_remark = a3.text_input(
@@ -13145,7 +13199,7 @@ elif page == "Attendance":
                     column_config={
                         "Select":st.column_config.CheckboxColumn("Select",default=False),
                         "Status":st.column_config.SelectboxColumn(
-                            "Status",options=["","WO","Absent","Leave","Holiday","LWP","Present","Half Day","CL","SL","EL"]
+                            "Status",options=["","WO","Absent","Leave","Holiday","LWP","Present","OD","Half Day","CL","SL","EL"]
                         ),
                         "HR Remark":st.column_config.TextColumn("HR Remark"),
                     },
@@ -13312,7 +13366,7 @@ elif page == "Attendance":
                 )
                 bulk_status = cstatus.selectbox(
                     "Bulk Status for Selected",
-                    ["Keep Each Row Status","Use Raw Biometric Status (Auto)","Present","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"],
+                    ["Keep Each Row Status","Use Raw Biometric Status (Auto)","Present","OD","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"],
                     key="v82_bulk_review_status"
                 )
                 bulk_division = cdiv.selectbox(
@@ -13343,9 +13397,10 @@ elif page == "Attendance":
                     "source_issue":"Master Issue","issue_type":"Issue Type"
                 }).copy()
                 review_show.insert(0,"Select",bool(select_all_filtered))
+                review_show["HR Confirmation"]=""
                 display_cols = [
                     "Select","ID","Issue Type","Division","Master Division","Date","Employee ID","Employee Name","Department","Designation",
-                    "Shift","Time In","Time Out","Working Hrs","Raw Status","Status","Remark","Master Issue"
+                    "Shift","Time In","Time Out","Working Hrs","Raw Status","Status","HR Confirmation","Remark","Master Issue"
                 ]
                 review_show = review_show[[c for c in display_cols if c in review_show.columns]]
 
@@ -13360,7 +13415,12 @@ elif page == "Attendance":
                         "Department":st.column_config.TextColumn("Department"),
                         "Designation":st.column_config.TextColumn("Designation"),
                         "Status":st.column_config.SelectboxColumn(
-                            "Status",options=["Present","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"]
+                            "Status",options=["Present","OD","Half Day","Absent","LWP","WO","Holiday","Leave","CL","SL","EL","HR Review"]
+                        ),
+                        "HR Confirmation":st.column_config.SelectboxColumn(
+                            "HR Confirmation",
+                            options=["","Miss Punch - Verified Present","On Duty (OD)","Biometric Device Issue","Approved Manual Attendance","Other"],
+                            help="Use this to record why HR is confirming a biometric exception."
                         ),
                         "Remark":st.column_config.TextColumn("HR Remark"),
                     }, key="v80_review_editor"
@@ -13415,6 +13475,19 @@ elif page == "Attendance":
                                 elif bulk_status != "Keep Each Row Status":
                                     final_status = bulk_status
 
+                                hr_confirmation=_clean_text(r.get("HR Confirmation"))
+                                if hr_confirmation in {
+                                    "Miss Punch - Verified Present",
+                                    "Biometric Device Issue",
+                                    "Approved Manual Attendance",
+                                }:
+                                    final_status = "Present"
+                                elif hr_confirmation == "On Duty (OD)":
+                                    final_status = "OD"
+                                final_remark=_clean_text(r.get("Remark"))
+                                if hr_confirmation:
+                                    final_remark = hr_confirmation + (f" · {final_remark}" if final_remark else "")
+
                                 final_division = _clean_text(r["Division"])
                                 if bulk_division != "Keep Each Row Division":
                                     final_division = bulk_division
@@ -13435,7 +13508,7 @@ elif page == "Attendance":
                                        division=%s,designation=%s,source_employee_name=%s,
                                        source_issue=%s,updated_at=CURRENT_TIMESTAMP WHERE id=%s""",
                                     (
-                                        final_status,str(r["Remark"] or ""),not resolved,_current_user["username"],
+                                        final_status,final_remark,not resolved,_current_user["username"],
                                         final_division,designation,employee_name,
                                         "" if resolved else source_issue,
                                         int(r["ID"])
