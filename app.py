@@ -15909,6 +15909,103 @@ elif page == "Operations":
                 _v190_pair_error=str(_v190_exc)
                 st.error(f"Unable to read the Finsys reel files: {_v190_pair_error}")
 
+        # V19.2 SAFE DAY-WISE IMPORT
+        # August monthly reel totals may already be finalized. This action imports
+        # only dated Issue/Return movements and never deletes/replaces the monthly
+        # production_consumption_summary rows.
+        if _v190_pair_loaded and not _v190_finsys_daily.empty:
+            _v192_day_rows=int(len(_v190_finsys_daily))
+            _v192_day_count=int(_v190_finsys_daily["Date"].dt.date.nunique())
+            _v192_save_allowed=bool(_v191_reconcile_ok)
+            st.markdown("#### Day-Wise Reel Movement Import")
+            st.caption(
+                "Use this when the monthly August reel report is already saved. "
+                "It updates only dated Issue/Return movements; monthly totals remain untouched."
+            )
+            if st.button(
+                "Import Day-Wise Reel Movements Only",
+                type="primary",
+                use_container_width=True,
+                key=f"v192_import_daywise_{_v160_month_date.isoformat()}",
+                disabled=not _v192_save_allowed,
+                help=(
+                    "Imports dated Finsys Issue/Return rows without changing the saved monthly reel report."
+                    if _v192_save_allowed
+                    else "Consumption Report reconciliation must pass before importing."
+                ),
+            ):
+                _v192_conn=get_pg_conn()
+                _v192_cur=None
+                try:
+                    _v192_cur=_v192_conn.cursor()
+                    _v192_month_start=_v160_month_date
+                    _v192_month_end=(
+                        date(_v160_month.year+1,1,1)-timedelta(days=1)
+                        if _v160_month.month==12
+                        else date(_v160_month.year,_v160_month.month+1,1)-timedelta(days=1)
+                    )
+                    _v192_cur.execute(
+                        """DELETE FROM production_reel_movement_daily
+                           WHERE movement_date BETWEEN %s AND %s""",
+                        (_v192_month_start,_v192_month_end),
+                    )
+                    _v192_rows=[]
+                    for _,_v192_r in _v190_finsys_daily.iterrows():
+                        _v192_rows.append((
+                            _v192_r["Date"].date(),
+                            str(_v192_r.get("ERP Code") or "").strip(),
+                            str(_v192_r.get("Item Name") or "").strip(),
+                            str(_v192_r.get("Reel Size") or "").strip(),
+                            float(_v192_r.get("Issue KG") or 0),
+                            float(_v192_r.get("Return KG") or 0),
+                            float(_v192_r.get("Net Issue KG") or 0),
+                            f"{getattr(_v190_issue_file,'name','Issue CSV')} + {getattr(_v190_return_file,'name','Return CSV')}",
+                            _current_user["username"],
+                        ))
+                    execute_values(
+                        _v192_cur,
+                        """INSERT INTO production_reel_movement_daily(
+                               movement_date,erp_code,item_name,reel_size,
+                               reel_issue_kg,reel_return_kg,net_issue_kg,
+                               source_file,imported_by
+                           ) VALUES %s
+                           ON CONFLICT(movement_date,erp_code,item_name,reel_size)
+                           DO UPDATE SET
+                               reel_issue_kg=excluded.reel_issue_kg,
+                               reel_return_kg=excluded.reel_return_kg,
+                               net_issue_kg=excluded.net_issue_kg,
+                               source_file=excluded.source_file,
+                               imported_by=excluded.imported_by,
+                               imported_at=CURRENT_TIMESTAMP""",
+                        _v192_rows,
+                    )
+                    _v192_conn.commit()
+                    record_audit_event(
+                        _current_user["username"],
+                        "DAYWISE_REEL_IMPORT",
+                        "Operations",
+                        "production_reel_movement_daily",
+                        _v160_month_date.isoformat(),
+                        (
+                            f"Rows={_v192_day_rows}; Days={_v192_day_count}; "
+                            f"Issue={_v190_issue_t:.3f}T; Return={_v190_return_t:.3f}T; "
+                            f"Net={_v190_net_t:.3f}T; MonthlySummaryPreserved=Yes"
+                        ),
+                    )
+                    st.success(
+                        f"Day-wise reel movements imported successfully · "
+                        f"{_v192_day_count} day(s) · {_v192_day_rows:,} dated item row(s). "
+                        "Existing monthly reel totals were not changed."
+                    )
+                except Exception as _v192_exc:
+                    if _v192_conn:
+                        _v192_conn.rollback()
+                    st.error(f"Day-wise reel import failed: {_v192_exc}")
+                finally:
+                    if _v192_cur is not None:
+                        _v192_cur.close()
+                    _v192_conn.close()
+
         _v160_existing=read_df(
             """SELECT erp_code AS "ERP Code",item_name AS "Item Name",
                       reel_size AS "Reel Size",
