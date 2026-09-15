@@ -15680,12 +15680,85 @@ elif page == "Operations":
                 key=f"v190_return_raw_{_v160_month_date.isoformat()}",
             )
 
+        _v191_consumption_file=st.file_uploader(
+            "Finsys Consumption Report XLS (optional verification)",
+            type=["xls","xlsx"],
+            key=f"v191_consumption_report_{_v160_month_date.isoformat()}",
+            help=(
+                "Upload the Finsys consumption summary with columns f1, grp, cref, "
+                "f2, f3, f4, f5, f6, f7, f8, f9. The ERP uses f4=Issue, "
+                "f5=Return and f6=Consumption to verify the raw CSV files."
+            ),
+        )
+
         _v190_finsys_daily=pd.DataFrame()
         _v190_pair_loaded=False
         _v190_pair_error=""
+        _v191_consumption=pd.DataFrame()
+        _v191_consumption_loaded=False
+        _v191_reconcile_ok=True
+        _v191_reconcile_message=""
 
         if (_v190_issue_file is None) ^ (_v190_return_file is None):
             st.info("Upload both Finsys files together: Reel Wise Issue + Reel Wise Return.")
+
+        if _v191_consumption_file is not None:
+            try:
+                _v191_raw=pd.read_excel(_v191_consumption_file)
+                _v191_raw.columns=[
+                    str(x).strip().lower() for x in _v191_raw.columns
+                ]
+                _v191_required={"f1","grp","cref","f2","f3","f4","f5","f6","f7","f8","f9"}
+                _v191_missing=_v191_required-set(_v191_raw.columns)
+                if _v191_missing:
+                    raise ValueError(
+                        "Invalid Consumption Report format. Missing columns: "
+                        + ", ".join(sorted(_v191_missing))
+                    )
+
+                _v191_consumption=pd.DataFrame({
+                    "Item Group":_v191_raw["f1"].fillna("").astype(str).str.strip(),
+                    "Group Code":_v191_raw["grp"].fillna("").astype(str).str.strip(),
+                    "CRef":_v191_raw["cref"].fillna("").astype(str).str.strip(),
+                    "Item Name":_v191_raw["f2"].fillna("").astype(str).str.strip(),
+                    "F3 Source KG":pd.to_numeric(_v191_raw["f3"],errors="coerce").fillna(0.0),
+                    "Issue KG":pd.to_numeric(_v191_raw["f4"],errors="coerce").fillna(0.0),
+                    "Return KG":pd.to_numeric(_v191_raw["f5"],errors="coerce").fillna(0.0),
+                    "Consumption KG":pd.to_numeric(_v191_raw["f6"],errors="coerce").fillna(0.0),
+                    "Reel Size":_v191_raw["f7"].fillna("").astype(str).str.strip(),
+                    "ERP Code":_v191_raw["f8"].fillna("").astype(str).str.strip(),
+                })
+                _v191_consumption=_v191_consumption[
+                    (_v191_consumption["ERP Code"]!="")
+                    | (_v191_consumption["Item Name"]!="")
+                ].copy()
+
+                _v191_consumption["Calculated Consumption KG"]=(
+                    _v191_consumption["Issue KG"]-_v191_consumption["Return KG"]
+                )
+                _v191_formula_diff=(
+                    _v191_consumption["Calculated Consumption KG"]
+                    - _v191_consumption["Consumption KG"]
+                ).abs()
+                if (_v191_formula_diff>0.01).any():
+                    raise ValueError(
+                        "Consumption Report contains rows where f6 is not equal to f4 - f5."
+                    )
+
+                _v191_consumption_loaded=True
+                _v191_f3_t=float(_v191_consumption["F3 Source KG"].sum())/1000.0
+                _v191_issue_t=float(_v191_consumption["Issue KG"].sum())/1000.0
+                _v191_return_t=float(_v191_consumption["Return KG"].sum())/1000.0
+                _v191_consumption_t=float(_v191_consumption["Consumption KG"].sum())/1000.0
+                st.info(
+                    f"Consumption Report loaded · {len(_v191_consumption):,} item code(s) · "
+                    f"F3 Qty {_v191_f3_t:,.3f} T · Issue {_v191_issue_t:,.3f} T · "
+                    f"Return {_v191_return_t:,.3f} T · Consumption {_v191_consumption_t:,.3f} T."
+                )
+            except Exception as _v191_exc:
+                _v191_reconcile_ok=False
+                _v191_reconcile_message=str(_v191_exc)
+                st.error(f"Unable to verify Consumption Report: {_v191_reconcile_message}")
 
         if _v190_issue_file is not None and _v190_return_file is not None:
             try:
@@ -15786,6 +15859,52 @@ elif page == "Operations":
                     f"Issue {_v190_issue_t:,.3f} T · Return {_v190_return_t:,.3f} T · "
                     f"Net Consumption {_v190_net_t:,.3f} T."
                 )
+
+                if _v191_consumption_loaded:
+                    _v191_by_code=(
+                        _v191_consumption.groupby(
+                            ["ERP Code"],as_index=False
+                        )[["Issue KG","Return KG","Consumption KG","F3 Source KG"]].sum()
+                    )
+                    _v190_by_code=(
+                        _v190_monthly.groupby(
+                            ["ERP Code"],as_index=False
+                        )[["Issue KG","Return KG"]].sum()
+                    )
+                    _v191_check=_v191_by_code.merge(
+                        _v190_by_code,
+                        on="ERP Code",
+                        how="outer",
+                        suffixes=("_Report","_Raw"),
+                    ).fillna(0)
+                    _v191_check["Issue Diff KG"]=(
+                        _v191_check["Issue KG_Report"]-_v191_check["Issue KG_Raw"]
+                    ).abs()
+                    _v191_check["Return Diff KG"]=(
+                        _v191_check["Return KG_Report"]-_v191_check["Return KG_Raw"]
+                    ).abs()
+                    _v191_bad=_v191_check[
+                        (_v191_check["Issue Diff KG"]>0.01)
+                        | (_v191_check["Return Diff KG"]>0.01)
+                    ]
+                    _v191_total_ok=(
+                        abs(_v191_issue_t-_v190_issue_t)<=0.00001
+                        and abs(_v191_return_t-_v190_return_t)<=0.00001
+                        and abs(_v191_consumption_t-_v190_net_t)<=0.00001
+                    )
+                    _v191_reconcile_ok=_v191_bad.empty and _v191_total_ok
+                    if _v191_reconcile_ok:
+                        _v191_reconcile_message=(
+                            f"VERIFIED · {len(_v191_consumption):,} ERP item code(s) match "
+                            "the Reel Wise Issue and Return files exactly."
+                        )
+                        st.success(_v191_reconcile_message)
+                    else:
+                        _v191_reconcile_message=(
+                            f"Reconciliation failed for {len(_v191_bad):,} ERP code(s). "
+                            "Do not save until the source files are corrected."
+                        )
+                        st.error(_v191_reconcile_message)
             except Exception as _v190_exc:
                 _v190_pair_error=str(_v190_exc)
                 st.error(f"Unable to read the Finsys reel files: {_v190_pair_error}")
@@ -15804,8 +15923,19 @@ elif page == "Operations":
             (_v160_month_date.isoformat(),),
         )
         if not _v190_pair_loaded:
-            _v160_seed=_v160_existing.copy() if not _v160_existing.empty else _v160_template.copy()
-        if _v160_upload is not None and not _v190_pair_loaded:
+            if _v191_consumption_loaded:
+                _v160_seed=pd.DataFrame({
+                    "ERP Code":_v191_consumption["ERP Code"],
+                    "Item Name":_v191_consumption["Item Name"],
+                    "Reel Size":_v191_consumption["Reel Size"],
+                    "Reel Issue Ton":_v191_consumption["Issue KG"]/1000.0,
+                    "Reel Return Ton":_v191_consumption["Return KG"]/1000.0,
+                    "Unit":"TON",
+                    "Remark":"Finsys Consumption Report",
+                })
+            else:
+                _v160_seed=_v160_existing.copy() if not _v160_existing.empty else _v160_template.copy()
+        if _v160_upload is not None and not _v190_pair_loaded and not _v191_consumption_loaded:
             try:
                 _v160_raw=(
                     pd.read_csv(_v160_upload)
@@ -15861,6 +15991,7 @@ elif page == "Operations":
             (not _v160_existing.empty)
             and _v160_upload is None
             and not _v190_pair_loaded
+            and not _v191_consumption_loaded
             and not st.session_state[_v160_edit_key]
         )
 
@@ -16042,6 +16173,11 @@ elif page == "Operations":
                 st.warning("Enter or upload at least one reel row.")
             elif not _v160_invalid.empty:
                 st.error("Every row must contain ERP Code or Item Name.")
+            elif not _v191_reconcile_ok:
+                st.error(
+                    "Consumption Report verification failed. "
+                    + (_v191_reconcile_message or "Correct the source files before saving.")
+                )
             elif (_v160_work["Net Issue Ton"]<0).any():
                 st.error("Reel Return cannot be greater than Reel Issue for the same row.")
             else:
@@ -16069,10 +16205,36 @@ elif page == "Operations":
                     for _,_v160_r in _v160_work.iterrows():
                         _v160_code=str(_v160_r.get("ERP Code") or "").strip()
                         _v160_name=str(_v160_r.get("Item Name") or "").strip()
+                        _v191_f3_value=0.0
+                        if _v191_consumption_loaded:
+                            _v191_f3_match=_v191_consumption[
+                                _v191_consumption["ERP Code"].astype(str)==_v160_code
+                            ]
+                            if not _v191_f3_match.empty:
+                                _v191_f3_value=float(
+                                    pd.to_numeric(
+                                        _v191_f3_match["F3 Source KG"],errors="coerce"
+                                    ).fillna(0).sum()
+                                )
+                        _v160_source_files=[]
+                        if _v190_pair_loaded:
+                            _v160_source_files.extend([
+                                getattr(_v190_issue_file,"name","Issue CSV"),
+                                getattr(_v190_return_file,"name","Return CSV"),
+                            ])
+                        if _v191_consumption_loaded:
+                            _v160_source_files.append(
+                                getattr(_v191_consumption_file,"name","Consumption Report")
+                            )
+                        if not _v160_source_files:
+                            _v160_source_files.append(
+                                getattr(_v160_upload,"name","Manual Entry")
+                            )
                         _v160_rows.append((
                             _v160_month_date,
                             str(_v160_r.get("Remark") or "").strip(),
                             _v160_name,
+                            _v191_f3_value,
                             float(_v160_r["Reel Issue Ton"])*1000.0,
                             float(_v160_r["Reel Return Ton"])*1000.0,
                             float(_v160_r["Net Issue Ton"])*1000.0,
@@ -16080,15 +16242,15 @@ elif page == "Operations":
                             _v160_code,
                             float(_v160_r["Consumption Ton"])*1000.0,
                             "TON",
-                            getattr(_v160_upload,"name","Manual Entry"),
+                            " + ".join(_v160_source_files),
                             _current_user["username"],
                         ))
                     execute_values(
                         _v160_cur,
                         """INSERT INTO production_consumption_summary(
-                               period_month,item_group,item_name,reel_issue_kg,reel_return_kg,
-                               net_issue_kg,reel_size,erp_code,reel_consumption_kg,unit,
-                               source_file,imported_by
+                               period_month,item_group,item_name,source_f3_qty_kg,
+                               reel_issue_kg,reel_return_kg,net_issue_kg,reel_size,erp_code,
+                               reel_consumption_kg,unit,source_file,imported_by
                            ) VALUES %s""",
                         _v160_rows,
                     )
@@ -16540,6 +16702,7 @@ elif page == "Reports":
                 """SELECT erp_code AS "ERP Code",
                           item_name AS "Item Name",
                           reel_size AS "Reel Size",
+                          source_f3_qty_kg/1000.0 AS "Finsys F3 Qty Ton",
                           reel_issue_kg/1000.0 AS "Reel Issue Ton",
                           reel_return_kg/1000.0 AS "Reel Return Ton",
                           reel_consumption_kg/1000.0 AS "Consumption Ton",
@@ -16551,7 +16714,7 @@ elif page == "Reports":
                 (date(report_month.year,report_month.month,1).isoformat(),),
             )
             if not report_df.empty:
-                for _mc in ["Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
+                for _mc in ["Finsys F3 Qty Ton","Reel Issue Ton","Reel Return Ton","Consumption Ton"]:
                     report_df[_mc]=pd.to_numeric(report_df[_mc],errors="coerce").fillna(0).round(2)
 
     elif report_type=="Reel Consumption - Day Wise":
