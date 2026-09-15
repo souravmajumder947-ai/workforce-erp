@@ -14,3 +14,8 @@ secondaryBackgroundColor = "#0E1826"
 textColor = "#F5F8FC"
 primaryColor = "#2F6FEB"
 borderColor = "#182638"
+
+[client]
+showErrorDetails = "none"
+showErrorLinks = false
+toolbarMode = "viewer"
