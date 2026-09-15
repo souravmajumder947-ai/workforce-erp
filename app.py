@@ -7308,6 +7308,350 @@ _current_role = str(_current_user.get("role", "Viewer"))
 _v109_production_mode = str(get_setting_value("production_mode", "SETUP") or "SETUP").upper()
 _v109_production_live = _v109_production_mode == "LIVE"
 st.markdown('<div class="v104-app-quality-marker"></div>', unsafe_allow_html=True)
+
+# ============================================================
+# V18.0 — ADVANCED 3D GLASS APPLICATION THEME
+# Visual-only authenticated app treatment. No business logic,
+# calculations, permissions, database values or company logo are changed.
+# ============================================================
+st.markdown(
+    """
+    <style>
+    :root{
+      --g18-glass:rgba(13,30,49,.66);
+      --g18-glass-strong:rgba(13,29,48,.82);
+      --g18-glass-soft:rgba(20,42,67,.46);
+      --g18-line:rgba(135,188,244,.20);
+      --g18-line-hi:rgba(164,212,255,.38);
+      --g18-text:#f7fbff;
+      --g18-muted:#8fa7bf;
+      --g18-blue:#5ca6ff;
+      --g18-cyan:#65d9ff;
+      --g18-green:#48d7a2;
+      --g18-shadow:0 18px 46px rgba(0,0,0,.28);
+      --g18-shadow-soft:0 10px 28px rgba(0,0,0,.20);
+      --g18-inset:inset 0 1px 0 rgba(255,255,255,.075),inset 0 -1px 0 rgba(0,0,0,.22);
+    }
+
+    /* ---------- APP CANVAS ---------- */
+    body:has(.v104-app-quality-marker) .stApp{
+      background:
+        radial-gradient(circle at 82% 2%,rgba(57,132,230,.16),transparent 28%),
+        radial-gradient(circle at 18% 18%,rgba(66,211,255,.055),transparent 24%),
+        radial-gradient(circle at 54% 108%,rgba(119,92,255,.075),transparent 30%),
+        linear-gradient(145deg,#06101b 0%,#071523 48%,#06111d 100%)!important;
+      color:var(--g18-text)!important;
+    }
+    body:has(.v104-app-quality-marker) .stApp:before{
+      opacity:.72!important;
+      background-image:
+        linear-gradient(rgba(118,176,235,.026) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(118,176,235,.026) 1px,transparent 1px)!important;
+      background-size:42px 42px!important;
+    }
+    body:has(.v104-app-quality-marker) .stApp:after{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      z-index:0;
+      background:
+        linear-gradient(115deg,transparent 0 31%,rgba(255,255,255,.018) 43%,transparent 56%),
+        radial-gradient(circle at 50% -15%,rgba(255,255,255,.028),transparent 35%);
+      mix-blend-mode:screen;
+    }
+
+    /* ---------- GLASS HEADER / STATUS / PAGE BARS ---------- */
+    body:has(.v104-app-quality-marker) .v8-topbar,
+    body:has(.v104-app-quality-marker) .v83-live-bar,
+    body:has(.v104-app-quality-marker) .v10-live-strip{
+      position:relative;
+      overflow:hidden;
+      background:
+        linear-gradient(135deg,rgba(22,48,76,.72),rgba(8,23,39,.72))!important;
+      border:1px solid var(--g18-line)!important;
+      box-shadow:var(--g18-shadow-soft),var(--g18-inset)!important;
+      backdrop-filter:blur(22px) saturate(135%)!important;
+      -webkit-backdrop-filter:blur(22px) saturate(135%)!important;
+    }
+    body:has(.v104-app-quality-marker) .v8-topbar:after,
+    body:has(.v104-app-quality-marker) .v83-live-bar:after{
+      content:"";
+      position:absolute;
+      left:-10%;
+      top:-80%;
+      width:34%;
+      height:220%;
+      pointer-events:none;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);
+      transform:skewX(-20deg);
+      opacity:.55;
+    }
+
+    /* ---------- SIDEBAR GLASS ---------- */
+    body:has(.v104-app-quality-marker) section[data-testid="stSidebar"]{
+      background:
+        radial-gradient(circle at 12% 0%,rgba(73,150,249,.14),transparent 25%),
+        linear-gradient(180deg,rgba(8,24,40,.93),rgba(6,17,29,.94))!important;
+      border-right:1px solid rgba(122,180,238,.20)!important;
+      box-shadow:14px 0 44px rgba(0,0,0,.25),inset -1px 0 0 rgba(255,255,255,.025)!important;
+      backdrop-filter:blur(24px) saturate(125%)!important;
+      -webkit-backdrop-filter:blur(24px) saturate(125%)!important;
+    }
+    body:has(.v104-app-quality-marker) .v10-sidebrand{
+      background:
+        linear-gradient(145deg,rgba(19,42,66,.78),rgba(8,23,38,.60))!important;
+      border:1px solid rgba(137,193,247,.20)!important;
+      border-radius:15px!important;
+      box-shadow:0 14px 32px rgba(0,0,0,.20),var(--g18-inset)!important;
+      backdrop-filter:blur(18px)!important;
+    }
+    body:has(.v104-app-quality-marker) section[data-testid="stSidebar"] div[role="radiogroup"]>label{
+      position:relative;
+      overflow:hidden;
+      border:1px solid transparent!important;
+      transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease!important;
+    }
+    body:has(.v104-app-quality-marker) section[data-testid="stSidebar"] div[role="radiogroup"]>label:hover{
+      transform:translateX(3px);
+      background:rgba(69,132,210,.095)!important;
+      border-color:rgba(119,181,247,.14)!important;
+    }
+    body:has(.v104-app-quality-marker) section[data-testid="stSidebar"] div[role="radiogroup"]>label:has(input:checked){
+      background:
+        linear-gradient(100deg,rgba(72,141,233,.28),rgba(43,96,166,.10))!important;
+      border-color:rgba(102,173,255,.36)!important;
+      box-shadow:
+        0 9px 22px rgba(10,56,112,.24),
+        inset 0 1px 0 rgba(255,255,255,.07),
+        inset 4px 0 0 rgba(93,169,255,.92)!important;
+    }
+
+    /* ---------- KPI / SUMMARY CARDS ---------- */
+    body:has(.v104-app-quality-marker) .v5-kpi,
+    body:has(.v104-app-quality-marker) .v10-kpi,
+    body:has(.v104-app-quality-marker) [data-testid="stMetric"]{
+      position:relative!important;
+      overflow:hidden!important;
+      border:1px solid var(--g18-line)!important;
+      background:
+        radial-gradient(circle at 100% 0%,rgba(91,166,255,.11),transparent 34%),
+        linear-gradient(145deg,rgba(18,40,64,.77),rgba(8,22,37,.72))!important;
+      box-shadow:
+        0 16px 34px rgba(0,0,0,.22),
+        inset 0 1px 0 rgba(255,255,255,.07),
+        inset 0 -1px 0 rgba(0,0,0,.30)!important;
+      backdrop-filter:blur(20px) saturate(135%)!important;
+      -webkit-backdrop-filter:blur(20px) saturate(135%)!important;
+      transition:transform .20s ease,border-color .20s ease,box-shadow .20s ease!important;
+    }
+    body:has(.v104-app-quality-marker) .v5-kpi:before,
+    body:has(.v104-app-quality-marker) .v10-kpi:before{
+      content:"";
+      position:absolute;
+      left:12px;
+      right:12px;
+      top:0;
+      height:1px;
+      background:linear-gradient(90deg,transparent,rgba(189,225,255,.42),transparent);
+      opacity:.65;
+    }
+    body:has(.v104-app-quality-marker) .v5-kpi:hover,
+    body:has(.v104-app-quality-marker) .v10-kpi:hover,
+    body:has(.v104-app-quality-marker) [data-testid="stMetric"]:hover{
+      transform:translateY(-3px);
+      border-color:var(--g18-line-hi)!important;
+      box-shadow:
+        0 21px 42px rgba(0,0,0,.28),
+        0 0 26px rgba(70,145,235,.06),
+        inset 0 1px 0 rgba(255,255,255,.09)!important;
+    }
+
+    /* ---------- PANELS / BORDERED CONTAINERS ---------- */
+    body:has(.v104-app-quality-marker) div[data-testid="stVerticalBlockBorderWrapper"]{
+      position:relative;
+      border-color:var(--g18-line)!important;
+      border-radius:14px!important;
+      background:
+        linear-gradient(145deg,rgba(18,39,62,.62),rgba(8,21,35,.58))!important;
+      box-shadow:var(--g18-shadow-soft),var(--g18-inset)!important;
+      backdrop-filter:blur(18px) saturate(125%)!important;
+      -webkit-backdrop-filter:blur(18px) saturate(125%)!important;
+    }
+    body:has(.v104-app-quality-marker) .v5-panel,
+    body:has(.v104-app-quality-marker) .v55-hero,
+    body:has(.v104-app-quality-marker) .v96-ai-console,
+    body:has(.v104-app-quality-marker) .v8-ai-card{
+      border-color:var(--g18-line)!important;
+      background:
+        linear-gradient(145deg,rgba(19,42,67,.69),rgba(8,22,37,.66))!important;
+      box-shadow:var(--g18-shadow-soft),var(--g18-inset)!important;
+      backdrop-filter:blur(18px) saturate(125%)!important;
+      -webkit-backdrop-filter:blur(18px) saturate(125%)!important;
+    }
+
+    /* ---------- TABLE / SHEET SURFACES ---------- */
+    body:has(.v104-app-quality-marker) div[data-testid="stDataFrame"],
+    body:has(.v104-app-quality-marker) div[data-testid="stDataEditor"]{
+      overflow:hidden!important;
+      border:1px solid rgba(123,180,237,.22)!important;
+      border-radius:13px!important;
+      background:
+        linear-gradient(145deg,rgba(15,34,55,.84),rgba(6,18,31,.84))!important;
+      box-shadow:
+        0 15px 36px rgba(0,0,0,.25),
+        inset 0 1px 0 rgba(255,255,255,.055)!important;
+      backdrop-filter:blur(18px) saturate(120%)!important;
+      -webkit-backdrop-filter:blur(18px) saturate(120%)!important;
+    }
+    body:has(.v104-app-quality-marker) [data-testid="stDataFrame"]>div,
+    body:has(.v104-app-quality-marker) [data-testid="stDataEditor"]>div{
+      background:transparent!important;
+    }
+    body:has(.v104-app-quality-marker) .v160-grid-shell{
+      border:1px solid rgba(124,185,245,.26)!important;
+      background:linear-gradient(145deg,rgba(15,34,55,.86),rgba(6,17,29,.88))!important;
+      box-shadow:0 17px 38px rgba(0,0,0,.27),inset 0 1px 0 rgba(255,255,255,.055)!important;
+      backdrop-filter:blur(19px) saturate(125%)!important;
+    }
+    body:has(.v104-app-quality-marker) .v160-grid th{
+      background:linear-gradient(180deg,rgba(35,49,66,.96),rgba(23,33,46,.96))!important;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+    }
+    body:has(.v104-app-quality-marker) .v160-grid td{
+      background:rgba(6,17,29,.78)!important;
+    }
+    body:has(.v104-app-quality-marker) .v160-grid tbody tr:hover td{
+      background:rgba(26,54,84,.58)!important;
+    }
+    body:has(.v104-app-quality-marker) .v160-grid tfoot td{
+      background:linear-gradient(180deg,rgba(30,48,68,.98),rgba(19,32,47,.98))!important;
+      border-top:1px solid rgba(128,187,246,.28)!important;
+      box-shadow:0 -8px 20px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.05)!important;
+    }
+
+    /* ---------- INPUTS / FILTER BAR ---------- */
+    body:has(.v104-app-quality-marker) [data-baseweb="select"]>div,
+    body:has(.v104-app-quality-marker) [data-baseweb="input"]>div,
+    body:has(.v104-app-quality-marker) [data-baseweb="textarea"]>div,
+    body:has(.v104-app-quality-marker) input,
+    body:has(.v104-app-quality-marker) textarea{
+      border-color:rgba(122,179,236,.22)!important;
+      background:linear-gradient(145deg,rgba(15,34,55,.74),rgba(8,22,37,.70))!important;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 8px 18px rgba(0,0,0,.10)!important;
+      color:#f5f9fd!important;
+    }
+    body:has(.v104-app-quality-marker) [data-baseweb="select"]>div:focus-within,
+    body:has(.v104-app-quality-marker) [data-baseweb="input"]>div:focus-within{
+      border-color:rgba(89,163,249,.58)!important;
+      box-shadow:0 0 0 2px rgba(67,143,231,.10),inset 0 1px 0 rgba(255,255,255,.06)!important;
+    }
+    body:has(.v104-app-quality-marker) [data-testid="stFileUploaderDropzone"]{
+      border:1px dashed rgba(110,177,245,.36)!important;
+      border-radius:13px!important;
+      background:
+        linear-gradient(145deg,rgba(19,42,66,.55),rgba(8,22,37,.50))!important;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
+    }
+
+    /* ---------- BUTTONS ---------- */
+    body:has(.v104-app-quality-marker) .stButton>button,
+    body:has(.v104-app-quality-marker) .stDownloadButton>button,
+    body:has(.v104-app-quality-marker) button[kind="secondary"]{
+      border:1px solid rgba(120,181,244,.25)!important;
+      border-radius:10px!important;
+      background:
+        linear-gradient(180deg,rgba(29,57,87,.84),rgba(14,33,54,.84))!important;
+      box-shadow:
+        0 9px 20px rgba(0,0,0,.18),
+        inset 0 1px 0 rgba(255,255,255,.08),
+        inset 0 -1px 0 rgba(0,0,0,.25)!important;
+      transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease!important;
+    }
+    body:has(.v104-app-quality-marker) .stButton>button:hover,
+    body:has(.v104-app-quality-marker) .stDownloadButton>button:hover{
+      transform:translateY(-2px);
+      border-color:rgba(111,183,255,.48)!important;
+      box-shadow:
+        0 13px 26px rgba(0,0,0,.23),
+        0 0 20px rgba(68,145,237,.07),
+        inset 0 1px 0 rgba(255,255,255,.10)!important;
+    }
+    body:has(.v104-app-quality-marker) button[kind="primary"],
+    body:has(.v104-app-quality-marker) button[kind="primaryFormSubmit"]{
+      background:
+        linear-gradient(110deg,#285ca8 0%,#3f84e6 52%,#3e76c9 100%)!important;
+      border:1px solid rgba(137,196,255,.62)!important;
+      box-shadow:
+        0 12px 28px rgba(29,91,170,.28),
+        inset 0 1px 0 rgba(255,255,255,.20),
+        inset 0 -1px 0 rgba(0,0,0,.24)!important;
+    }
+
+    /* ---------- RADIO / TABS / EXPANDERS ---------- */
+    body:has(.v104-app-quality-marker) div[role="radiogroup"]>label{
+      border-radius:9px!important;
+      transition:background .16s ease,border-color .16s ease!important;
+    }
+    body:has(.v104-app-quality-marker) [data-baseweb="tab-list"]{
+      border:1px solid rgba(119,178,237,.15)!important;
+      border-radius:11px!important;
+      padding:3px!important;
+      background:rgba(9,24,40,.55)!important;
+      backdrop-filter:blur(14px)!important;
+    }
+    body:has(.v104-app-quality-marker) [data-testid="stExpander"]{
+      border:1px solid rgba(120,180,240,.18)!important;
+      border-radius:12px!important;
+      overflow:hidden!important;
+      background:linear-gradient(145deg,rgba(17,38,61,.58),rgba(8,21,35,.55))!important;
+      box-shadow:0 9px 22px rgba(0,0,0,.13),inset 0 1px 0 rgba(255,255,255,.035)!important;
+    }
+
+    /* ---------- TYPOGRAPHY / SECTION POLISH ---------- */
+    body:has(.v104-app-quality-marker) .v8-page-title,
+    body:has(.v104-app-quality-marker) h1,
+    body:has(.v104-app-quality-marker) h2,
+    body:has(.v104-app-quality-marker) h3{
+      text-shadow:0 2px 18px rgba(62,137,226,.09);
+    }
+    body:has(.v104-app-quality-marker) .v5-panel-title{
+      letter-spacing:.015em;
+    }
+
+    /* ---------- SCROLLBARS ---------- */
+    body:has(.v104-app-quality-marker) *{
+      scrollbar-width:thin;
+      scrollbar-color:rgba(97,151,207,.58) rgba(6,17,29,.28);
+    }
+    body:has(.v104-app-quality-marker) *::-webkit-scrollbar{width:8px;height:8px}
+    body:has(.v104-app-quality-marker) *::-webkit-scrollbar-track{background:rgba(6,17,29,.28)}
+    body:has(.v104-app-quality-marker) *::-webkit-scrollbar-thumb{
+      background:linear-gradient(180deg,rgba(94,163,232,.65),rgba(52,103,160,.65));
+      border-radius:20px;
+      border:2px solid rgba(6,17,29,.32);
+    }
+
+    @media(max-width:760px){
+      body:has(.v104-app-quality-marker) .v5-kpi:hover,
+      body:has(.v104-app-quality-marker) .v10-kpi:hover,
+      body:has(.v104-app-quality-marker) [data-testid="stMetric"]:hover{
+        transform:none;
+      }
+    }
+    @media(prefers-reduced-motion:reduce){
+      body:has(.v104-app-quality-marker) *,
+      body:has(.v104-app-quality-marker) *:before,
+      body:has(.v104-app-quality-marker) *:after{
+        transition:none!important;
+        animation:none!important;
+      }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 _backend_allowed = set(get_effective_permissions(_current_user["user_id"], _current_role))
 
 # Full-control security.
