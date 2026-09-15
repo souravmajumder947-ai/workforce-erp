@@ -12053,7 +12053,10 @@ elif page == "Employees":
                     st.markdown('<div class="v55-profile-section">',unsafe_allow_html=True)
                     events=[]
                     if not att.empty:
-                        for _,r in att.sort_values("work_date_dt",ascending=False).head(20).iterrows():
+                        # Show every attendance record for the selected profile month.
+                        # The old .head(20) limit caused the beginning of longer months
+                        # to disappear from Employee 360 → Timeline.
+                        for _,r in att.sort_values("work_date_dt",ascending=False).iterrows():
                             events.append({
                                 "date":str(r["work_date"]),
                                 "title":f"Attendance · {r['status']}",
@@ -12066,7 +12069,7 @@ elif page == "Employees":
                                 "sort":pd.to_datetime(r["work_date"],errors="coerce")
                             })
                     if not payroll_history.empty:
-                        for _,r in payroll_history.head(12).iterrows():
+                        for _,r in payroll_history.iterrows():
                             events.append({
                                 "date":str(r["payroll_month"]),
                                 "title":"Payroll Finalized",
@@ -12081,10 +12084,20 @@ elif page == "Employees":
                         events,
                         key=lambda e: e["sort"] if not pd.isna(e["sort"]) else pd.Timestamp.min,
                         reverse=True
-                    )[:30]
+                    )
                     if not events:
                         st.info("No employee activity history is available yet.")
                     else:
+                        _timeline_att_count=len(att) if not att.empty else 0
+                        _timeline_pay_count=len(payroll_history) if not payroll_history.empty else 0
+                        st.caption(
+                            f"Complete timeline · {profile_month.strftime('%b %Y')} attendance: "
+                            f"{_timeline_att_count:,} record(s)"
+                            + (
+                                f" · Payroll history: {_timeline_pay_count:,} finalized record(s)"
+                                if can_view_salary(_current_role) else ""
+                            )
+                        )
                         html_events=[]
                         for ev in events:
                             html_events.append(
