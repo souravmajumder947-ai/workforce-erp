@@ -18549,102 +18549,283 @@ elif page == "User Management":
                         '</div></div>',
                         unsafe_allow_html=True,
                     )
-            st.markdown("### Edit User & Module Access")
-            selected_user=st.selectbox(
-                "Edit User",users["username"].astype(str).tolist(),key="v54_edit_user"
+            st.markdown("### Edit User Master & Access")
+
+            _v189_user_options = users["username"].astype(str).tolist()
+
+            # When a username itself is changed, select the renamed account on
+            # the next rerun before the selectbox is instantiated.
+            _v189_pending_selected = st.session_state.pop(
+                "v189_edit_user_after_save", None
             )
-            u=users[users["username"]==selected_user].iloc[0]
-            uid=int(u["user_id"])
-            current_backend=set(get_effective_permissions(uid,str(u["role"])))
-            module_defaults=[
+            if (
+                _v189_pending_selected
+                and _v189_pending_selected in _v189_user_options
+            ):
+                st.session_state["v54_edit_user"] = _v189_pending_selected
+
+            selected_user = st.selectbox(
+                "Select User to Edit",
+                _v189_user_options,
+                key="v54_edit_user",
+            )
+
+            _v189_match = users[
+                users["username"].astype(str) == str(selected_user)
+            ]
+            if _v189_match.empty:
+                st.error("Selected user could not be loaded. Please refresh the page.")
+                st.stop()
+
+            u = _v189_match.iloc[0]
+            uid = int(u["user_id"])
+            role_options = ["Owner", "Admin", "HR", "Manager", "Viewer"]
+
+            current_backend = set(
+                get_effective_permissions(uid, str(u["role"]))
+            )
+            module_defaults = [
                 m for m in V5_ASSIGNABLE_MODULES
                 if V5_MODULE_BACKEND[m] & current_backend
             ]
-            role_options=["Owner","Admin","HR","Manager","Viewer"]
 
-            # Streamlit widget keys retain their previous value. Reload the form
-            # whenever Edit User changes so one user's name/role/modules can never
-            # leak into another selected account.
+            # Always reload the complete editable master when another user is
+            # selected. This prevents values from the previously selected user
+            # leaking into the next account.
             if st.session_state.get("v184_loaded_edit_user") != selected_user:
-                st.session_state["v54_edit_name"] = str(u["full_name"] or "")
+                st.session_state["v189_edit_username"] = str(
+                    u["username"] or ""
+                ).strip()
+                st.session_state["v54_edit_name"] = str(
+                    u["full_name"] or ""
+                ).strip()
                 st.session_state["v54_edit_role"] = (
-                    str(u["role"]) if str(u["role"]) in role_options else "Manager"
+                    str(u["role"])
+                    if str(u["role"]) in role_options
+                    else "Manager"
                 )
                 st.session_state["v54_edit_active"] = bool(u["is_active"])
                 st.session_state["v54_modules"] = list(module_defaults)
                 st.session_state["v54_reset_pw"] = ""
                 st.session_state["v184_loaded_edit_user"] = selected_user
 
-            c1,c2,c3=st.columns([1.05,1.0,.65],gap="small")
-            edit_name=c1.text_input(
-                "Full Name",key="v54_edit_name"
+            _v189_saved_message = st.session_state.pop(
+                "v189_user_save_message", None
             )
-            edit_role=c2.selectbox(
-                "Role",role_options,key="v54_edit_role"
-            )
-            active=c3.checkbox(
-                "Active",key="v54_edit_active"
-            )
-            modules=st.multiselect(
-                "Operational Module Access",
-                V5_ASSIGNABLE_MODULES,
-                disabled=edit_role in FULL_CONTROL_ROLES,
-                key="v54_modules"
-            )
-            st.caption(
-                "Master Centre and User Management are Owner/Admin-only and cannot be delegated to HR, Manager or Viewer."
-            )
-            new_password=st.text_input(
-                "Reset Password (optional)",type="password",key="v54_reset_pw"
-            )
-            if st.button(
-                "Save User & Access",type="primary",use_container_width=True,key="v54_save_user"
-            ):
-                if selected_user==_current_user["username"] and not active:
-                    st.error("You cannot deactivate your current account.")
-                elif new_password and len(new_password)<8:
-                    st.error("New password must be at least 8 characters.")
+            if _v189_saved_message:
+                st.success(_v189_saved_message)
+
+            with st.container(border=True):
+                st.caption(
+                    "Edit the selected login account. Changes are saved against "
+                    "the same database User ID, so permissions and sessions remain synchronized."
+                )
+
+                ec1, ec2 = st.columns([1, 1.55], gap="small")
+                edit_username = ec1.text_input(
+                    "Username",
+                    key="v189_edit_username",
+                    help="Used for login. Must be unique.",
+                )
+                edit_name = ec2.text_input(
+                    "Full Name",
+                    key="v54_edit_name",
+                )
+
+                ec3, ec4 = st.columns([1, 1], gap="small")
+                edit_role = ec3.selectbox(
+                    "Role",
+                    role_options,
+                    key="v54_edit_role",
+                )
+                active = ec4.checkbox(
+                    "Active User",
+                    key="v54_edit_active",
+                )
+
+                if edit_role in FULL_CONTROL_ROLES:
+                    # Owner/Admin permissions are intentionally all-access.
+                    # Do not show a greyed-out multiselect that looks broken.
+                    st.session_state["v54_modules"] = list(V5_ASSIGNABLE_MODULES)
+                    modules = list(V5_ASSIGNABLE_MODULES)
+                    st.info(
+                        f"{edit_role} has full operational access automatically. "
+                        "Change the Role to HR, Manager or Viewer to customize module access."
+                    )
                 else:
-                    if new_password:
-                        upsert(
-                            """UPDATE app_users SET full_name=?,role=?,is_active=?,password_hash=?
-                               WHERE user_id=?""",
-                            (
-                                edit_name,edit_role,active,
-                                hash_user_password(new_password),uid
-                            )
-                        )
-                    else:
-                        upsert(
-                            """UPDATE app_users SET full_name=?,role=?,is_active=?
-                               WHERE user_id=?""",
-                            (edit_name,edit_role,active,uid)
-                        )
-                    backend_pages=set()
-                    for m in modules:
-                        backend_pages |= V5_MODULE_BACKEND[m]
-                    if edit_role in FULL_CONTROL_ROLES:
-                        backend_pages=set(PAGE_ORDER)
-                    save_user_permissions(uid,backend_pages)
-                    record_audit_event(
-                        _current_user["username"], "USER_ACCESS_UPDATE", "User Management",
-                        "User", selected_user,
-                        f"Role={edit_role}; Active={active}; Modules={','.join(sorted(modules))}"
+                    modules = st.multiselect(
+                        "Operational Module Access",
+                        V5_ASSIGNABLE_MODULES,
+                        key="v54_modules",
+                        placeholder="Select modules this user can access",
+                    )
+                    st.caption(
+                        "Master Centre and User Management remain protected "
+                        "Owner/Admin functions."
                     )
 
-                    # If the signed-in account edits itself, refresh its session
-                    # snapshot immediately so every header/sidebar uses the same details.
-                    if selected_user == str(_current_user.get("username","")):
-                        _v184_self = read_df(
-                            """SELECT user_id,username,full_name,role,is_active,created_at,last_login
-                               FROM app_users WHERE user_id=? LIMIT 1""",
-                            (uid,),
-                        )
-                        if not _v184_self.empty:
-                            st.session_state["auth_user"].update(_v184_self.iloc[0].to_dict())
+                new_password = st.text_input(
+                    "Reset Password (optional)",
+                    type="password",
+                    key="v54_reset_pw",
+                    autocomplete="new-password",
+                    help="Leave blank to keep the current password.",
+                )
 
-                    st.success("User access updated.")
-                    st.rerun()
+                save_user = st.button(
+                    "Save User Master & Access",
+                    type="primary",
+                    use_container_width=True,
+                    key="v189_save_user_master",
+                )
+
+            if save_user:
+                clean_username = str(edit_username or "").strip().lower()
+                clean_name = str(edit_name or "").strip()
+                old_username = str(u["username"] or "").strip()
+                old_role = str(u["role"] or "")
+                old_active = bool(u["is_active"])
+
+                validation_error = None
+
+                if not clean_username:
+                    validation_error = "Username is required."
+                elif not clean_name:
+                    validation_error = "Full Name is required."
+                elif any(ch.isspace() for ch in clean_username):
+                    validation_error = "Username cannot contain spaces."
+                elif new_password and len(new_password) < 8:
+                    validation_error = "New password must be at least 8 characters."
+                elif (
+                    old_username == str(_current_user.get("username", ""))
+                    and not active
+                ):
+                    validation_error = "You cannot deactivate your current account."
+
+                # Prevent accidental duplicate usernames.
+                if validation_error is None:
+                    duplicate_user = read_df(
+                        """SELECT user_id
+                           FROM app_users
+                           WHERE LOWER(username)=LOWER(?)
+                             AND user_id<>?
+                           LIMIT 1""",
+                        (clean_username, uid),
+                    )
+                    if not duplicate_user.empty:
+                        validation_error = (
+                            f"Username '{clean_username}' is already in use."
+                        )
+
+                # Never allow the final active Owner/Admin account to be removed
+                # from full control, otherwise the ERP could lock itself out.
+                removing_full_control = (
+                    old_role in FULL_CONTROL_ROLES
+                    and old_active
+                    and (
+                        edit_role not in FULL_CONTROL_ROLES
+                        or not active
+                    )
+                )
+                if validation_error is None and removing_full_control:
+                    other_control = read_df(
+                        """SELECT COUNT(*) AS c
+                           FROM app_users
+                           WHERE user_id<>?
+                             AND is_active=TRUE
+                             AND role IN ('Owner','Admin')""",
+                        (uid,),
+                    )
+                    other_control_count = (
+                        int(other_control.iloc[0]["c"])
+                        if not other_control.empty else 0
+                    )
+                    if other_control_count <= 0:
+                        validation_error = (
+                            "At least one other active Owner/Admin is required "
+                            "before this account can be demoted or deactivated."
+                        )
+
+                if validation_error:
+                    st.error(validation_error)
+                else:
+                    try:
+                        if new_password:
+                            upsert(
+                                """UPDATE app_users
+                                   SET username=?,full_name=?,role=?,is_active=?,password_hash=?
+                                   WHERE user_id=?""",
+                                (
+                                    clean_username,
+                                    clean_name,
+                                    edit_role,
+                                    bool(active),
+                                    hash_user_password(new_password),
+                                    uid,
+                                ),
+                            )
+                        else:
+                            upsert(
+                                """UPDATE app_users
+                                   SET username=?,full_name=?,role=?,is_active=?
+                                   WHERE user_id=?""",
+                                (
+                                    clean_username,
+                                    clean_name,
+                                    edit_role,
+                                    bool(active),
+                                    uid,
+                                ),
+                            )
+
+                        backend_pages = set()
+                        if edit_role in FULL_CONTROL_ROLES:
+                            backend_pages = set(PAGE_ORDER)
+                        else:
+                            for m in modules:
+                                backend_pages |= V5_MODULE_BACKEND[m]
+
+                        save_user_permissions(uid, backend_pages)
+
+                        record_audit_event(
+                            _current_user["username"],
+                            "USER_MASTER_UPDATE",
+                            "User Management",
+                            "User",
+                            clean_username,
+                            (
+                                f"PreviousUsername={old_username}; "
+                                f"Role={edit_role}; Active={bool(active)}; "
+                                f"Modules={','.join(sorted(modules))}; "
+                                f"PasswordReset={'Yes' if bool(new_password) else 'No'}"
+                            ),
+                        )
+
+                        # Refresh the signed-in identity immediately when the
+                        # current account edits itself, including a username change.
+                        if uid == int(_current_user.get("user_id", -1)):
+                            live_self = read_df(
+                                """SELECT user_id,username,full_name,role,is_active,
+                                          created_at,last_login
+                                   FROM app_users
+                                   WHERE user_id=?
+                                   LIMIT 1""",
+                                (uid,),
+                            )
+                            if not live_self.empty:
+                                st.session_state["auth_user"].update(
+                                    live_self.iloc[0].to_dict()
+                                )
+
+                        st.session_state["v189_edit_user_after_save"] = clean_username
+                        st.session_state["v184_loaded_edit_user"] = None
+                        st.session_state["v189_user_save_message"] = (
+                            f"User '{clean_username}' updated successfully."
+                        )
+                        st.rerun()
+
+                    except Exception as exc:
+                        st.error(f"Unable to update user master: {exc}")
 
             st.markdown("### Delete User")
             st.caption(
