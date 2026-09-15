@@ -14842,7 +14842,6 @@ elif page == "Reports":
 
         v5_kpis([
             ("Active Employees",f"{len(_md_active):,}","Selected division","blue"),
-            ("Attendance Rows",f"{_md_att_rows:,}",report_month.strftime("%b %Y"),""),
             ("OT Hours",f"{_md_ot:,.2f}",report_month.strftime("%b %Y"),""),
             ("Final Payroll",v5_money(_md_net),f"{_md_pay_emp:,} employee(s)","good" if _md_net else "warn"),
             ("Production",f"{_md_prod_ton:,.2f} T","Greater Noida","blue"),
@@ -14851,7 +14850,7 @@ elif page == "Reports":
 
         report_df=pd.DataFrame([
             {"Section":"HR & Attendance","Report":"Active Employee Master","Key Figure":f"{len(_md_active):,} employees","Status":"LIVE"},
-            {"Section":"HR & Attendance","Report":"Monthly Attendance","Key Figure":f"{_md_att_rows:,} rows · OT {_md_ot:,.2f} hrs","Status":"LIVE" if _md_att_rows else "NO DATA"},
+            {"Section":"HR & Attendance","Report":"Monthly Attendance","Key Figure":f"OT {_md_ot:,.2f} hrs","Status":"LIVE" if _md_att_rows else "NO DATA"},
             {"Section":"Payroll & Statutory","Report":"Finalized Salary","Key Figure":f"{v5_money(_md_net)} · {_md_pay_emp:,} employees","Status":"FINAL" if _md_net else "PENDING"},
             {"Section":"Production & Material","Report":"Production Performance","Key Figure":f"{_md_prod_ton:,.2f} T · Waste {_md_waste_ton:,.2f} T","Status":"LIVE" if _md_prod_ton else "NO DATA"},
             {"Section":"Production & Material","Report":"Monthly Reel Consumption","Key Figure":f"Issue {_md_issue:,.2f} T · Return {_md_return:,.2f} T · Consumption {_md_consumption:,.2f} T","Status":"LIVE" if _md_issue or _md_return else "NO DATA"},
