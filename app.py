@@ -7365,8 +7365,17 @@ body:has(.v82-login-root) .v116-brand-sub{
                 unsafe_allow_html=True,
             )
             with st.form("login_form_v82", clear_on_submit=False, border=False):
-                login_username = st.text_input("User ID / Username", placeholder="Enter your user ID or username")
-                login_password = st.text_input("Password", type="password", placeholder="Enter your password")
+                login_username = st.text_input(
+                    "User ID / Username",
+                    placeholder="Enter your user ID or username",
+                    autocomplete="username",
+                )
+                login_password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="Enter your password",
+                    autocomplete="current-password",
+                )
                 login_submit = st.form_submit_button("Sign In  →", type="primary", use_container_width=True)
 
             if login_submit:
@@ -7385,6 +7394,9 @@ body:has(.v82-login-root) .v116-brand-sub{
 
                         st.session_state["auth_user"] = user
                         st.session_state["auth_token"] = _new_token
+                        # Cover the one authenticated rerun so users never see
+                        # Streamlit assembling an unstyled/partial dashboard.
+                        st.session_state["_v188_login_transition"] = True
                         if _new_token:
                             st.query_params["session"] = _new_token
                         else:
@@ -7799,6 +7811,117 @@ body:has(.v82-login-root) .v116-brand-sub{
 
 
 _current_user = st.session_state["auth_user"]
+
+# V18.8 LOGIN -> ERP ATOMIC TRANSITION
+# Streamlit sends page deltas while a rerun is executing. On a large one-file
+# application this can briefly expose raw/unmatched layout before the final CSS
+# nodes arrive. Only the first authenticated rerun is shielded; normal in-app
+# interactions remain instant.
+_v188_transition_active = bool(st.session_state.get("_v188_login_transition", False))
+if _v188_transition_active:
+    st.markdown(
+        f"""
+        <style>
+        .v188-login-transition-overlay{{
+          position:fixed!important;
+          inset:0!important;
+          z-index:2147483000!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          padding:24px!important;
+          background:
+            radial-gradient(circle at 50% 28%,rgba(72,151,238,.16),transparent 34%),
+            linear-gradient(145deg,#06111d 0%,#081827 50%,#06111c 100%)!important;
+          opacity:1!important;
+          visibility:visible!important;
+          pointer-events:all!important;
+          transition:opacity .22s ease,visibility .22s ease!important;
+        }}
+        .v188-login-transition-card{{
+          width:min(430px,92vw)!important;
+          padding:30px 30px 28px!important;
+          border:1px solid rgba(116,181,241,.28)!important;
+          border-radius:22px!important;
+          background:
+            linear-gradient(145deg,rgba(20,46,74,.88),rgba(8,24,40,.94))!important;
+          box-shadow:
+            0 28px 80px rgba(0,0,0,.42),
+            inset 0 1px 0 rgba(255,255,255,.08)!important;
+          backdrop-filter:blur(22px) saturate(130%)!important;
+          -webkit-backdrop-filter:blur(22px) saturate(130%)!important;
+          text-align:center!important;
+        }}
+        .v188-login-transition-logo{{
+          width:58px!important;
+          height:72px!important;
+          object-fit:contain!important;
+          display:block!important;
+          margin:0 auto 16px!important;
+          filter:drop-shadow(0 10px 20px rgba(0,0,0,.28))!important;
+        }}
+        .v188-login-transition-title{{
+          margin:0!important;
+          color:#f7fbff!important;
+          font-size:20px!important;
+          font-weight:900!important;
+          letter-spacing:.25px!important;
+          line-height:1.15!important;
+        }}
+        .v188-login-transition-sub{{
+          margin:8px 0 0!important;
+          color:#93b6d5!important;
+          font-size:11px!important;
+          font-weight:650!important;
+          letter-spacing:.35px!important;
+        }}
+        .v188-login-transition-loader{{
+          width:172px!important;
+          height:4px!important;
+          margin:21px auto 0!important;
+          overflow:hidden!important;
+          border-radius:999px!important;
+          background:rgba(137,187,232,.14)!important;
+          position:relative!important;
+        }}
+        .v188-login-transition-loader:after{{
+          content:""!important;
+          position:absolute!important;
+          top:0!important;
+          left:-45%!important;
+          width:45%!important;
+          height:100%!important;
+          border-radius:999px!important;
+          background:linear-gradient(90deg,#69d6ff,#4f9cff,#6f7cff)!important;
+          box-shadow:0 0 16px rgba(79,156,255,.48)!important;
+          animation:v188-login-load 1.05s cubic-bezier(.4,0,.2,1) infinite!important;
+        }}
+        @keyframes v188-login-load{{
+          0%{{left:-45%}}
+          100%{{left:110%}}
+        }}
+        body:has(.v188-login-transition-ready) .v188-login-transition-overlay{{
+          opacity:0!important;
+          visibility:hidden!important;
+          pointer-events:none!important;
+        }}
+        @media(max-width:540px){{
+          .v188-login-transition-card{{padding:25px 20px 23px!important;border-radius:18px!important}}
+          .v188-login-transition-title{{font-size:18px!important}}
+        }}
+        </style>
+        <div class="v188-login-transition-overlay" aria-live="polite" aria-busy="true">
+          <div class="v188-login-transition-card">
+            <img class="v188-login-transition-logo" src="{LOGO_ICON_DATA_URI}" alt="Reliable Packaging">
+            <div class="v188-login-transition-title">Opening your secure workspace</div>
+            <div class="v188-login-transition-sub">RELIABLE PACKAGING INDUSTRIES LIMITED · SMART WORKFORCE ERP</div>
+            <div class="v188-login-transition-loader"></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # V18.4 LIVE USER IDENTITY SYNC
 # Login/session data is only an authentication snapshot. Display name, role and
@@ -20544,3 +20667,11 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V15.2 MANAGEMENT FINAL PAYROLL SOURCE
 
 # V15.3 MANAGEMENT MONTHLY EXECUTIVE CONTEXT
+
+# V18.8 FINAL RENDER BARRIER
+# This is deliberately last. It releases the login transition shield only after
+# the full authenticated page and every final style layer have been emitted.
+if st.session_state.get("_v188_login_transition", False):
+    st.markdown('<div class="v188-login-transition-ready" aria-hidden="true"></div>', unsafe_allow_html=True)
+    st.session_state["_v188_login_transition"] = False
+
