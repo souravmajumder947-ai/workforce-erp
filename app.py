@@ -16461,20 +16461,232 @@ elif page == "Reports":
                 (first.isoformat(),last.isoformat())
             )
 
+            # Prefer explicit machine headcount. If that has not been entered,
+            # recover machine manpower from individual employee allocations.
+            _manpower_source="Saved Machine Headcount"
             if _hc_raw.empty:
-                report_df=pd.DataFrame()
+                _alloc_raw=read_df(
+                    """SELECT work_date,shift,machine,employee_id
+                       FROM manpower_allocation
+                       WHERE work_date::text BETWEEN ? AND ?
+                       ORDER BY work_date,shift,machine,employee_id""",
+                    (first.isoformat(),last.isoformat())
+                )
+                if not _alloc_raw.empty:
+                    _alloc_raw["work_date"]=_alloc_raw["work_date"].astype(str)
+                    _alloc_raw["shift"]=_alloc_raw["shift"].astype(str)
+                    _alloc_raw["machine"]=_alloc_raw["machine"].astype(str)
+                    _hc_raw=(
+                        _alloc_raw.groupby(["work_date","shift","machine"],as_index=False)
+                        .agg(employee_headcount=("employee_id","nunique"))
+                    )
+                    _hc_raw["contractor_headcount"]=0
+                    _manpower_source="Employee-to-Machine Allocation"
+
+            if _hc_raw.empty:
+                # Final truthful fallback: plant-wide production divided by
+                # actual worked-person equivalents from attendance. This is NOT
+                # presented as machine manpower because no machine allocation exists.
+                _att_fallback=read_df(
+                    """SELECT work_date,shift,employee_id,status
+                       FROM attendance
+                       WHERE work_date::text BETWEEN ? AND ?
+                         AND division='Greater Noida Plant'
+                       ORDER BY work_date,shift,employee_id""",
+                    (first.isoformat(),last.isoformat())
+                )
+
                 if _prod_raw.empty:
+                    report_df=pd.DataFrame()
                     report_note=(
-                        "No manpower headcount or production entries exist for this month. "
-                        "Go to Operations → Manpower Allocation and save Employee / Contractor Headcount "
-                        "for each Date + Shift + Machine, then go to Operations → Production Entry and save "
-                        "the daily machine production."
+                        "No production entries exist for this month. "
+                        "Go to Operations → Production Entry and save the daily machine output."
+                    )
+                elif _att_fallback.empty:
+                    report_df=pd.DataFrame()
+                    report_note=(
+                        "Production exists, but neither machine manpower nor attendance is available. "
+                        "Upload attendance or save Manpower Allocation before calculating Ton / Person."
                     )
                 else:
+                    _manpower_source="Attendance Fallback · Plant Level"
+                    _att_fallback["work_date"]=_att_fallback["work_date"].astype(str)
+                    _att_fallback["shift"]=_att_fallback["shift"].astype(str)
+                    _att_fallback["status"]=_att_fallback["status"].fillna("").astype(str).str.strip()
+
+                    # Worked-person equivalent: Present/OD = 1, Half Day = 0.5.
+                    # Leave, WO, Holiday, Absent, LWP and review rows are not
+                    # counted as productive person-shifts.
+                    _att_factor_map={
+                        "Present":1.0,
+                        "OD":1.0,
+                        "Half Day":0.5,
+                    }
+                    _att_fallback["person_factor"]=_att_fallback["status"].map(
+                        _att_factor_map
+                    ).fillna(0.0)
+
+                    _att_daily=(
+                        _att_fallback.groupby("work_date",as_index=False)
+                        .agg(
+                            employee_person_shifts=("person_factor","sum"),
+                            attendance_rows=("employee_id","count"),
+                        )
+                    )
+                    _att_shift_labels=(
+                        _att_fallback[_att_fallback["person_factor"]>0]
+                        .groupby("work_date")["shift"]
+                        .agg(lambda s:"+".join(sorted(set(str(x) for x in s if str(x)))))
+                        .reset_index(name="shifts_covered")
+                    )
+                    _att_daily=_att_daily.merge(
+                        _att_shift_labels,on="work_date",how="left"
+                    )
+
+                    _prod_raw["work_date"]=_prod_raw["work_date"].astype(str)
+                    _prod_raw["shift"]=_prod_raw["shift"].astype(str)
+                    _prod_raw["machine"]=_prod_raw["machine"].astype(str)
+                    for _pc in ["production_ton","target_ton","good_output_ton"]:
+                        _prod_raw[_pc]=pd.to_numeric(
+                            _prod_raw[_pc],errors="coerce"
+                        ).fillna(0)
+                    _prod_raw["report_production_ton"]=_prod_raw[
+                        "good_output_ton"
+                    ].where(
+                        _prod_raw["good_output_ton"]>0,
+                        _prod_raw["production_ton"],
+                    )
+
+                    # Prefer 24-hour DAY production; use legacy A/B only on dates
+                    # where no DAY row exists for that machine.
+                    _pf_day=_prod_raw[_prod_raw["shift"].str.upper()=="DAY"].copy()
+                    _pf_legacy=_prod_raw[_prod_raw["shift"].str.upper()!="DAY"].copy()
+                    if not _pf_day.empty:
+                        _pf_day_keys=set(zip(
+                            _pf_day["work_date"].astype(str),
+                            _pf_day["machine"].astype(str),
+                        ))
+                        if not _pf_legacy.empty:
+                            _pf_legacy=_pf_legacy[
+                                ~_pf_legacy.apply(
+                                    lambda r:(str(r["work_date"]),str(r["machine"])) in _pf_day_keys,
+                                    axis=1,
+                                )
+                            ]
+                    _pf_use=pd.concat([_pf_day,_pf_legacy],ignore_index=True)
+                    _prod_daily=(
+                        _pf_use.groupby("work_date",as_index=False)
+                        .agg({
+                            "report_production_ton":"sum",
+                            "target_ton":"sum",
+                        })
+                        .rename(columns={"report_production_ton":"production_ton"})
+                    )
+
+                    _plant=_prod_daily.merge(
+                        _att_daily,on="work_date",how="left"
+                    )
+                    _plant["employee_person_shifts"]=pd.to_numeric(
+                        _plant["employee_person_shifts"],errors="coerce"
+                    ).fillna(0)
+                    _plant["production_ton"]=pd.to_numeric(
+                        _plant["production_ton"],errors="coerce"
+                    ).fillna(0)
+                    _plant["target_ton"]=pd.to_numeric(
+                        _plant["target_ton"],errors="coerce"
+                    ).fillna(0)
+
+                    # Daily employee cost from finalized payroll when available;
+                    # otherwise use the live payroll engine.
+                    _month_key_value=_month_key(report_month)
+                    _final_cost=read_df(
+                        """SELECT COALESCE(SUM(total_payable),0) AS employee_cost
+                           FROM payroll_records
+                           WHERE payroll_month=? AND division='Greater Noida Plant'""",
+                        (_month_key_value,)
+                    )
+                    _employee_month_cost=float(
+                        pd.to_numeric(
+                            _final_cost.iloc[0]["employee_cost"],errors="coerce"
+                        ) or 0
+                    ) if not _final_cost.empty else 0.0
+                    if _employee_month_cost<=0:
+                        _live_cost=calculate_live_payroll(
+                            report_month,"Greater Noida Plant"
+                        )
+                        _employee_month_cost=float(
+                            pd.to_numeric(
+                                _live_cost.get("Total Payable",0),errors="coerce"
+                            ).fillna(0).sum()
+                        ) if not _live_cost.empty else 0.0
+                    _daily_employee_cost=(
+                        _employee_month_cost/max(1,(last-first).days+1)
+                    )
+
+                    _contractor_daily=read_df(
+                        """SELECT work_date,COALESCE(SUM(amount),0) AS contractor_cost
+                           FROM contractor_work_entries
+                           WHERE work_date BETWEEN ? AND ?
+                             AND division='Greater Noida Plant'
+                           GROUP BY work_date""",
+                        (first.isoformat(),last.isoformat())
+                    )
+                    _contractor_map={
+                        str(r["work_date"]):float(r["contractor_cost"] or 0)
+                        for _,r in _contractor_daily.iterrows()
+                    } if not _contractor_daily.empty else {}
+
+                    _plant["employee_cost"]=_daily_employee_cost
+                    _plant["contractor_cost"]=_plant["work_date"].map(
+                        _contractor_map
+                    ).fillna(0)
+                    _plant["total_manpower_cost"]=(
+                        _plant["employee_cost"]+_plant["contractor_cost"]
+                    )
+                    _plant["ton_per_person"]=_plant["production_ton"].div(
+                        _plant["employee_person_shifts"].where(
+                            _plant["employee_person_shifts"]>0,1
+                        )
+                    )
+                    _plant["cost_per_person"]=_plant["total_manpower_cost"].div(
+                        _plant["employee_person_shifts"].where(
+                            _plant["employee_person_shifts"]>0,1
+                        )
+                    )
+                    _plant["cost_per_ton"]=_plant["total_manpower_cost"].div(
+                        _plant["production_ton"].where(
+                            _plant["production_ton"]>0,1
+                        )
+                    )
+                    _plant["tonnage_variance"]=(
+                        _plant["production_ton"]-_plant["target_ton"]
+                    )
+
+                    report_df=pd.DataFrame({
+                        "Date":_plant["work_date"],
+                        "Shifts Covered":_plant["shifts_covered"].fillna("Attendance"),
+                        "Machine":"PLANT TOTAL",
+                        "Department":"Greater Noida Plant",
+                        "Manpower Source":_manpower_source,
+                        "Required Person-Shifts":0.0,
+                        "Employee Person-Shifts":_plant["employee_person_shifts"].round(2),
+                        "Contractor Person-Shifts":0.0,
+                        "Actual Person-Shifts":_plant["employee_person_shifts"].round(2),
+                        "Manpower Variance":0.0,
+                        "Production Ton":_plant["production_ton"].round(2),
+                        "Target Ton":_plant["target_ton"].round(2),
+                        "Tonnage Variance":_plant["tonnage_variance"].round(2),
+                        "Employee Cost":_plant["employee_cost"].round(2),
+                        "Contractor Cost":_plant["contractor_cost"].round(2),
+                        "Total Manpower Cost":_plant["total_manpower_cost"].round(2),
+                        "Ton / Person-Shift":_plant["ton_per_person"].round(2),
+                        "Cost / Person-Shift":_plant["cost_per_person"].round(2),
+                        "Cost / Ton":_plant["cost_per_ton"].round(2),
+                    })
                     report_note=(
-                        "Production data exists, but Manpower Allocation headcount is missing. "
-                        "Go to Operations → Manpower Allocation, select the same dates and machines, "
-                        "enter Shift A / B Employee Headcount and Contractor Headcount, then click Save Headcount."
+                        "Machine-wise headcount has not been entered, so this view is using "
+                        "Greater Noida attendance to show plant-level Ton / Present Person-Shift. "
+                        "Enter machine headcount or employee allocations to unlock machine-wise productivity."
                     )
             else:
                 _hc_raw["work_date"]=_hc_raw["work_date"].astype(str)
@@ -16709,6 +16921,7 @@ elif page == "Reports":
                     "Date":_cost_rows["work_date"],
                     "Shifts Covered":_cost_rows["shifts_covered"].fillna(""),
                     "Machine":_cost_rows["machine"],
+                    "Manpower Source":_manpower_source,
                     "Department":_cost_rows["department"].fillna(""),
                     "Required Person-Shifts":_cost_rows["required_headcount"],
                     "Employee Person-Shifts":_cost_rows["employee_headcount"],
@@ -16761,7 +16974,7 @@ elif page == "Reports":
             ("Production",f"{_md_total_ton:,.2f} Ton","Selected month","blue"),
             ("Manpower Cost",v5_money(_md_total_cost),"Employee + contractor",""),
             ("Cost / Ton",v5_money(_md_cost_per_ton),"Management efficiency","good" if _md_total_ton else "warn"),
-            ("Ton / Person-Shift",f"{_md_ton_per_person:,.2f}","Daily output ÷ A+B person-shifts","good" if _md_person_shifts else "warn"),
+            ("Ton / Person-Shift",f"{_md_ton_per_person:,.2f}","Output ÷ worked/allocated person-shifts","good" if _md_person_shifts else "warn"),
             ("Avg Person-Shifts",f"{_md_avg_headcount:,.1f}","Per machine-day",""),
         ])
         _md_machine=(
