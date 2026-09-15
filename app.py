@@ -7340,9 +7340,8 @@ body:has(.v82-login-root) .v116-brand-sub{
                   <div class="v103-right-time"><small>IST · 24H</small><b data-v116-login-clock>{_login_verified_time}</b></div>
                 </div>
 
-                <div class="v90-auth-head v103-auth-head">
-                  <div class="v103-auth-logo"><img src="{LOGO_FULL_DATA_URI}" alt="Reliable Packaging Industries Limited"></div>
-                  <div>
+                <div class="v90-auth-head v103-auth-head v186-single-brand">
+                  <div class="v186-brand-copy">
                     <div class="v90-card-kicker">Smart Workforce ERP</div>
                     <div class="v90-card-title v116-brand-flash">Reliable Packaging</div>
                     <div class="v116-brand-sub">Industries Limited</div>
@@ -7546,6 +7545,52 @@ body:has(.v82-login-root) .v116-brand-sub{
 
         html body:has(.v82-login-root) .v103-footer span+span:before{
           color:#5ba8ff!important;
+        }
+
+        /* V18.6 — one brand only: no duplicated company logo/text. */
+        html body:has(.v82-login-root) .v103-auth-logo{
+          display:none!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand{
+          display:flex!important;
+          align-items:center!important;
+          justify-content:flex-start!important;
+          min-height:118px!important;
+          padding:23px 28px!important;
+          gap:0!important;
+        }
+        html body:has(.v82-login-root) .v186-brand-copy{
+          width:100%!important;
+          display:flex!important;
+          flex-direction:column!important;
+          justify-content:center!important;
+          align-items:flex-start!important;
+          gap:5px!important;
+          margin:0!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand .v90-card-kicker{
+          margin:0 0 2px 0!important;
+          letter-spacing:2.1px!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand .v90-card-title{
+          margin:0!important;
+          line-height:.98!important;
+          font-size:clamp(31px,2.35vw,52px)!important;
+          white-space:nowrap!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand .v116-brand-sub{
+          margin:2px 0 0 0!important;
+          letter-spacing:2.4px!important;
+        }
+        @media(max-width:540px){
+          html body:has(.v82-login-root) .v186-single-brand{
+            min-height:106px!important;
+            padding:20px 22px!important;
+          }
+          html body:has(.v82-login-root) .v186-single-brand .v90-card-title{
+            font-size:clamp(27px,8vw,38px)!important;
+            white-space:normal!important;
+          }
         }
         </style>
         """,
