@@ -7415,6 +7415,142 @@ body:has(.v82-login-root) .v116-brand-sub{
                 """,
                 unsafe_allow_html=True,
             )
+
+    # V18.5 ABSOLUTE FINAL LOGIN THEME
+    # Intentionally rendered after every previous login CSS layer so the
+    # authenticated ERP's navy/blue glass language is the final winner.
+    st.markdown(
+        """
+        <style>
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+          position:relative!important;
+          overflow:hidden!important;
+          border:1px solid rgba(83,151,220,.30)!important;
+          background:
+            radial-gradient(circle at 92% 0%,rgba(66,135,225,.10),transparent 30%),
+            radial-gradient(circle at 6% 100%,rgba(53,213,255,.045),transparent 28%),
+            linear-gradient(155deg,#081827 0%,#071522 55%,#06111e 100%)!important;
+          box-shadow:
+            0 26px 70px rgba(0,0,0,.34),
+            0 0 28px rgba(49,118,205,.045),
+            inset 0 1px 0 rgba(255,255,255,.035)!important;
+        }
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker):before{
+          content:""!important;
+          position:absolute!important;
+          inset:0 auto 0 0!important;
+          width:4px!important;
+          background:linear-gradient(180deg,#73d7ff,#4f9cff 48%,#2f6feb)!important;
+          box-shadow:0 0 22px rgba(79,156,255,.42)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-right-top{
+          border:1px solid rgba(94,149,204,.22)!important;
+          background:linear-gradient(90deg,rgba(7,22,37,.78),rgba(7,19,33,.62))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.03)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-auth-head{
+          position:relative!important;
+          overflow:hidden!important;
+          border:1px solid rgba(91,159,229,.31)!important;
+          background:
+            radial-gradient(circle at 86% 18%,rgba(79,156,255,.17),transparent 31%),
+            radial-gradient(circle at 15% 115%,rgba(53,213,255,.07),transparent 34%),
+            linear-gradient(145deg,#112a44 0%,#0b2035 48%,#081725 100%)!important;
+          box-shadow:
+            0 17px 38px rgba(0,0,0,.25),
+            inset 0 1px 0 rgba(255,255,255,.055)!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-head:before{
+          display:none!important;
+          content:none!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-head:after{
+          content:""!important;
+          position:absolute!important;
+          left:0!important;top:0!important;bottom:0!important;width:4px!important;
+          background:linear-gradient(180deg,#6fd6ff,#4f9cff,#315fd2)!important;
+          box-shadow:0 0 20px rgba(79,156,255,.34)!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-logo{
+          border:1px solid rgba(105,174,238,.32)!important;
+          box-shadow:0 10px 24px rgba(47,111,235,.10)!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-head .v90-card-kicker{
+          color:#7fd2ff!important;
+        }
+        html body:has(.v82-login-root) .v116-brand-flash{
+          color:#f8fbff!important;
+          text-shadow:
+            0 0 8px rgba(255,255,255,.16),
+            0 0 20px rgba(82,166,255,.24)!important;
+        }
+        html body:has(.v82-login-root) .v116-brand-sub{
+          color:#8fcaff!important;
+          text-shadow:0 0 12px rgba(80,166,255,.16)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-company-block{
+          border:1px solid rgba(82,149,216,.22)!important;
+          border-left:4px solid #4f9cff!important;
+          background:
+            linear-gradient(90deg,rgba(31,75,119,.31),rgba(9,25,42,.84))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.028)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-status-grid .v90-status{
+          background:linear-gradient(145deg,#0a1d30,#081624)!important;
+          border:1px solid rgba(80,140,199,.20)!important;
+          box-shadow:0 10px 24px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.025)!important;
+        }
+        html body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(1){
+          border-top:3px solid #39d99f!important;
+        }
+        html body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(2){
+          border-top:3px solid #5ba8ff!important;
+        }
+        html body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){
+          border-top:3px solid #8f6bff!important;
+        }
+
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input{
+          background:#0b1a2b!important;
+          border:1px solid rgba(79,137,194,.36)!important;
+          color:#f6fbff!important;
+        }
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input:focus{
+          border-color:#5ba8ff!important;
+          box-shadow:0 0 0 3px rgba(79,156,255,.11)!important;
+        }
+
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker)
+        button[kind="primaryFormSubmit"]{
+          background:linear-gradient(100deg,#245aaa 0%,#3f84e6 50%,#58a7ff 100%)!important;
+          border:1px solid rgba(137,199,255,.66)!important;
+          box-shadow:
+            0 12px 28px rgba(42,107,190,.24),
+            inset 0 1px 0 rgba(255,255,255,.16)!important;
+        }
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker)
+        button[kind="primaryFormSubmit"]:hover{
+          filter:brightness(1.06)!important;
+          box-shadow:0 16px 34px rgba(42,107,190,.30)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-footer span+span:before{
+          color:#5ba8ff!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 
