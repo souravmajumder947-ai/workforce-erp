@@ -16780,17 +16780,62 @@ elif page == "Reports":
     elif report_type=="Production Performance":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
+            report_note="Production Performance is currently configured for Greater Noida Plant."
         else:
-            report_df=read_df("""SELECT p.work_date AS "Date",p.shift AS "Shift",p.machine AS "Machine",m.department AS "Department",
-                                       m.target_type AS "Target Type",p.good_output_ton AS "Good Output Ton",
-                                       p.target_ton AS "Fixed Target Ton",p.opening_wip_ton AS "Opening WIP",
-                                       p.material_received_ton AS "Material Received",p.material_available_ton AS "Material Available",
-                                       p.material_processed_ton AS "Material Processed",p.closing_wip_ton AS "Closing WIP",
-                                       p.waste_ton AS "Waste Ton",p.conversion_pct AS "Conversion %",
-                                       p.yield_pct AS "Yield %",p.waste_pct AS "Waste %",
-                                       p.breakdown_hours AS "Breakdown Hours",p.remark AS "Remark"
-                                FROM production p LEFT JOIN machines m ON m.machine=p.machine
-                                WHERE p.work_date BETWEEN ? AND ? ORDER BY p.work_date,p.shift,p.machine""",(first.isoformat(),last.isoformat()))
+            # V19.3 PRODUCTION PERFORMANCE REPORT HARDENING
+            # Do not place a literal % sign inside a psycopg2 SQL string that also
+            # contains bound parameters. Use neutral SQL aliases, then rename in
+            # pandas for the user-facing report.
+            try:
+                report_df=read_df(
+                    """SELECT p.work_date AS "Date",
+                              p.shift AS "Shift",
+                              p.machine AS "Machine",
+                              COALESCE(m.department,'') AS "Department",
+                              COALESCE(m.target_type,'') AS "Target Type",
+                              COALESCE(p.good_output_ton,p.production_ton,0) AS "Good Output Ton",
+                              COALESCE(p.target_ton,0) AS "Fixed Target Ton",
+                              COALESCE(p.opening_wip_ton,0) AS "Opening WIP",
+                              COALESCE(p.material_received_ton,0) AS "Material Received",
+                              COALESCE(p.material_available_ton,0) AS "Material Available",
+                              COALESCE(p.material_processed_ton,0) AS "Material Processed",
+                              COALESCE(p.closing_wip_ton,0) AS "Closing WIP",
+                              COALESCE(p.waste_ton,0) AS "Waste Ton",
+                              COALESCE(p.conversion_pct,0) AS "Conversion Pct",
+                              COALESCE(p.yield_pct,0) AS "Yield Pct",
+                              COALESCE(p.waste_pct,0) AS "Waste Pct",
+                              COALESCE(p.breakdown_hours,0) AS "Breakdown Hours",
+                              COALESCE(p.remark,'') AS "Remark"
+                       FROM production p
+                       LEFT JOIN machines m ON m.machine=p.machine
+                       WHERE p.work_date::text BETWEEN ? AND ?
+                       ORDER BY p.work_date,p.shift,p.machine""",
+                    (first.isoformat(),last.isoformat()),
+                )
+                if not report_df.empty:
+                    report_df=report_df.rename(columns={
+                        "Conversion Pct":"Conversion %",
+                        "Yield Pct":"Yield %",
+                        "Waste Pct":"Waste %",
+                    })
+                    for _v193_col in [
+                        "Good Output Ton","Fixed Target Ton","Opening WIP",
+                        "Material Received","Material Available","Material Processed",
+                        "Closing WIP","Waste Ton","Conversion %","Yield %",
+                        "Waste %","Breakdown Hours",
+                    ]:
+                        if _v193_col in report_df.columns:
+                            report_df[_v193_col]=pd.to_numeric(
+                                report_df[_v193_col],errors="coerce"
+                            ).fillna(0).round(2)
+            except Exception:
+                # Keep Report Center usable even if a legacy production schema
+                # has not finished migrating yet.
+                report_df=pd.DataFrame()
+                report_note=(
+                    "Production Performance could not be loaded from the current production table. "
+                    "The rest of Report Center remains available. Please refresh once after deployment."
+                )
     elif report_type=="Reel Consumption - Monthly":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
