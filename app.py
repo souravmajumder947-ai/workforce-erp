@@ -7345,7 +7345,7 @@ body:has(.v82-login-root) .v116-brand-sub{
                   <div class="v187-brand-rule"></div>
                   <div class="v187-brand-copy">
                     <div class="v187-brand-kicker">SMART WORKFORCE ERP</div>
-                    <div class="v187-brand-name">RELIABLE PACKAGING</div>
+                    <div class="v187-brand-name"><span class="v188-brand-reliable">RELIABLE</span><span class="v188-brand-packaging">PACKAGING</span></div>
                     <div class="v187-brand-company">INDUSTRIES LIMITED</div>
                   </div>
                 </div>
@@ -7594,69 +7594,202 @@ body:has(.v82-login-root) .v116-brand-sub{
             white-space:normal!important;
           }
         }
+        /* V18.8 — premium single-company wordmark. One emblem + one company identity. */
+        html body:has(.v82-login-root) .v103-auth-logo,
+        html body:has(.v82-login-root) .v186-single-brand{
+          display:none!important;
+        }
         html body:has(.v82-login-root) .v187-premium-brand{
+          position:relative!important;
+          isolation:isolate!important;
+          overflow:hidden!important;
           display:grid!important;
-          grid-template-columns:64px 1px minmax(0,1fr)!important;
+          grid-template-columns:68px 1px minmax(0,1fr)!important;
           align-items:center!important;
-          gap:18px!important;
-          min-height:132px!important;
-          padding:22px 28px!important;
-          border:1px solid rgba(100,170,238,.34)!important;
-          border-radius:18px!important;
-          background:linear-gradient(145deg,#112a44 0%,#0b2035 50%,#081725 100%)!important;
-          box-shadow:0 18px 42px rgba(0,0,0,.27),inset 0 1px 0 rgba(255,255,255,.06)!important;
+          gap:20px!important;
+          min-height:136px!important;
+          margin:8px 0 16px!important;
+          padding:23px 28px!important;
+          border:1px solid rgba(117,183,244,.34)!important;
+          border-radius:20px!important;
+          background:
+            radial-gradient(circle at 88% 6%,rgba(92,166,255,.17),transparent 34%),
+            radial-gradient(circle at 8% 110%,rgba(62,211,255,.08),transparent 35%),
+            linear-gradient(145deg,#112b45 0%,#0a2035 52%,#071522 100%)!important;
+          box-shadow:
+            0 24px 58px rgba(0,0,0,.32),
+            0 0 0 1px rgba(104,175,240,.035),
+            inset 0 1px 0 rgba(255,255,255,.075)!important;
+        }
+        html body:has(.v82-login-root) .v187-premium-brand:before{
+          display:block!important;
+          content:""!important;
+          position:absolute!important;
+          z-index:-1!important;
+          left:14%!important;
+          right:-8%!important;
+          top:-62%!important;
+          height:105%!important;
+          transform:rotate(-7deg)!important;
+          background:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,0))!important;
+          pointer-events:none!important;
         }
         html body:has(.v82-login-root) .v187-premium-brand:after{
           content:""!important;
           position:absolute!important;
-          left:0!important;top:0!important;bottom:0!important;width:4px!important;
-          background:linear-gradient(180deg,#78dcff,#4f9cff,#315fd2)!important;
+          z-index:3!important;
+          left:0!important;
+          top:15px!important;
+          bottom:15px!important;
+          width:4px!important;
+          border-radius:0 8px 8px 0!important;
+          background:linear-gradient(180deg,#86e4ff 0%,#4f9cff 48%,#335ed0 100%)!important;
+          box-shadow:0 0 22px rgba(79,156,255,.40)!important;
         }
         html body:has(.v82-login-root) .v187-emblem-box{
-          width:64px!important;height:72px!important;
-          display:grid!important;place-items:center!important;
-          border-radius:16px!important;
-          background:rgba(255,255,255,.055)!important;
-          border:1px solid rgba(162,211,255,.22)!important;
-          box-shadow:0 12px 26px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.07)!important;
+          position:relative!important;
+          z-index:2!important;
+          width:68px!important;
+          height:76px!important;
+          display:grid!important;
+          place-items:center!important;
+          border-radius:18px!important;
+          background:linear-gradient(145deg,rgba(255,255,255,.09),rgba(255,255,255,.025))!important;
+          border:1px solid rgba(162,211,255,.25)!important;
+          box-shadow:
+            0 14px 30px rgba(0,0,0,.24),
+            inset 0 1px 0 rgba(255,255,255,.10),
+            0 0 28px rgba(73,149,234,.07)!important;
+          backdrop-filter:blur(12px)!important;
         }
         html body:has(.v82-login-root) .v187-emblem-box img{
-          width:34px!important;height:58px!important;object-fit:contain!important;
+          display:block!important;
+          width:38px!important;
+          height:62px!important;
+          object-fit:contain!important;
+          filter:drop-shadow(0 6px 12px rgba(0,0,0,.24))!important;
         }
         html body:has(.v82-login-root) .v187-brand-rule{
-          width:1px!important;height:68px!important;
-          background:linear-gradient(180deg,transparent,rgba(128,192,255,.34),transparent)!important;
+          position:relative!important;
+          z-index:2!important;
+          width:1px!important;
+          height:70px!important;
+          background:linear-gradient(180deg,transparent,rgba(150,208,255,.42),transparent)!important;
         }
         html body:has(.v82-login-root) .v187-brand-copy{
-          display:flex!important;flex-direction:column!important;
-          align-items:flex-start!important;justify-content:center!important;gap:5px!important;
+          position:relative!important;
+          z-index:2!important;
+          min-width:0!important;
+          display:flex!important;
+          flex-direction:column!important;
+          align-items:flex-start!important;
+          justify-content:center!important;
+          gap:5px!important;
         }
         html body:has(.v82-login-root) .v187-brand-kicker{
-          color:#76d0ff!important;font-size:11px!important;font-weight:950!important;
-          letter-spacing:2.5px!important;line-height:1!important;
+          display:inline-flex!important;
+          align-items:center!important;
+          min-height:23px!important;
+          margin:0 0 2px 0!important;
+          padding:0 9px!important;
+          border:1px solid rgba(118,208,255,.22)!important;
+          border-radius:999px!important;
+          background:rgba(74,153,231,.085)!important;
+          color:#8bdcff!important;
+          font-size:10px!important;
+          font-weight:900!important;
+          letter-spacing:2.15px!important;
+          line-height:1!important;
+          white-space:nowrap!important;
         }
         html body:has(.v82-login-root) .v187-brand-name{
-          color:#ffffff!important;font-size:clamp(30px,2.25vw,48px)!important;
-          font-weight:950!important;letter-spacing:.8px!important;line-height:.96!important;
-          white-space:nowrap!important;
-          text-shadow:0 0 18px rgba(81,166,255,.18)!important;
+          display:flex!important;
+          align-items:baseline!important;
+          flex-wrap:wrap!important;
+          column-gap:10px!important;
+          row-gap:2px!important;
+          margin:0!important;
+          color:#f8fbff!important;
+          font-size:clamp(31px,2.32vw,49px)!important;
+          font-weight:950!important;
+          letter-spacing:.45px!important;
+          line-height:.94!important;
+          text-transform:uppercase!important;
+          text-shadow:0 8px 30px rgba(0,0,0,.20)!important;
+        }
+        html body:has(.v82-login-root) .v188-brand-reliable{
+          color:#ffffff!important;
+        }
+        html body:has(.v82-login-root) .v188-brand-packaging{
+          background:linear-gradient(180deg,#f7fbff 0%,#cfe8ff 100%)!important;
+          -webkit-background-clip:text!important;
+          background-clip:text!important;
+          -webkit-text-fill-color:transparent!important;
+          color:#d7ecff!important;
         }
         html body:has(.v82-login-root) .v187-brand-company{
-          color:#a8d8ff!important;font-size:clamp(11px,.78vw,15px)!important;
-          font-weight:900!important;letter-spacing:4px!important;line-height:1!important;
+          margin:2px 0 0 1px!important;
+          color:#9ed4ff!important;
+          font-size:clamp(10px,.76vw,14px)!important;
+          font-weight:850!important;
+          letter-spacing:4.1px!important;
+          line-height:1!important;
           white-space:nowrap!important;
+          text-transform:uppercase!important;
+        }
+        @media(max-width:760px){
+          html body:has(.v82-login-root) .v187-premium-brand{
+            grid-template-columns:54px 1px minmax(0,1fr)!important;
+            gap:14px!important;
+            min-height:118px!important;
+            padding:19px 20px!important;
+            border-radius:17px!important;
+          }
+          html body:has(.v82-login-root) .v187-emblem-box{
+            width:54px!important;height:62px!important;border-radius:15px!important;
+          }
+          html body:has(.v82-login-root) .v187-emblem-box img{
+            width:30px!important;height:50px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-rule{height:56px!important}
+          html body:has(.v82-login-root) .v187-brand-name{
+            font-size:clamp(25px,5.6vw,36px)!important;
+            column-gap:8px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-company{
+            font-size:10px!important;letter-spacing:2.8px!important;
+          }
         }
         @media(max-width:540px){
           html body:has(.v82-login-root) .v187-premium-brand{
-            grid-template-columns:44px minmax(0,1fr)!important;
-            gap:12px!important;padding:18px!important;min-height:112px!important;
+            grid-template-columns:48px minmax(0,1fr)!important;
+            gap:12px!important;
+            padding:17px 16px!important;
+            min-height:106px!important;
           }
           html body:has(.v82-login-root) .v187-brand-rule{display:none!important}
-          html body:has(.v82-login-root) .v187-emblem-box{width:44px!important;height:54px!important}
-          html body:has(.v82-login-root) .v187-emblem-box img{width:25px!important;height:44px!important}
-          html body:has(.v82-login-root) .v187-brand-kicker{font-size:8px!important;letter-spacing:1.5px!important}
-          html body:has(.v82-login-root) .v187-brand-name{font-size:clamp(22px,6.8vw,32px)!important;white-space:normal!important}
-          html body:has(.v82-login-root) .v187-brand-company{font-size:9px!important;letter-spacing:2px!important}
+          html body:has(.v82-login-root) .v187-emblem-box{
+            width:48px!important;height:56px!important;border-radius:14px!important;
+          }
+          html body:has(.v82-login-root) .v187-emblem-box img{
+            width:27px!important;height:44px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-kicker{
+            min-height:20px!important;
+            padding:0 7px!important;
+            font-size:7.5px!important;
+            letter-spacing:1.35px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-name{
+            font-size:clamp(21px,6.7vw,31px)!important;
+            column-gap:6px!important;
+            line-height:.98!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-company{
+            font-size:8.5px!important;
+            letter-spacing:1.8px!important;
+            white-space:normal!important;
+          }
         }
         </style>
         """,
