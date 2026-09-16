@@ -18034,8 +18034,8 @@ elif page == "Activity Monitor":
             """SELECT a.audit_id,a.actor,a.action,a.module,a.entity_type,a.entity_id,
                       a.details,
                       CASE
-                          WHEN UPPER(COALESCE(a.action,'')) LIKE '%FAILED%'
-                            OR UPPER(COALESCE(a.action,'')) LIKE '%BLOCKED%'
+                          WHEN POSITION('FAILED' IN UPPER(COALESCE(a.action,''))) > 0
+                            OR POSITION('BLOCKED' IN UPPER(COALESCE(a.action,''))) > 0
                           THEN 'FAILED'
                           ELSE 'SUCCESS'
                       END AS status,
