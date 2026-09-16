@@ -1443,14 +1443,24 @@ def migrate_postgres():
                 entity_type TEXT,
                 entity_id TEXT,
                 details TEXT,
+                status TEXT NOT NULL DEFAULT 'SUCCESS',
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cur.execute(
+            "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'SUCCESS'"
+        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_log_module ON audit_log(module)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)"
         )
         cur.execute("""
             CREATE TABLE IF NOT EXISTS machine_shift_targets(
@@ -2114,13 +2124,26 @@ def verify_user_password(password, stored_hash):
 
 
 # V10.7 PRODUCTION GO-LIVE HARDENING
-def record_audit_event(actor, action, module, entity_type="", entity_id="", details=""):
-    """Best-effort business audit. Audit logging must never break the user's action."""
+def record_audit_event(
+    actor, action, module, entity_type="", entity_id="", details="", status="SUCCESS"
+):
+    """Best-effort business audit without passwords, hashes or session tokens."""
     try:
+        _audit_details=str(details or "")[:4000]
+        # Never persist credential/session material if a future caller accidentally
+        # includes it in free-form details.
+        _audit_lower=_audit_details.lower()
+        if any(
+            marker in _audit_lower
+            for marker in ["password_hash", "token_hash", "session_token", "auth_token"]
+        ):
+            _audit_details="[Sensitive credential/session detail suppressed]"
         upsert(
             """
-            INSERT INTO audit_log(actor, action, module, entity_type, entity_id, details)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO audit_log(
+                actor, action, module, entity_type, entity_id, details, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(actor or "system"),
@@ -2128,10 +2151,12 @@ def record_audit_event(actor, action, module, entity_type="", entity_id="", deta
                 str(module or ""),
                 str(entity_type or ""),
                 str(entity_id or ""),
-                str(details or "")[:4000],
+                _audit_details,
+                str(status or "SUCCESS").upper()[:20],
             ),
         )
     except Exception:
+        # Audit failure must never block the underlying business operation.
         pass
 
 
@@ -7382,6 +7407,16 @@ body:has(.v82-login-root) .v116-brand-sub{
                 try:
                     user = authenticate_app_user(login_username, login_password)
                     if user is None:
+                        _failed_actor=str(login_username or "").strip().lower() or "unknown"
+                        record_audit_event(
+                            _failed_actor,
+                            "LOGIN_FAILED",
+                            "Authentication",
+                            "User",
+                            _failed_actor,
+                            "Invalid credentials or inactive account",
+                            status="FAILED",
+                        )
                         st.error("Invalid username/password or inactive user.")
                     else:
                         try:
@@ -9184,6 +9219,7 @@ V5_MODULE_BACKEND = {
     "AI Tools": {"Dashboard"},
     "Master Centre": {"Settings"},
     "User Management": {"Settings"},
+    "Activity Monitor": {"Settings"},
 }
 V5_ASSIGNABLE_MODULES = [
     "Employees","Attendance","Payroll","Contractors","Operations","Reports"
@@ -9199,12 +9235,13 @@ V5_NAV_ICONS = {
     "AI Tools":"✦",
     "Master Centre":"🗂",
     "User Management":"⚙",
+    "Activity Monitor":"◉",
 }
 
 def v5_module_allowed(module):
     if module in {"Home", "AI Tools"}:
         return True
-    if module in {"Master Centre", "User Management"}:
+    if module in {"Master Centre", "User Management", "Activity Monitor"}:
         return _current_role in FULL_CONTROL_ROLES
     required = V5_MODULE_BACKEND.get(module, set())
     if _current_role in FULL_CONTROL_ROLES:
@@ -10346,7 +10383,7 @@ st.sidebar.markdown(
 available_modules = [
     m for m in [
         "Home","Employees","Attendance","Payroll","Contractors",
-        "Operations","Reports","AI Tools","Master Centre","User Management"
+        "Operations","Reports","AI Tools","Activity Monitor","Master Centre","User Management"
     ] if v5_module_allowed(m)
 ]
 
@@ -10398,6 +10435,26 @@ global_payroll_month = st.sidebar.selectbox(
     key="v5_global_payroll_month",
 )
 
+# V19.4 USER ACTIVITY TRACKING
+# Log navigation only when page/context actually changes, not on every Streamlit rerun.
+_v194_nav_signature=(
+    f"{page}|{global_division}|"
+    f"{global_payroll_month.strftime('%Y-%m') if global_payroll_month else ''}"
+)
+if st.session_state.get("_v194_last_nav_signature") != _v194_nav_signature:
+    record_audit_event(
+        _current_user["username"],
+        "PAGE_VIEW",
+        page,
+        "Page",
+        page,
+        (
+            f"Role={_current_role}; Division={global_division}; "
+            f"Month={global_payroll_month.strftime('%Y-%m')}"
+        ),
+    )
+    st.session_state["_v194_last_nav_signature"]=_v194_nav_signature
+
 # Sidebar intentionally kept compact: navigation and live context only.
 
 st.sidebar.markdown(
@@ -10416,6 +10473,14 @@ st.sidebar.markdown(
 )
 
 if st.sidebar.button("Sign out", use_container_width=True, key="v5_logout"):
+    record_audit_event(
+        _current_user["username"],
+        "LOGOUT",
+        "Authentication",
+        "User",
+        _current_user["username"],
+        f"LastPage={page}",
+    )
     _logout_token = st.session_state.get("auth_token") or st.query_params.get("session")
     if isinstance(_logout_token, list):
         _logout_token = _logout_token[0] if _logout_token else None
@@ -16675,6 +16740,20 @@ elif page == "Reports":
     report_title=report_type
     report_note=""
 
+    _v194_report_signature=(
+        f"{report_type}|{report_div}|{report_month.strftime('%Y-%m')}"
+    )
+    if st.session_state.get("_v194_last_report_signature") != _v194_report_signature:
+        record_audit_event(
+            _current_user["username"],
+            "REPORT_VIEW",
+            "Reports",
+            "Report",
+            report_type,
+            f"Division={report_div}; Month={report_month.strftime('%Y-%m')}",
+        )
+        st.session_state["_v194_last_report_signature"]=_v194_report_signature
+
     if report_type=="MD Executive Overview":
         # Lightweight management snapshot: aggregates only, not every detail table.
         _md_active=v5_active_employees(report_div)
@@ -17578,12 +17657,21 @@ elif page == "Reports":
             height=min(620, max(260, 38 * min(len(report_df) + 1, 16))),
         )
         report_bytes=make_excel_report(report_df,report_title,f"{report_div} | {report_month.strftime('%b %Y')}")
-        st.download_button(
+        _v194_report_downloaded=st.download_button(
             "Download Excel Report",data=report_bytes,
             file_name=f"{report_type.replace('/','-').replace(' ','_')}_{report_month.strftime('%Y_%m')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",use_container_width=True
         )
+        if _v194_report_downloaded:
+            record_audit_event(
+                _current_user["username"],
+                "REPORT_DOWNLOAD",
+                "Reports",
+                "Report",
+                report_type,
+                f"Division={report_div}; Month={report_month.strftime('%Y-%m')}; Rows={len(report_df)}",
+            )
 
 # ============================================================
 # ADMINISTRATION — USERS / RULES / MASTER SETTINGS
@@ -17886,6 +17974,330 @@ elif page == "AI Tools":
         if "Payroll" in available_modules and _v96_a3.button("Check Payroll", use_container_width=True, key="v96_auto_pay"):
             st.session_state["_v83_nav_request"] = "Payroll"
             st.rerun()
+
+# ============================================================
+# USER ACTIVITY MONITOR — OWNER / ADMIN AUDIT CONTROL
+# ============================================================
+elif page == "Activity Monitor":
+    st.markdown('<div class="v194-activity-monitor-page"></div>', unsafe_allow_html=True)
+    v5_page_header(
+        "User Activity Monitor",
+        "See who accessed the ERP, which modules they opened, and which controlled business actions they performed."
+    )
+
+    if _current_role not in FULL_CONTROL_ROLES:
+        st.warning("User Activity Monitor is restricted to Owner / Admin.")
+    else:
+        st.caption(
+            "Tracks ERP activity only. Passwords, password hashes and session tokens are never displayed or exported."
+        )
+
+        _v194_today=datetime.now(IST).date()
+        _v194_default_start=_v194_today-timedelta(days=6)
+        _v194_f1,_v194_f2,_v194_f3,_v194_f4=st.columns([1,1,1.25,1.25],gap="small")
+        _v194_start=_v194_f1.date_input(
+            "From Date",
+            value=_v194_default_start,
+            format="DD/MM/YYYY",
+            key="v194_activity_start",
+        )
+        _v194_end=_v194_f2.date_input(
+            "To Date",
+            value=_v194_today,
+            format="DD/MM/YYYY",
+            key="v194_activity_end",
+        )
+        if _v194_start>_v194_end:
+            _v194_start,_v194_end=_v194_end,_v194_start
+
+        # Fetch one extra day at both ends; exact IST date filtering happens in pandas.
+        _v194_raw=read_df(
+            """SELECT a.audit_id,a.actor,a.action,a.module,a.entity_type,a.entity_id,
+                      a.details,COALESCE(a.status,'SUCCESS') AS status,a.created_at,
+                      u.full_name,u.role
+               FROM audit_log a
+               LEFT JOIN app_users u ON LOWER(u.username)=LOWER(a.actor)
+               WHERE a.created_at >= (?::date - INTERVAL '1 day')
+                 AND a.created_at <  (?::date + INTERVAL '2 day')
+               ORDER BY a.created_at DESC
+               LIMIT 5000""",
+            (_v194_start.isoformat(),_v194_end.isoformat()),
+        )
+
+        if not _v194_raw.empty:
+            _v194_raw["Time IST"]=_v194_raw["created_at"].apply(_to_ist_display)
+            _v194_raw["_ist_date"]=pd.to_datetime(
+                _v194_raw["Time IST"],errors="coerce"
+            ).dt.date
+            _v194_raw=_v194_raw[
+                (_v194_raw["_ist_date"]>=_v194_start)
+                & (_v194_raw["_ist_date"]<=_v194_end)
+            ].copy()
+
+        _v194_actor_options=["All Users"]+(
+            sorted(_v194_raw["actor"].dropna().astype(str).unique().tolist())
+            if not _v194_raw.empty else []
+        )
+        _v194_module_options=["All Modules"]+(
+            sorted(_v194_raw["module"].dropna().astype(str).unique().tolist())
+            if not _v194_raw.empty else []
+        )
+        _v194_actor=_v194_f3.selectbox(
+            "User",_v194_actor_options,key="v194_activity_actor"
+        )
+        _v194_module=_v194_f4.selectbox(
+            "Module",_v194_module_options,key="v194_activity_module"
+        )
+
+        _v194_a1,_v194_a2=st.columns([1.2,2],gap="small")
+        _v194_action_options=["All Actions"]+(
+            sorted(_v194_raw["action"].dropna().astype(str).unique().tolist())
+            if not _v194_raw.empty else []
+        )
+        _v194_action=_v194_a1.selectbox(
+            "Action",_v194_action_options,key="v194_activity_action"
+        )
+        _v194_search=_v194_a2.text_input(
+            "Search activity",
+            placeholder="Search record, report, employee, machine, details...",
+            key="v194_activity_search",
+        ).strip()
+
+        _v194_view=_v194_raw.copy()
+        if not _v194_view.empty:
+            if _v194_actor!="All Users":
+                _v194_view=_v194_view[
+                    _v194_view["actor"].astype(str)==str(_v194_actor)
+                ]
+            if _v194_module!="All Modules":
+                _v194_view=_v194_view[
+                    _v194_view["module"].astype(str)==str(_v194_module)
+                ]
+            if _v194_action!="All Actions":
+                _v194_view=_v194_view[
+                    _v194_view["action"].astype(str)==str(_v194_action)
+                ]
+            if _v194_search:
+                _v194_search_lower=_v194_search.lower()
+                _v194_search_blob=(
+                    _v194_view[
+                        ["actor","action","module","entity_type","entity_id","details"]
+                    ]
+                    .fillna("")
+                    .astype(str)
+                    .agg(" ".join,axis=1)
+                    .str.lower()
+                )
+                _v194_view=_v194_view[
+                    _v194_search_blob.str.contains(
+                        _v194_search_lower,regex=False,na=False
+                    )
+                ]
+
+        def _v194_category(action):
+            _a=str(action or "").upper()
+            if _a in {"LOGIN_SUCCESS","LOGIN_FAILED","LOGOUT"}:
+                return "Authentication"
+            if _a=="PAGE_VIEW":
+                return "Navigation"
+            if "REPORT" in _a:
+                return "Reporting"
+            if "DOWNLOAD" in _a or "EXPORT" in _a or "BACKUP" in _a:
+                return "Download / Backup"
+            if "IMPORT" in _a or "UPLOAD" in _a:
+                return "Import"
+            if any(x in _a for x in [
+                "CREATE","UPDATE","SAVE","DELETE","RESET","FINAL",
+                "APPROVE","ACTIVATE","DEACTIVATE","CORRECTION","RESOLVE"
+            ]):
+                return "Data Change"
+            return "System / Other"
+
+        if not _v194_view.empty:
+            _v194_view["Category"]=_v194_view["action"].map(_v194_category)
+            _v194_actions_upper=_v194_view["action"].fillna("").astype(str).str.upper()
+            _v194_status_upper=_v194_view["status"].fillna("SUCCESS").astype(str).str.upper()
+            _v194_total=len(_v194_view)
+            _v194_users=int(_v194_view["actor"].astype(str).nunique())
+            _v194_logins=int((_v194_actions_upper=="LOGIN_SUCCESS").sum())
+            _v194_failed=int(
+                ((_v194_actions_upper=="LOGIN_FAILED")|(_v194_status_upper=="FAILED")).sum()
+            )
+            _v194_changes=int((_v194_view["Category"]=="Data Change").sum())
+            _v194_downloads=int((_v194_view["Category"]=="Download / Backup").sum())
+        else:
+            _v194_total=_v194_users=_v194_logins=_v194_failed=_v194_changes=_v194_downloads=0
+
+        try:
+            _v194_sessions=read_df(
+                """SELECT COUNT(*) AS c
+                   FROM app_sessions
+                   WHERE expires_at>CURRENT_TIMESTAMP"""
+            )
+            _v194_active_sessions=int(
+                _v194_sessions.iloc[0]["c"]
+            ) if not _v194_sessions.empty else 0
+        except Exception:
+            _v194_active_sessions=0
+
+        v5_kpis([
+            ("Events",f"{_v194_total:,}","Filtered audit activity","blue"),
+            ("Users",f"{_v194_users:,}","Users in selected activity",""),
+            ("Successful Logins",f"{_v194_logins:,}","Selected period","good"),
+            ("Data Changes",f"{_v194_changes:,}","Create · edit · delete · save",""),
+            ("Failed / Blocked",f"{_v194_failed:,}","Failed login / recorded failure","warn" if _v194_failed else "good"),
+            ("Valid Sessions",f"{_v194_active_sessions:,}","Unexpired login sessions",""),
+        ])
+
+        if _v194_view.empty:
+            st.info("No audit activity matches the selected filters.")
+        else:
+            _v194_user_summary=(
+                _v194_view.groupby("actor",as_index=False)
+                .agg(
+                    Events=("audit_id","count"),
+                    Last_Activity=("Time IST","max"),
+                )
+                .sort_values(["Events","Last_Activity"],ascending=[False,False])
+                .head(12)
+            )
+            _v194_module_summary=(
+                _v194_view.groupby("module",as_index=False)
+                .agg(Events=("audit_id","count"))
+                .sort_values("Events",ascending=False)
+                .head(12)
+            )
+
+            _v194_left,_v194_right=st.columns(2,gap="medium")
+            with _v194_left:
+                st.markdown("#### Activity by User")
+                _v194_user_chart=(
+                    alt.Chart(_v194_user_summary)
+                    .mark_bar(cornerRadiusTopRight=4,cornerRadiusBottomRight=4)
+                    .encode(
+                        y=alt.Y("actor:N",sort="-x",title=None),
+                        x=alt.X("Events:Q",title="Events"),
+                        tooltip=[
+                            alt.Tooltip("actor:N",title="User"),
+                            alt.Tooltip("Events:Q",title="Events"),
+                        ],
+                    )
+                    .properties(height=max(200,min(360,30*len(_v194_user_summary))))
+                )
+                st.altair_chart(_v194_user_chart,use_container_width=True)
+
+            with _v194_right:
+                st.markdown("#### Activity by Module")
+                _v194_module_chart=(
+                    alt.Chart(_v194_module_summary)
+                    .mark_bar(cornerRadiusTopRight=4,cornerRadiusBottomRight=4)
+                    .encode(
+                        y=alt.Y("module:N",sort="-x",title=None),
+                        x=alt.X("Events:Q",title="Events"),
+                        tooltip=[
+                            alt.Tooltip("module:N",title="Module"),
+                            alt.Tooltip("Events:Q",title="Events"),
+                        ],
+                    )
+                    .properties(height=max(200,min(360,30*len(_v194_module_summary))))
+                )
+                st.altair_chart(_v194_module_chart,use_container_width=True)
+
+            _v194_table=_v194_view.copy()
+            _v194_table["Time IST"]=pd.to_datetime(
+                _v194_table["Time IST"],errors="coerce"
+            ).dt.strftime("%d %b %Y · %H:%M:%S")
+            _v194_table["User"]=_v194_table.apply(
+                lambda r:(
+                    f"{str(r.get('full_name') or '').strip()} (@{str(r.get('actor') or '').strip()})"
+                    if str(r.get("full_name") or "").strip()
+                    else str(r.get("actor") or "")
+                ),
+                axis=1,
+            )
+            _v194_table["Role"]=_v194_table["role"].fillna("—").astype(str)
+            _v194_table["Status"]=_v194_table["status"].fillna("SUCCESS").astype(str)
+            _v194_table["Module"]=_v194_table["module"].fillna("").astype(str)
+            _v194_table["Action"]=_v194_table["action"].fillna("").astype(str)
+            _v194_table["Record"]=_v194_table.apply(
+                lambda r:" · ".join(
+                    x for x in [
+                        str(r.get("entity_type") or "").strip(),
+                        str(r.get("entity_id") or "").strip(),
+                    ] if x
+                ),
+                axis=1,
+            )
+            _v194_table["Details"]=_v194_table["details"].fillna("").astype(str)
+
+            _v194_display=_v194_table[[
+                "Time IST","User","Role","Category","Module",
+                "Action","Record","Status","Details"
+            ]].copy()
+
+            st.markdown("#### Detailed Audit Trail")
+            st.dataframe(
+                _v194_display,
+                hide_index=True,
+                use_container_width=True,
+                height=min(650,max(300,38*min(len(_v194_display)+1,17))),
+            )
+
+            _v194_csv=_v194_display.to_csv(index=False).encode("utf-8-sig")
+            _v194_exported=st.download_button(
+                "Download Filtered Audit CSV",
+                data=_v194_csv,
+                file_name=(
+                    f"ERP_User_Activity_{_v194_start.strftime('%Y%m%d')}_"
+                    f"{_v194_end.strftime('%Y%m%d')}.csv"
+                ),
+                mime="text/csv",
+                type="primary",
+                use_container_width=True,
+                key="v194_download_audit_csv",
+            )
+            if _v194_exported:
+                record_audit_event(
+                    _current_user["username"],
+                    "AUDIT_EXPORT",
+                    "Activity Monitor",
+                    "Audit Log",
+                    f"{_v194_start.isoformat()}:{_v194_end.isoformat()}",
+                    f"Rows={len(_v194_display)}",
+                )
+
+        with st.expander("Valid Login Sessions",expanded=False):
+            try:
+                _v194_session_rows=read_df(
+                    """SELECT u.username,u.full_name,u.role,
+                              s.created_at,s.last_seen,s.expires_at
+                       FROM app_sessions s
+                       JOIN app_users u ON u.user_id=s.user_id
+                       WHERE s.expires_at>CURRENT_TIMESTAMP
+                       ORDER BY s.last_seen DESC"""
+                )
+                if _v194_session_rows.empty:
+                    st.caption("No valid login sessions.")
+                else:
+                    for _col in ["created_at","last_seen","expires_at"]:
+                        _v194_session_rows[_col]=_v194_session_rows[_col].apply(
+                            _to_ist_display
+                        )
+                    _v194_session_rows=_v194_session_rows.rename(columns={
+                        "username":"Username",
+                        "full_name":"Full Name",
+                        "role":"Role",
+                        "created_at":"Session Created (IST)",
+                        "last_seen":"Last Seen (IST)",
+                        "expires_at":"Expires (IST)",
+                    })
+                    st.dataframe(
+                        _v194_session_rows,
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+            except Exception:
+                st.caption("Session summary is temporarily unavailable.")
 
 # ============================================================
 # MASTER CENTRE — ALL BUSINESS MASTERS IN ONE ADMIN WORKSPACE
