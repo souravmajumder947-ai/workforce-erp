@@ -2128,16 +2128,27 @@ def record_audit_event(
     actor, action, module, entity_type="", entity_id="", details="", status="SUCCESS"
 ):
     """Best-effort business audit without passwords, hashes or session tokens."""
+    _audit_details=str(details or "")[:4000]
+    # Never persist credential/session material if a future caller accidentally
+    # includes it in free-form details.
+    _audit_lower=_audit_details.lower()
+    if any(
+        marker in _audit_lower
+        for marker in ["password_hash", "token_hash", "session_token", "auth_token"]
+    ):
+        _audit_details="[Sensitive credential/session detail suppressed]"
+
+    _audit_values=(
+        str(actor or "system"),
+        str(action or ""),
+        str(module or ""),
+        str(entity_type or ""),
+        str(entity_id or ""),
+        _audit_details,
+    )
+    _audit_status=str(status or "SUCCESS").upper()[:20]
+
     try:
-        _audit_details=str(details or "")[:4000]
-        # Never persist credential/session material if a future caller accidentally
-        # includes it in free-form details.
-        _audit_lower=_audit_details.lower()
-        if any(
-            marker in _audit_lower
-            for marker in ["password_hash", "token_hash", "session_token", "auth_token"]
-        ):
-            _audit_details="[Sensitive credential/session detail suppressed]"
         upsert(
             """
             INSERT INTO audit_log(
@@ -2145,16 +2156,24 @@ def record_audit_event(
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                str(actor or "system"),
-                str(action or ""),
-                str(module or ""),
-                str(entity_type or ""),
-                str(entity_id or ""),
-                _audit_details,
-                str(status or "SUCCESS").upper()[:20],
-            ),
+            _audit_values+(_audit_status,),
         )
+    except psycopg2.errors.UndefinedColumn:
+        # Backward-compatible fallback for a running database that still has
+        # the pre-V19.4 audit_log schema. The main migration will add status,
+        # but activity logging must continue safely in the meantime.
+        try:
+            upsert(
+                """
+                INSERT INTO audit_log(
+                    actor, action, module, entity_type, entity_id, details
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                _audit_values,
+            )
+        except Exception:
+            pass
     except Exception:
         # Audit failure must never block the underlying business operation.
         pass
@@ -18013,7 +18032,14 @@ elif page == "Activity Monitor":
         # Fetch one extra day at both ends; exact IST date filtering happens in pandas.
         _v194_raw=read_df(
             """SELECT a.audit_id,a.actor,a.action,a.module,a.entity_type,a.entity_id,
-                      a.details,COALESCE(a.status,'SUCCESS') AS status,a.created_at,
+                      a.details,
+                      CASE
+                          WHEN UPPER(COALESCE(a.action,'')) LIKE '%FAILED%'
+                            OR UPPER(COALESCE(a.action,'')) LIKE '%BLOCKED%'
+                          THEN 'FAILED'
+                          ELSE 'SUCCESS'
+                      END AS status,
+                      a.created_at,
                       u.full_name,u.role
                FROM audit_log a
                LEFT JOIN app_users u ON LOWER(u.username)=LOWER(a.actor)
