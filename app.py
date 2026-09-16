@@ -7448,6 +7448,9 @@ body:has(.v82-login-root) .v116-brand-sub{
 
                         st.session_state["auth_user"] = user
                         st.session_state["auth_token"] = _new_token
+                        # Start a fresh audit-navigation context for this signed-in user.
+                        st.session_state.pop("_v194_last_nav_signature", None)
+                        st.session_state.pop("_v194_last_report_signature", None)
                         # Cover the one authenticated rerun so users never see
                         # Streamlit assembling an unstyled/partial dashboard.
                         st.session_state["_v188_login_transition"] = True
@@ -10457,7 +10460,7 @@ global_payroll_month = st.sidebar.selectbox(
 # V19.4 USER ACTIVITY TRACKING
 # Log navigation only when page/context actually changes, not on every Streamlit rerun.
 _v194_nav_signature=(
-    f"{page}|{global_division}|"
+    f"{_current_user['username']}|{page}|{global_division}|"
     f"{global_payroll_month.strftime('%Y-%m') if global_payroll_month else ''}"
 )
 if st.session_state.get("_v194_last_nav_signature") != _v194_nav_signature:
@@ -10506,6 +10509,8 @@ if st.sidebar.button("Sign out", use_container_width=True, key="v5_logout"):
     destroy_login_session(_logout_token)
     st.session_state["auth_user"] = None
     st.session_state["auth_token"] = None
+    st.session_state.pop("_v194_last_nav_signature", None)
+    st.session_state.pop("_v194_last_report_signature", None)
     try:
         del st.query_params["session"]
     except Exception:
@@ -18201,8 +18206,11 @@ elif page == "Activity Monitor":
             )
             _v194_changes=int((_v194_view["Category"]=="Data Change").sum())
             _v194_downloads=int((_v194_view["Category"]=="Download / Backup").sum())
+            _v194_work_actions=int(
+                (~_v194_actions_upper.isin(["LOGIN_SUCCESS","LOGIN_FAILED","LOGOUT"])).sum()
+            )
         else:
-            _v194_total=_v194_users=_v194_logins=_v194_failed=_v194_changes=_v194_downloads=0
+            _v194_total=_v194_users=_v194_logins=_v194_failed=_v194_changes=_v194_downloads=_v194_work_actions=0
 
         try:
             _v194_sessions=read_df(
@@ -18217,7 +18225,7 @@ elif page == "Activity Monitor":
             _v194_active_sessions=0
 
         v5_kpis([
-            ("Events",f"{_v194_total:,}","Filtered audit activity","blue"),
+            ("Work Actions",f"{_v194_work_actions:,}","Pages + business actions","blue"),
             ("Users",f"{_v194_users:,}","Users in selected activity",""),
             ("Successful Logins",f"{_v194_logins:,}","Selected period","good"),
             ("Data Changes",f"{_v194_changes:,}","Create · edit · delete · save",""),
@@ -18252,18 +18260,48 @@ elif page == "Activity Monitor":
             )
             _v194_latest["Details"]=_v194_latest["details"].fillna("").astype(str)
 
-            st.markdown("#### Latest User Actions")
+            _v194_work=_v194_latest[
+                ~_v194_latest["action"].fillna("").astype(str).str.upper().isin(
+                    ["LOGIN_SUCCESS","LOGIN_FAILED","LOGOUT"]
+                )
+            ].copy()
+            _v194_auth=_v194_latest[
+                _v194_latest["action"].fillna("").astype(str).str.upper().isin(
+                    ["LOGIN_SUCCESS","LOGIN_FAILED","LOGOUT"]
+                )
+            ].copy()
+
+            st.markdown("#### What the User Actually Did")
             st.caption(
-                "Use the User / Module / Action filters above to check exactly what one login user did."
+                "This section excludes simple login/logout events and shows ERP work activity only."
             )
-            st.dataframe(
-                _v194_latest[[
-                    "Time IST","User","What User Did","module","Record","Details"
-                ]].rename(columns={"module":"Module"}).head(15),
-                hide_index=True,
-                use_container_width=True,
-                height=min(475,max(220,36*min(len(_v194_latest)+1,13))),
-            )
+            if _v194_work.empty:
+                st.info(
+                    "No ERP work activity is recorded for the selected user/date yet. "
+                    "The records available are login/logout only. New page visits and controlled "
+                    "save/import/download actions will appear here going forward."
+                )
+            else:
+                st.dataframe(
+                    _v194_work[[
+                        "Time IST","User","What User Did","module","Record","Details"
+                    ]].rename(columns={"module":"Module"}).head(20),
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(560,max(220,36*min(len(_v194_work)+1,15))),
+                )
+
+            with st.expander("Login / Logout History", expanded=False):
+                if _v194_auth.empty:
+                    st.caption("No authentication activity in the selected period.")
+                else:
+                    st.dataframe(
+                        _v194_auth[[
+                            "Time IST","User","What User Did","Record","Details"
+                        ]].head(30),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
 
         if _v194_view.empty:
             st.info("No audit activity matches the selected filters.")
