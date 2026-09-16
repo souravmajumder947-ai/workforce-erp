@@ -17999,6 +17999,24 @@ elif page == "AI Tools":
 # ============================================================
 elif page == "Activity Monitor":
     st.markdown('<div class="v194-activity-monitor-page"></div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+        /* Activity Monitor owns the top workspace: hide the global heartbeat
+           that was being clipped underneath the Streamlit toolbar. */
+        body:has(.v194-activity-monitor-page) .v83-live-strip{
+            display:none!important;
+        }
+        body:has(.v194-activity-monitor-page) .block-container{
+            padding-top:.72rem!important;
+        }
+        body:has(.v194-activity-monitor-page) .v8-topbar{
+            margin-top:0!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     v5_page_header(
         "User Activity Monitor",
         "See who accessed the ERP, which modules they opened, and which controlled business actions they performed."
@@ -18139,6 +18157,38 @@ elif page == "Activity Monitor":
                 return "Data Change"
             return "System / Other"
 
+        def _v194_activity_text(row):
+            _action=str(row.get("action") or "").upper()
+            _module=str(row.get("module") or "").strip()
+            _record=str(row.get("entity_id") or "").strip()
+            _labels={
+                "LOGIN_SUCCESS":"Logged in successfully",
+                "LOGIN_FAILED":"Failed login attempt",
+                "LOGOUT":"Logged out",
+                "PAGE_VIEW":f"Opened {_module or 'ERP page'}",
+                "REPORT_VIEW":f"Viewed report: {_record or 'report'}",
+                "REPORT_DOWNLOAD":f"Downloaded report: {_record or 'report'}",
+                "AUDIT_EXPORT":"Exported user activity audit",
+                "USER_CREATE":f"Created user: {_record or 'user'}",
+                "USER_MASTER_UPDATE":f"Updated user master: {_record or 'user'}",
+                "USER_DELETE":f"Deleted user: {_record or 'user'}",
+                "ATTENDANCE_IMPORT":"Imported attendance data",
+                "ATTENDANCE_CORRECTION_SAVE":"Saved attendance corrections",
+                "HR_REVIEW_RESOLVE":"Resolved HR attendance review",
+                "PAYROLL_ADJUSTMENT_SAVE":f"Updated payroll adjustment: {_record or 'employee'}",
+                "FINAL_SALARY_IMPORT":"Imported final salary sheet",
+                "PAYROLL_FINALIZE":"Finalized payroll",
+                "PRODUCTION_SAVE":"Saved production entry",
+                "DAYWISE_REEL_IMPORT":"Imported day-wise reel issue / return data",
+                "MONTHLY_REEL_SAVE":"Saved monthly reel consumption data",
+                "PRODUCTION_GO_LIVE":"Activated production go-live",
+                "BACKUP_PREPARE":"Prepared business-data backup",
+            }
+            return _labels.get(
+                _action,
+                _action.replace("_"," ").title() if _action else "ERP activity"
+            )
+
         if not _v194_view.empty:
             _v194_view["Category"]=_v194_view["action"].map(_v194_category)
             _v194_actions_upper=_v194_view["action"].fillna("").astype(str).str.upper()
@@ -18174,6 +18224,46 @@ elif page == "Activity Monitor":
             ("Failed / Blocked",f"{_v194_failed:,}","Failed login / recorded failure","warn" if _v194_failed else "good"),
             ("Valid Sessions",f"{_v194_active_sessions:,}","Unexpired login sessions",""),
         ])
+
+        if not _v194_view.empty:
+            _v194_latest=_v194_view.copy()
+            _v194_latest["Time IST"]=pd.to_datetime(
+                _v194_latest["Time IST"],errors="coerce"
+            ).dt.strftime("%d %b %Y · %H:%M:%S")
+            _v194_latest["User"]=_v194_latest.apply(
+                lambda r:(
+                    f"{str(r.get('full_name') or '').strip()} (@{str(r.get('actor') or '').strip()})"
+                    if str(r.get("full_name") or "").strip()
+                    else str(r.get("actor") or "")
+                ),
+                axis=1,
+            )
+            _v194_latest["What User Did"]=_v194_latest.apply(
+                _v194_activity_text,axis=1
+            )
+            _v194_latest["Record"]=_v194_latest.apply(
+                lambda r:" · ".join(
+                    x for x in [
+                        str(r.get("entity_type") or "").strip(),
+                        str(r.get("entity_id") or "").strip(),
+                    ] if x
+                ),
+                axis=1,
+            )
+            _v194_latest["Details"]=_v194_latest["details"].fillna("").astype(str)
+
+            st.markdown("#### Latest User Actions")
+            st.caption(
+                "Use the User / Module / Action filters above to check exactly what one login user did."
+            )
+            st.dataframe(
+                _v194_latest[[
+                    "Time IST","User","What User Did","module","Record","Details"
+                ]].rename(columns={"module":"Module"}).head(15),
+                hide_index=True,
+                use_container_width=True,
+                height=min(475,max(220,36*min(len(_v194_latest)+1,13))),
+            )
 
         if _v194_view.empty:
             st.info("No audit activity matches the selected filters.")
@@ -18244,7 +18334,10 @@ elif page == "Activity Monitor":
             _v194_table["Role"]=_v194_table["role"].fillna("—").astype(str)
             _v194_table["Status"]=_v194_table["status"].fillna("SUCCESS").astype(str)
             _v194_table["Module"]=_v194_table["module"].fillna("").astype(str)
-            _v194_table["Action"]=_v194_table["action"].fillna("").astype(str)
+            _v194_table["Action Code"]=_v194_table["action"].fillna("").astype(str)
+            _v194_table["What User Did"]=_v194_table.apply(
+                _v194_activity_text,axis=1
+            )
             _v194_table["Record"]=_v194_table.apply(
                 lambda r:" · ".join(
                     x for x in [
@@ -18258,7 +18351,7 @@ elif page == "Activity Monitor":
 
             _v194_display=_v194_table[[
                 "Time IST","User","Role","Category","Module",
-                "Action","Record","Status","Details"
+                "What User Did","Record","Status","Details","Action Code"
             ]].copy()
 
             st.markdown("#### Detailed Audit Trail")
