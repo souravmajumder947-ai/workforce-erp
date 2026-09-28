@@ -3043,6 +3043,171 @@ def _v121_old_importer_disabled():
     return True
 
 
+# ============================================================
+# V19.5 FINSYS JOB-WISE PRODUCTION EXCEL IMPORT
+# ============================================================
+def _v195_ensure_production_import_schema():
+    """Keep job-wise Finsys source rows for audit while production stays Date + Machine daily."""
+    conn=get_pg_conn()
+    try:
+        cur=conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS production_import_detail(
+                detail_id BIGSERIAL PRIMARY KEY,
+                source_file_hash TEXT NOT NULL,
+                source_file_name TEXT,
+                source_row_no INTEGER NOT NULL,
+                production_date DATE,
+                source_shift TEXT,
+                source_machine_group TEXT,
+                source_machine_name TEXT,
+                erp_machine TEXT,
+                import_status TEXT NOT NULL DEFAULT 'IMPORTED',
+                voucher_no TEXT,
+                job_no TEXT,
+                item_code TEXT,
+                item_description TEXT,
+                plan_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                production_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                rejection_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                net_production_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                wastage_pct NUMERIC(12,4) NOT NULL DEFAULT 0,
+                production_weight_kg NUMERIC(18,4) NOT NULL DEFAULT 0,
+                production_ton NUMERIC(18,6) NOT NULL DEFAULT 0,
+                operator_name TEXT,
+                imported_by TEXT,
+                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source_file_hash,source_row_no)
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prod_import_detail_date_machine
+            ON production_import_detail(production_date,erp_machine)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prod_import_detail_file
+            ON production_import_detail(source_file_hash)
+        """)
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _v195_norm_machine(value):
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+
+def _v195_suggest_machine(source_machine, machine_options):
+    """Suggest only when the current Machine Master gives a safe match."""
+    source=_v195_norm_machine(source_machine)
+    if not source:
+        return ""
+    option_map={_v195_norm_machine(x):str(x) for x in machine_options}
+    if source in option_map:
+        return option_map[source]
+
+    def _first(predicate):
+        for option in machine_options:
+            if predicate(_v195_norm_machine(option)):
+                return str(option)
+        return ""
+
+    if source=="AUTOCORRUGATION":
+        return _first(lambda x:"CORRUG" in x)
+    if source=="TOPRAGD1228":
+        return _first(lambda x:"TOPRA" in x and "1228" in x)
+    if source=="AUTOGLUER":
+        return _first(lambda x:"GLUE" in x or "GLUER" in x)
+    if source.startswith("MANUALSTITCHING"):
+        suffix=source.replace("MANUALSTITCHING","").lstrip("0") or "0"
+        specific=_first(
+            lambda x:("STITCH" in x or "STICH" in x)
+            and (
+                (suffix!="0" and x.endswith(suffix))
+                or (suffix!="0" and ("0"+suffix) in x)
+            )
+        )
+        return specific or _first(lambda x:"STITCH" in x or "STICH" in x)
+    if source.startswith("DIECUTTING"):
+        suffix=source.replace("DIECUTTING","").lstrip("0") or "0"
+        specific=_first(
+            lambda x:"DIE" in x and "CUT" in x
+            and (
+                (suffix!="0" and x.endswith(suffix))
+                or (suffix!="0" and ("0"+suffix) in x)
+            )
+        )
+        return specific or _first(lambda x:"DIE" in x and "CUT" in x)
+    if source in {"MANUALSHEETPASTING","PASTING"}:
+        return _first(lambda x:"PAST" in x)
+    return ""
+
+
+def _v195_parse_finsys_production_excel(file_bytes):
+    """Read the user's Finsys production export without modifying the source workbook."""
+    raw=pd.read_excel(BytesIO(file_bytes),sheet_name=0,dtype=object,engine="openpyxl")
+    raw.columns=[str(c).strip() for c in raw.columns]
+    col_lookup={str(c).strip().lower():c for c in raw.columns}
+    required=[
+        "vchdate","prevcode","machine","machine name","vchnum","job_no","icode",
+        "item","plan qty","production","rejection","net production","wstage %","prodn_wt"
+    ]
+    missing=[c for c in required if c not in col_lookup]
+    if missing:
+        raise ValueError(
+            "Production Excel format does not match the approved Finsys file. Missing column(s): "
+            + ", ".join(missing)
+        )
+
+    def _col(name,default=""):
+        return raw[col_lookup[name]] if name in col_lookup else default
+
+    work=pd.DataFrame()
+    work["Source Row"]=range(2,len(raw)+2)
+    work["Production Date"]=pd.to_datetime(_col("vchdate"),errors="coerce").dt.date
+    work["Source Shift"]=_col("prevcode").fillna("").astype(str).str.strip().replace(
+        {"SHIFT A":"A","SHIFT B":"B","A SHIFT":"A","B SHIFT":"B"}
+    )
+    work["Source Machine Group"]=_col("machine").fillna("").astype(str).str.strip()
+    work["Source Machine"]=_col("machine name").fillna("").astype(str).str.strip()
+    work["Voucher No"]=_col("vchnum").fillna("").astype(str).str.strip()
+    work["Job No"]=_col("job_no").fillna("").astype(str).str.strip()
+    work["Item Code"]=_col("icode").fillna("").astype(str).str.strip()
+    work["Item"]=_col("item").fillna("").astype(str).str.strip()
+    work["Operator"]=_col("opr_dtl").fillna("").astype(str).str.strip() if "opr_dtl" in col_lookup else ""
+    work["Entered By"]=_col("ent_by").fillna("").astype(str).str.strip() if "ent_by" in col_lookup else ""
+
+    numeric_map={
+        "Plan Qty":"plan qty",
+        "Production Qty":"production",
+        "Rejection Qty":"rejection",
+        "Net Production Qty":"net production",
+        "Wastage %":"wstage %",
+        "Production Weight Kg":"prodn_wt",
+    }
+    for target,source in numeric_map.items():
+        work[target]=pd.to_numeric(_col(source),errors="coerce").fillna(0.0)
+
+    work=work[
+        work["Production Date"].notna()
+        & work["Source Machine"].astype(str).str.strip().ne("")
+    ].copy()
+    if work.empty:
+        raise ValueError("No valid production rows were found in this workbook.")
+
+    work["Production Ton"]=work["Production Weight Kg"]/1000.0
+    work["Calculated Net Qty"]=work["Production Qty"]-work["Rejection Qty"]
+    work["Net Qty Difference"]=(work["Calculated Net Qty"]-work["Net Production Qty"]).abs()
+    work["Source Shift"]=work["Source Shift"].where(
+        work["Source Shift"].isin(["A","B"]),work["Source Shift"]
+    )
+    return work
+
+
 def can_view_salary(role):
     return str(role) in {"Owner", "Admin", "HR", "Manager"}
 
@@ -15074,6 +15239,373 @@ elif page == "Operations":
     )
 
     if _v141_ops_section=="Production Entry":
+        # V19.5 FINSYS JOB-WISE PRODUCTION IMPORT
+        with st.expander("Import Finsys Production Excel",expanded=False):
+            st.caption(
+                "Upload the original job-wise Finsys Daily Production export. "
+                "The source rows are preserved for audit and the ERP saves one daily total per Date + Machine."
+            )
+            _v195_prod_file=st.file_uploader(
+                "Production Excel",
+                type=["xlsx","xls"],
+                key="v195_finsys_production_excel",
+            )
+
+            if _v195_prod_file is not None:
+                try:
+                    _v195_bytes=_v195_prod_file.getvalue()
+                    _v195_hash=hashlib.sha256(_v195_bytes).hexdigest()
+                    _v195_source=_v195_parse_finsys_production_excel(_v195_bytes)
+                    _v195_machine_df=get_machine_list_cached()
+                    _v195_machine_options=(
+                        _v195_machine_df["machine"].dropna().astype(str).tolist()
+                        if not _v195_machine_df.empty else []
+                    )
+
+                    _v195_net_errors=int((_v195_source["Net Qty Difference"]>0.01).sum())
+                    _v195_total_ton=float(_v195_source["Production Ton"].sum())
+                    _v195_first=min(_v195_source["Production Date"])
+                    _v195_last=max(_v195_source["Production Date"])
+                    _v195_source_machines=int(_v195_source["Source Machine"].nunique())
+
+                    _v195_k1,_v195_k2,_v195_k3,_v195_k4,_v195_k5=st.columns(5)
+                    _v195_k1.metric("Source Rows",f"{len(_v195_source):,}")
+                    _v195_k2.metric("Date Range",f"{_v195_first.strftime('%d %b')} – {_v195_last.strftime('%d %b')}")
+                    _v195_k3.metric("Source Machines",f"{_v195_source_machines:,}")
+                    _v195_k4.metric("Production Weight",f"{_v195_total_ton:,.2f} T")
+                    _v195_k5.metric("Net Qty Errors",f"{_v195_net_errors:,}")
+
+                    if _v195_net_errors:
+                        st.error(
+                            f"{_v195_net_errors:,} source row(s) do not satisfy Production − Rejection = Net Production. "
+                            "Import is blocked until the source file is corrected."
+                        )
+
+                    _v195_summary=(
+                        _v195_source.groupby(
+                            ["Source Machine","Source Machine Group"],as_index=False
+                        )
+                        .agg(
+                            Rows=("Source Row","count"),
+                            Production_Ton=("Production Ton","sum"),
+                            Production_Qty=("Production Qty","sum"),
+                            Rejection_Qty=("Rejection Qty","sum"),
+                            First_Date=("Production Date","min"),
+                            Last_Date=("Production Date","max"),
+                        )
+                    )
+                    _v195_summary["Production Ton"]=_v195_summary["Production_Ton"].round(2)
+                    _v195_summary["Rejection Qty"]=_v195_summary["Rejection_Qty"].round(0)
+                    _v195_summary["Target ERP Machine"]=_v195_summary["Source Machine"].apply(
+                        lambda x:_v195_suggest_machine(x,_v195_machine_options)
+                    )
+                    _v195_summary["Target ERP Machine"]=_v195_summary["Target ERP Machine"].replace(
+                        "","IGNORE / REVIEW"
+                    )
+
+                    if not _v195_machine_options:
+                        st.error(
+                            "Machine Master is empty. Create/activate production machines before importing production."
+                        )
+
+                    st.markdown("#### Machine Mapping")
+                    st.caption(
+                        "Known source machines are suggested automatically. Review the two suspicious source labels "
+                        "(for example 'Name' or a non-production asset) and either map them deliberately or leave them ignored."
+                    )
+                    _v195_mapping=st.data_editor(
+                        _v195_summary[[
+                            "Source Machine","Source Machine Group","Rows","Production Ton",
+                            "Rejection Qty","First_Date","Last_Date","Target ERP Machine"
+                        ]],
+                        hide_index=True,
+                        use_container_width=True,
+                        disabled=[
+                            "Source Machine","Source Machine Group","Rows","Production Ton",
+                            "Rejection Qty","First_Date","Last_Date"
+                        ],
+                        column_config={
+                            "Production Ton":st.column_config.NumberColumn("Production Ton",format="%.2f"),
+                            "Rejection Qty":st.column_config.NumberColumn("Rejection Qty",format="%.0f"),
+                            "First_Date":st.column_config.DateColumn("First Date",format="DD/MM/YYYY"),
+                            "Last_Date":st.column_config.DateColumn("Last Date",format="DD/MM/YYYY"),
+                            "Target ERP Machine":st.column_config.SelectboxColumn(
+                                "Target ERP Machine",
+                                options=["IGNORE / REVIEW"]+_v195_machine_options,
+                                required=True,
+                            ),
+                        },
+                        key=f"v195_prod_mapping_{_v195_hash[:12]}",
+                    )
+
+                    _v195_map=dict(
+                        zip(
+                            _v195_mapping["Source Machine"].astype(str),
+                            _v195_mapping["Target ERP Machine"].astype(str),
+                        )
+                    )
+                    _v195_source["ERP Machine"]=_v195_source["Source Machine"].map(_v195_map).fillna("IGNORE / REVIEW")
+                    _v195_source["Import Status"]=_v195_source["ERP Machine"].apply(
+                        lambda x:"IGNORED" if str(x)=="IGNORE / REVIEW" else "IMPORTED"
+                    )
+                    _v195_mapped=_v195_source[
+                        _v195_source["Import Status"]=="IMPORTED"
+                    ].copy()
+                    _v195_ignored=_v195_source[
+                        _v195_source["Import Status"]=="IGNORED"
+                    ].copy()
+
+                    if not _v195_mapped.empty:
+                        _v195_daily=(
+                            _v195_mapped.groupby(
+                                ["Production Date","ERP Machine"],as_index=False
+                            )
+                            .agg(
+                                Source_Rows=("Source Row","count"),
+                                Production_Ton=("Production Ton","sum"),
+                                Plan_Qty=("Plan Qty","sum"),
+                                Production_Qty=("Production Qty","sum"),
+                                Rejection_Qty=("Rejection Qty","sum"),
+                                Net_Qty=("Net Production Qty","sum"),
+                            )
+                        )
+                        _v195_daily["Production Ton"]=_v195_daily["Production_Ton"].round(2)
+                        _v195_daily["Rejection Qty"]=_v195_daily["Rejection_Qty"].round(0)
+                        _v195_daily["Yield %"]=_v195_daily.apply(
+                            lambda r:(
+                                (float(r["Net_Qty"])/float(r["Production_Qty"])*100.0)
+                                if float(r["Production_Qty"] or 0)>0 else 0.0
+                            ),
+                            axis=1,
+                        ).round(2)
+                        _v195_daily["Source Waste %"]=_v195_daily.apply(
+                            lambda r:(
+                                (float(r["Rejection_Qty"])/float(r["Production_Qty"])*100.0)
+                                if float(r["Production_Qty"] or 0)>0 else 0.0
+                            ),
+                            axis=1,
+                        ).round(2)
+                    else:
+                        _v195_daily=pd.DataFrame()
+
+                    _v195_c1,_v195_c2,_v195_c3,_v195_c4=st.columns(4)
+                    _v195_c1.metric("Mapped Rows",f"{len(_v195_mapped):,}")
+                    _v195_c2.metric("Daily ERP Rows",f"{len(_v195_daily):,}")
+                    _v195_c3.metric("Ignored / Review Rows",f"{len(_v195_ignored):,}")
+                    _v195_c4.metric(
+                        "Mapped Production",
+                        f"{float(_v195_mapped['Production Ton'].sum()) if not _v195_mapped.empty else 0:,.2f} T"
+                    )
+
+                    if not _v195_ignored.empty:
+                        _v195_ignored_names=(
+                            _v195_ignored["Source Machine"].value_counts().rename_axis("Source Machine")
+                            .reset_index(name="Rows")
+                        )
+                        st.warning(
+                            "Ignored/review source rows will NOT be included in daily Production totals. "
+                            "Map them above if they belong to a real production machine."
+                        )
+                        st.dataframe(_v195_ignored_names,hide_index=True,use_container_width=True)
+
+                    st.markdown("#### Daily Import Preview")
+                    if _v195_daily.empty:
+                        st.info("No production rows are currently mapped to ERP machines.")
+                    else:
+                        st.dataframe(
+                            _v195_daily[[
+                                "Production Date","ERP Machine","Source_Rows","Production Ton",
+                                "Production_Qty","Rejection Qty","Net_Qty","Yield %","Source Waste %"
+                            ]].rename(columns={
+                                "Source_Rows":"Source Rows",
+                                "Production_Qty":"Production Qty",
+                                "Net_Qty":"Net Production Qty",
+                            }),
+                            hide_index=True,
+                            use_container_width=True,
+                            height=min(560,max(240,34*min(len(_v195_daily)+1,16))),
+                            column_config={
+                                "Production Date":st.column_config.DateColumn("Production Date",format="DD/MM/YYYY"),
+                                "Production Ton":st.column_config.NumberColumn("Production Ton",format="%.2f"),
+                                "Yield %":st.column_config.NumberColumn("Yield %",format="%.2f"),
+                                "Source Waste %":st.column_config.NumberColumn("Source Waste %",format="%.2f"),
+                            }
+                        )
+
+                    _v195_replace=st.checkbox(
+                        "Replace existing DAY production for the mapped Date + Machine combinations",
+                        value=True,
+                        key=f"v195_prod_replace_{_v195_hash[:12]}",
+                        help=(
+                            "Use this for the approved Finsys file. Only the same Date + Machine daily rows are replaced; "
+                            "other production dates and machines are untouched."
+                        ),
+                    )
+                    _v195_confirm=st.checkbox(
+                        "I have reviewed the machine mapping and confirm this production preview can be imported.",
+                        value=False,
+                        key=f"v195_prod_confirm_{_v195_hash[:12]}",
+                    )
+
+                    _v195_can_import=bool(
+                        _v195_confirm
+                        and not _v195_daily.empty
+                        and not _v195_net_errors
+                        and bool(_v195_machine_options)
+                    )
+                    if st.button(
+                        "Import Production to ERP",
+                        type="primary",
+                        use_container_width=True,
+                        disabled=not _v195_can_import,
+                        key=f"v195_prod_import_{_v195_hash[:12]}",
+                    ):
+                        _v195_ensure_production_import_schema()
+                        _v195_conn=get_pg_conn()
+                        _v195_cur=None
+                        try:
+                            _v195_cur=_v195_conn.cursor()
+
+                            # Same source file may be safely re-imported after correcting its mapping.
+                            _v195_cur.execute(
+                                "DELETE FROM production_import_detail WHERE source_file_hash=%s",
+                                (_v195_hash,),
+                            )
+
+                            _v195_detail_values=[]
+                            for _,_r in _v195_source.iterrows():
+                                _v195_detail_values.append((
+                                    _v195_hash,
+                                    str(_v195_prod_file.name),
+                                    int(_r["Source Row"]),
+                                    _r["Production Date"],
+                                    str(_r["Source Shift"] or ""),
+                                    str(_r["Source Machine Group"] or ""),
+                                    str(_r["Source Machine"] or ""),
+                                    "" if str(_r["ERP Machine"])=="IGNORE / REVIEW" else str(_r["ERP Machine"]),
+                                    str(_r["Import Status"]),
+                                    str(_r["Voucher No"] or ""),
+                                    str(_r["Job No"] or ""),
+                                    str(_r["Item Code"] or ""),
+                                    str(_r["Item"] or ""),
+                                    float(_r["Plan Qty"] or 0),
+                                    float(_r["Production Qty"] or 0),
+                                    float(_r["Rejection Qty"] or 0),
+                                    float(_r["Net Production Qty"] or 0),
+                                    float(_r["Wastage %"] or 0),
+                                    float(_r["Production Weight Kg"] or 0),
+                                    float(_r["Production Ton"] or 0),
+                                    str(_r["Operator"] or ""),
+                                    str(_current_user.get("username") or ""),
+                                ))
+
+                            execute_values(
+                                _v195_cur,
+                                """
+                                INSERT INTO production_import_detail(
+                                    source_file_hash,source_file_name,source_row_no,production_date,
+                                    source_shift,source_machine_group,source_machine_name,erp_machine,
+                                    import_status,voucher_no,job_no,item_code,item_description,
+                                    plan_qty,production_qty,rejection_qty,net_production_qty,wastage_pct,
+                                    production_weight_kg,production_ton,operator_name,imported_by
+                                ) VALUES %s
+                                """,
+                                _v195_detail_values,
+                                page_size=1000,
+                            )
+
+                            _v195_profiles={
+                                str(r["machine"]):r.to_dict()
+                                for _,r in _v195_machine_df.iterrows()
+                            }
+
+                            for _,_r in _v195_daily.iterrows():
+                                _v195_date=_r["Production Date"]
+                                _v195_machine=str(_r["ERP Machine"])
+                                _v195_profile=_v195_profiles.get(_v195_machine,{})
+                                _v195_target_type=str(
+                                    _v195_profile.get("target_type") or "MATERIAL_CONVERSION"
+                                )
+                                _v195_target=(
+                                    float(_v195_profile.get("daily_target_ton") or 0)
+                                    if _v195_target_type=="FIXED_TON" else 0.0
+                                )
+                                _v195_good=float(_r["Production_Ton"] or 0)
+                                _v195_source_waste=float(_r["Source Waste %"] or 0)
+                                _v195_yield=float(_r["Yield %"] or 0)
+                                _v195_remark=(
+                                    f"FINSYS PRODUCTION IMPORT | {_v195_prod_file.name} | "
+                                    f"SourceRows={int(_r['Source_Rows'])}; "
+                                    f"ProductionQty={float(_r['Production_Qty']):.0f}; "
+                                    f"RejectionQty={float(_r['Rejection_Qty']):.0f}; "
+                                    f"NetQty={float(_r['Net_Qty']):.0f}"
+                                )
+
+                                if _v195_replace:
+                                    _v195_cur.execute(
+                                        "DELETE FROM production WHERE work_date=%s AND shift='DAY' AND machine=%s",
+                                        (_v195_date.isoformat(),_v195_machine),
+                                    )
+
+                                _v195_cur.execute(
+                                    """
+                                    INSERT INTO production(
+                                        work_date,shift,machine,production_ton,target_ton,waste_ton,
+                                        breakdown_hours,paper_cost,ink_cost,glue_cost,other_material_cost,
+                                        target_type,opening_wip_ton,material_received_ton,
+                                        material_available_ton,material_processed_ton,good_output_ton,
+                                        closing_wip_ton,conversion_pct,yield_pct,waste_pct,remark
+                                    ) VALUES (
+                                        %s,'DAY',%s,%s,%s,0,0,0,0,0,0,
+                                        %s,0,0,0,0,%s,0,0,%s,%s,%s
+                                    )
+                                    ON CONFLICT(work_date,shift,machine) DO UPDATE SET
+                                        production_ton=excluded.production_ton,
+                                        target_ton=excluded.target_ton,
+                                        good_output_ton=excluded.good_output_ton,
+                                        target_type=excluded.target_type,
+                                        yield_pct=excluded.yield_pct,
+                                        waste_pct=excluded.waste_pct,
+                                        remark=excluded.remark
+                                    """,
+                                    (
+                                        _v195_date.isoformat(),_v195_machine,_v195_good,_v195_target,
+                                        _v195_target_type,_v195_good,_v195_yield,_v195_source_waste,
+                                        _v195_remark,
+                                    ),
+                                )
+
+                            _v195_conn.commit()
+                            record_audit_event(
+                                _current_user["username"],
+                                "PRODUCTION_EXCEL_IMPORT",
+                                "Operations",
+                                "Production Import",
+                                _v195_hash[:16],
+                                (
+                                    f"File={_v195_prod_file.name}; SourceRows={len(_v195_source)}; "
+                                    f"ImportedSourceRows={len(_v195_mapped)}; IgnoredRows={len(_v195_ignored)}; "
+                                    f"DailyRows={len(_v195_daily)}; Ton={float(_v195_mapped['Production Ton'].sum()):.2f}; "
+                                    f"Replace={bool(_v195_replace)}"
+                                ),
+                            )
+                            st.success(
+                                f"Production import completed: {len(_v195_daily):,} Date + Machine daily row(s), "
+                                f"{float(_v195_mapped['Production Ton'].sum()):,.2f} T mapped production. "
+                                f"{len(_v195_ignored):,} source row(s) kept for audit as ignored/review."
+                            )
+                            st.rerun()
+                        except Exception as _v195_import_exc:
+                            _v195_conn.rollback()
+                            st.error(f"Production import failed: {_v195_import_exc}")
+                        finally:
+                            if _v195_cur is not None:
+                                _v195_cur.close()
+                            _v195_conn.close()
+
+                except Exception as _v195_parse_exc:
+                    st.error(f"Unable to preview production Excel: {_v195_parse_exc}")
+
         # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
         st.markdown("### Daily Production Entry")
         st.caption(
