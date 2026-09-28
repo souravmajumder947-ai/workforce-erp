@@ -16652,6 +16652,171 @@ elif page == "Operations":
                         },
                     )
 
+        # V19.6 UNMAPPED PRODUCTION REVIEW
+        if _v196_schema_ready:
+            try:
+                _v196_review=read_df(
+                    """
+                    SELECT entry_id AS "ID",
+                           work_date AS "Date",
+                           shift AS "Shift",
+                           stage AS "Stage",
+                           source_machine AS "Source Machine",
+                           machine_code AS "Machine Code",
+                           job_no AS "Job No.",
+                           item_description AS "Item",
+                           production_qty AS "Prodn",
+                           rejection_qty AS "Rejn",
+                           net_production_qty AS "Net Prod.",
+                           production_weight_kg/1000.0 AS "Prodn Weight T",
+                           source_file_hash,
+                           source_row_no
+                    FROM production_job_entries
+                    WHERE COALESCE(import_status,'IMPORTED')='IGNORED'
+                    ORDER BY work_date DESC,entry_id DESC
+                    LIMIT 250
+                    """
+                )
+            except Exception:
+                _v196_review=pd.DataFrame()
+
+            if not _v196_review.empty:
+                with st.expander(
+                    f"Production Review / Unmapped · {len(_v196_review):,} row(s)",
+                    expanded=False,
+                ):
+                    _v196_review_show=_v196_review.drop(
+                        columns=["source_file_hash","source_row_no"],errors="ignore"
+                    ).copy()
+                    st.warning(
+                        "These source rows are preserved in the ERP but are not yet included in "
+                        "machine-wise daily tonnage. Assign the correct ERP Machine once and the "
+                        "daily totals will recalculate automatically."
+                    )
+                    st.dataframe(
+                        _v196_review_show,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Date":st.column_config.DateColumn("Date",format="DD/MM/YYYY"),
+                            "Prodn Weight T":st.column_config.NumberColumn(
+                                "Prodn Weight T",format="%.3f"
+                            ),
+                        },
+                    )
+
+                    _v196_review_ids=_v196_review["ID"].astype(int).tolist()
+                    _v196_review_label={
+                        int(r["ID"]):(
+                            f"#{int(r['ID'])} · {r['Date']} · "
+                            f"{_clean_text(r.get('Source Machine'))} · "
+                            f"{_clean_text(r.get('Job No.'))} · "
+                            f"{float(r.get('Prodn Weight T') or 0):.3f} T"
+                        )
+                        for _,r in _v196_review.iterrows()
+                    }
+                    _v196_review_pick=st.selectbox(
+                        "Review Row",
+                        _v196_review_ids,
+                        format_func=lambda x:_v196_review_label.get(int(x),str(x)),
+                        key="v196_review_pick",
+                    )
+                    _v196_review_machine=st.selectbox(
+                        "Assign Correct ERP Machine",
+                        _v196_machine_options,
+                        key="v196_review_machine",
+                    )
+                    if st.button(
+                        "Resolve Mapping & Add to Production",
+                        type="primary",
+                        use_container_width=True,
+                        key="v196_resolve_mapping",
+                    ):
+                        _v196_row=_v196_review[
+                            _v196_review["ID"].astype(int)==int(_v196_review_pick)
+                        ].iloc[0].to_dict()
+                        _v196_conn=get_pg_conn()
+                        _v196_cur=None
+                        try:
+                            _v196_cur=_v196_conn.cursor()
+                            _v196_actor=str(_current_user.get("username") or "system")
+                            _v196_cur.execute(
+                                """
+                                UPDATE production_job_entries
+                                SET erp_machine=%s,
+                                    import_status='IMPORTED',
+                                    updated_at=CURRENT_TIMESTAMP
+                                WHERE entry_id=%s
+                                """,
+                                (_v196_review_machine,int(_v196_review_pick)),
+                            )
+                            _v196_hash=_clean_text(_v196_row.get("source_file_hash"))
+                            _v196_source_row=_v196_row.get("source_row_no")
+                            if _v196_hash and _v196_source_row is not None:
+                                _v196_cur.execute(
+                                    """
+                                    UPDATE production_import_detail
+                                    SET erp_machine=%s,import_status='IMPORTED'
+                                    WHERE source_file_hash=%s AND source_row_no=%s
+                                    """,
+                                    (
+                                        _v196_review_machine,_v196_hash,
+                                        int(_v196_source_row),
+                                    ),
+                                )
+
+                            _v196_source_machine_name=_clean_text(
+                                _v196_row.get("Source Machine")
+                            )
+                            if _v196_source_machine_name:
+                                _v196_cur.execute(
+                                    """
+                                    INSERT INTO production_machine_aliases(
+                                        source_machine,erp_machine,source_stage,active,
+                                        updated_by,updated_at
+                                    ) VALUES (%s,%s,%s,TRUE,%s,CURRENT_TIMESTAMP)
+                                    ON CONFLICT(source_machine) DO UPDATE SET
+                                        erp_machine=excluded.erp_machine,
+                                        source_stage=excluded.source_stage,
+                                        active=TRUE,
+                                        updated_by=excluded.updated_by,
+                                        updated_at=CURRENT_TIMESTAMP
+                                    """,
+                                    (
+                                        _v196_source_machine_name,_v196_review_machine,
+                                        _clean_text(_v196_row.get("Stage")),_v196_actor,
+                                    ),
+                                )
+
+                            _v196_sync_daily_production(
+                                _v196_cur,_v196_row.get("Date"),
+                                _v196_review_machine,_v196_actor,
+                                replace_existing=True,
+                            )
+                            _v196_conn.commit()
+                            record_audit_event(
+                                _v196_actor,"PRODUCTION_MAPPING_RESOLVE","Operations",
+                                "Production Job",str(int(_v196_review_pick)),
+                                (
+                                    f"SourceMachine={_v196_source_machine_name}; "
+                                    f"ERP Machine={_v196_review_machine}; "
+                                    f"Date={_v196_row.get('Date')}"
+                                ),
+                            )
+                            st.success(
+                                "Production mapping resolved. The row is now included in daily production."
+                            )
+                            st.rerun()
+                        except Exception as _v196_resolve_exc:
+                            if _v196_conn is not None:
+                                _v196_conn.rollback()
+                            st.error(f"Production mapping could not be resolved: {_v196_resolve_exc}")
+                        finally:
+                            if _v196_cur is not None:
+                                _v196_cur.close()
+                            if _v196_conn is not None:
+                                _v196_conn.close()
+
         # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
         st.markdown("### Daily Machine Material / Output Summary")
         st.caption(
@@ -19855,6 +20020,7 @@ elif page == "Activity Monitor":
                 "PRODUCTION_JOB_UPDATE":f"Updated production job: {_record or 'job'}",
                 "PRODUCTION_JOB_DELETE":f"Deleted production job: {_record or 'job'}",
                 "PRODUCTION_EXCEL_IMPORT":"Imported Finsys job-wise production Excel",
+                "PRODUCTION_MAPPING_RESOLVE":f"Resolved production machine mapping: {_record or 'job'}",
                 "DAYWISE_REEL_IMPORT":"Imported day-wise reel issue / return data",
                 "MONTHLY_REEL_SAVE":"Saved monthly reel consumption data",
                 "PRODUCTION_GO_LIVE":"Activated production go-live",
