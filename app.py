@@ -3299,6 +3299,85 @@ def _v196_ensure_production_job_schema():
         conn.close()
 
 
+def _v196_ensure_core_production_machines():
+    """Create only missing canonical production machines needed by the approved Finsys DPR."""
+    canonical=[
+        ("Corrugation","Corrugation","FIXED_TON",110.0),
+        ("Topra 1228","Printing","MATERIAL_CONVERSION",0.0),
+        ("Glue Folder","Finishing / Glue","MATERIAL_CONVERSION",0.0),
+        ("Stitching Machine 1","Finishing / Stitching","MATERIAL_CONVERSION",0.0),
+        ("Stitching Machine 2","Finishing / Stitching","MATERIAL_CONVERSION",0.0),
+        ("Stitching Machine 3","Finishing / Stitching","MATERIAL_CONVERSION",0.0),
+        ("Stitching Machine 4","Finishing / Stitching","MATERIAL_CONVERSION",0.0),
+        ("Die Cutting","Conversion","MATERIAL_CONVERSION",0.0),
+        ("Pasting","Conversion","MATERIAL_CONVERSION",0.0),
+    ]
+    existing=get_machine_list_cached()
+    existing_names=existing["machine"].dropna().astype(str).tolist() if not existing.empty else []
+
+    def _has_equivalent(name):
+        n=_v195_norm_machine(name)
+        if n=="CORRUGATION":
+            return any("CORRUG" in _v195_norm_machine(x) for x in existing_names)
+        if n=="TOPRA1228":
+            return any("TOPRA" in _v195_norm_machine(x) and "1228" in _v195_norm_machine(x) for x in existing_names)
+        if n=="GLUEFOLDER":
+            return any("GLUE" in _v195_norm_machine(x) or "GLUER" in _v195_norm_machine(x) for x in existing_names)
+        if n.startswith("STITCHINGMACHINE"):
+            suffix=n.replace("STITCHINGMACHINE","")
+            return any(
+                ("STITCH" in _v195_norm_machine(x) or "STICH" in _v195_norm_machine(x))
+                and _v195_norm_machine(x).endswith(suffix)
+                for x in existing_names
+            )
+        if n=="DIECUTTING":
+            return any("DIE" in _v195_norm_machine(x) and "CUT" in _v195_norm_machine(x) for x in existing_names)
+        if n=="PASTING":
+            return any("PAST" in _v195_norm_machine(x) for x in existing_names)
+        return n in {_v195_norm_machine(x) for x in existing_names}
+
+    missing=[row for row in canonical if not _has_equivalent(row[0])]
+    if not missing:
+        return []
+
+    conn=get_pg_conn()
+    try:
+        cur=conn.cursor()
+        created=[]
+        for machine,department,target_type,daily_target in missing:
+            shift_target=float(daily_target)/2.0 if target_type=="FIXED_TON" else 0.0
+            cur.execute(
+                """
+                INSERT INTO machines(
+                    machine,department,standard_manpower,target_ton,target_type,
+                    daily_target_ton,conversion_target_pct,active
+                ) VALUES (%s,%s,0,%s,%s,%s,100,TRUE)
+                ON CONFLICT(machine) DO NOTHING
+                """,
+                (machine,department,shift_target,target_type,float(daily_target)),
+            )
+            if cur.rowcount:
+                created.append(machine)
+            for sh in ("A","B"):
+                cur.execute(
+                    """
+                    INSERT INTO machine_shift_targets(machine,shift,standard_manpower,target_ton)
+                    VALUES (%s,%s,0,%s)
+                    ON CONFLICT(machine,shift) DO NOTHING
+                    """,
+                    (machine,sh,shift_target),
+                )
+        conn.commit()
+        cur.close()
+        get_machine_list_cached.clear()
+        return created
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def _v196_machine_alias_map():
     try:
         _v196_ensure_production_job_schema()
@@ -15528,6 +15607,13 @@ elif page == "Operations":
                     _v195_bytes=_v195_prod_file.getvalue()
                     _v195_hash=hashlib.sha256(_v195_bytes).hexdigest()
                     _v195_source=_v195_parse_finsys_production_excel(_v195_bytes)
+                    _v196_created_machines=_v196_ensure_core_production_machines()
+                    if _v196_created_machines:
+                        st.info(
+                            "Production Machine Master prepared automatically: "
+                            + ", ".join(_v196_created_machines)
+                            + ". Standard manpower is left at 0 (Not Set) until you confirm it."
+                        )
                     _v195_machine_df=get_machine_list_cached()
                     _v195_machine_options=(
                         _v195_machine_df["machine"].dropna().astype(str).tolist()
