@@ -16728,7 +16728,7 @@ elif page == "Operations":
                     )
 
         # V19.6 UNMAPPED PRODUCTION REVIEW
-        if _v196_schema_ready:
+        if _v196_schema_ready and _v196_machine_options:
             try:
                 _v196_review=read_df(
                     """
