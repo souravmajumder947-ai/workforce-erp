@@ -15998,7 +15998,12 @@ elif page == "Operations":
                                     float(_r["Rejection Qty"] or 0),
                                     float(_r["Net Production Qty"] or 0),
                                     float(_r["Production Weight Kg"] or 0),
-                                    0.0,
+                                    (
+                                        float(_r["Rejection Qty"] or 0)
+                                        / float(_r["Production Qty"] or 1)
+                                        * 1000000.0
+                                        if float(_r["Production Qty"] or 0)>0 else 0.0
+                                    ),
                                     float(_r["Wastage %"] or 0),
                                     str(_r["Operator"] or ""),
                                     str(_r["Entered By"] or ""),
@@ -16245,7 +16250,7 @@ elif page == "Operations":
                         key=f"v196_item_{_v196_token}",
                     )
 
-                    _v196_c1,_v196_c2,_v196_c3,_v196_c4,_v196_c5=st.columns(5)
+                    _v196_c1,_v196_c2,_v196_c3,_v196_c4=st.columns(4)
                     _v196_start=_v196_c1.text_input(
                         "Start (HH:MM)",
                         value=_clean_text(_v196_er.get("start_time")),
@@ -16271,13 +16276,6 @@ elif page == "Operations":
                         step=1.0,
                         key=f"v196_time_{_v196_token}",
                         disabled=_v196_use_auto_time,
-                    )
-                    _v196_ppm=_v196_c5.number_input(
-                        "PPM",
-                        min_value=0.0,
-                        value=float(_v196_er.get("ppm") or 0),
-                        step=1.0,
-                        key=f"v196_ppm_{_v196_token}",
                     )
                     _v196_time_taken=(
                         float(_v196_auto_time)
@@ -16334,11 +16332,16 @@ elif page == "Operations":
                         float(_v196_rejn)/float(_v196_prodn)*100.0
                         if float(_v196_prodn)>0 else 0.0
                     )
-                    _v196_m1,_v196_m2,_v196_m3,_v196_m4=st.columns(4)
+                    _v196_ppm=(
+                        float(_v196_rejn)/float(_v196_prodn)*1000000.0
+                        if float(_v196_prodn)>0 else 0.0
+                    )
+                    _v196_m1,_v196_m2,_v196_m3,_v196_m4,_v196_m5=st.columns(5)
                     _v196_m1.metric("Time Taken",f"{_v196_time_taken:.0f} min")
                     _v196_m2.metric("Net Production",f"{_v196_net:,.0f}")
-                    _v196_m3.metric("Wstg %",f"{_v196_waste_pct:.2f}%")
-                    _v196_m4.metric("Production Ton",f"{float(_v196_weight)/1000.0:.3f} T")
+                    _v196_m3.metric("PPM",f"{_v196_ppm:,.0f}")
+                    _v196_m4.metric("Wstg %",f"{_v196_waste_pct:.2f}%")
+                    _v196_m5.metric("Production Ton",f"{float(_v196_weight)/1000.0:.3f} T")
 
                     if float(_v196_rejn)>float(_v196_prodn):
                         st.error("Rejection cannot be greater than Production.")
