@@ -3352,7 +3352,24 @@ def _v196_ensure_core_production_machines():
                     machine,department,standard_manpower,target_ton,target_type,
                     daily_target_ton,conversion_target_pct,active
                 ) VALUES (%s,%s,0,%s,%s,%s,100,TRUE)
-                ON CONFLICT(machine) DO NOTHING
+                ON CONFLICT(machine) DO UPDATE SET
+                    active=TRUE,
+                    department=CASE
+                        WHEN COALESCE(TRIM(machines.department),'')=''
+                        THEN excluded.department ELSE machines.department
+                    END,
+                    target_type=CASE
+                        WHEN COALESCE(TRIM(machines.target_type),'')=''
+                        THEN excluded.target_type ELSE machines.target_type
+                    END,
+                    daily_target_ton=CASE
+                        WHEN excluded.machine='Corrugation'
+                        THEN excluded.daily_target_ton ELSE machines.daily_target_ton
+                    END,
+                    conversion_target_pct=CASE
+                        WHEN excluded.target_type='MATERIAL_CONVERSION'
+                        THEN 100 ELSE machines.conversion_target_pct
+                    END
                 """,
                 (machine,department,shift_target,target_type,float(daily_target)),
             )
@@ -15772,8 +15789,10 @@ elif page == "Operations":
 
                     st.markdown("#### Machine Mapping")
                     st.caption(
-                        "Known source machines are suggested automatically. Review the two suspicious source labels "
-                        "(for example 'Name' or a non-production asset) and either map them deliberately or leave them ignored."
+                        "Known source machines are mapped automatically. Die Cutting and Pasting are kept active "
+                        "as core production machines. Only clearly suspicious source labels (for example 'Name' or a "
+                        "non-production asset) should remain in Production Review so their weight is preserved without "
+                        "assigning it to the wrong machine."
                     )
                     _v195_mapping=st.data_editor(
                         _v195_summary[[
@@ -15800,13 +15819,26 @@ elif page == "Operations":
                         key=f"v195_prod_mapping_{_v195_hash[:12]}",
                     )
 
-                    _v195_map=dict(
-                        zip(
-                            _v195_mapping["Source Machine"].astype(str),
-                            _v195_mapping["Target ERP Machine"].astype(str),
-                        )
+                    # Mapping is stage-aware. The same physical/source machine can appear
+                    # under more than one Finsys process group, so Source Machine alone is
+                    # not a safe key for a production import.
+                    _v195_map={
+                        (
+                            str(_maprow.get("Source Machine") or "").strip(),
+                            str(_maprow.get("Source Machine Group") or "").strip(),
+                        ):str(_maprow.get("Target ERP Machine") or "").strip()
+                        for _,_maprow in _v195_mapping.iterrows()
+                    }
+                    _v195_source["ERP Machine"]=_v195_source.apply(
+                        lambda _r:_v195_map.get(
+                            (
+                                str(_r.get("Source Machine") or "").strip(),
+                                str(_r.get("Source Machine Group") or "").strip(),
+                            ),
+                            "IGNORE / REVIEW",
+                        ),
+                        axis=1,
                     )
-                    _v195_source["ERP Machine"]=_v195_source["Source Machine"].map(_v195_map).fillna("IGNORE / REVIEW")
                     _v195_source["Import Status"]=_v195_source["ERP Machine"].apply(
                         lambda x:"IGNORED" if str(x)=="IGNORE / REVIEW" else "IMPORTED"
                     )
@@ -15863,16 +15895,27 @@ elif page == "Operations":
                         if _v195_total_ton>0 else 0.0
                     )
 
+                    _v195_reconciled_ton=_v195_mapped_ton+_v195_ignored_ton
+                    _v195_reconcile_delta=_v195_total_ton-_v195_reconciled_ton
+
                     _v195_c1,_v195_c2,_v195_c3,_v195_c4,_v195_c5=st.columns(5)
                     _v195_c1.metric("Mapped Rows",f"{len(_v195_mapped):,}")
                     _v195_c2.metric("Daily ERP Rows",f"{len(_v195_daily):,}")
-                    _v195_c3.metric("Mapped Weight",f"{_v195_mapped_ton:,.2f} T")
+                    _v195_c3.metric("Machine Weight",f"{_v195_mapped_ton:,.2f} T")
                     _v195_c4.metric(
-                        "Unmapped Weight",
+                        "Review Weight",
                         f"{_v195_ignored_ton:,.2f} T",
                         f"{len(_v195_ignored):,} source row(s)"
                     )
-                    _v195_c5.metric("Mapping Complete",f"{_v195_mapping_pct:.2f}%")
+                    _v195_c5.metric(
+                        "Reconciled Total",
+                        f"{_v195_reconciled_ton:,.2f} T",
+                        f"Delta {_v195_reconcile_delta:,.2f} T"
+                    )
+                    st.caption(
+                        "Reconciled Total always includes machine-mapped rows plus Production Review rows, "
+                        "so the ERP keeps the complete Finsys production weight without silently dropping source entries."
+                    )
 
                     if not _v195_ignored.empty:
                         _v195_ignored_names=(
