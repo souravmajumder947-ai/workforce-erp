@@ -15268,12 +15268,23 @@ elif page == "Operations":
                     _v195_last=max(_v195_source["Production Date"])
                     _v195_source_machines=int(_v195_source["Source Machine"].nunique())
 
+                    _v195_source_prod_qty=float(_v195_source["Production Qty"].sum())
+                    _v195_source_rej_qty=float(_v195_source["Rejection Qty"].sum())
+                    _v195_source_net_qty=float(_v195_source["Net Production Qty"].sum())
+
                     _v195_k1,_v195_k2,_v195_k3,_v195_k4,_v195_k5=st.columns(5)
                     _v195_k1.metric("Source Rows",f"{len(_v195_source):,}")
-                    _v195_k2.metric("Date Range",f"{_v195_first.strftime('%d %b')} – {_v195_last.strftime('%d %b')}")
-                    _v195_k3.metric("Source Machines",f"{_v195_source_machines:,}")
-                    _v195_k4.metric("Production Weight",f"{_v195_total_ton:,.2f} T")
+                    _v195_k2.metric("Source Prodn Qty",f"{_v195_source_prod_qty:,.0f}","Finsys Prodn column")
+                    _v195_k3.metric("Source Net Qty",f"{_v195_source_net_qty:,.0f}","Prodn − Rejection")
+                    _v195_k4.metric("Source Weight",f"{_v195_total_ton:,.2f} T","prodn_wt ÷ 1000")
                     _v195_k5.metric("Net Qty Errors",f"{_v195_net_errors:,}")
+
+                    st.caption(
+                        f"Source period: {_v195_first.strftime('%d %b %Y')} – {_v195_last.strftime('%d %b %Y')} · "
+                        f"{_v195_source_machines} source machine name(s) · "
+                        f"Rejection {_v195_source_rej_qty:,.0f}. "
+                        "Finsys 'Prodn' / 'Net Prod.' are quantity counts; ERP Production Ton comes from prodn_wt."
+                    )
 
                     if _v195_net_errors:
                         st.error(
@@ -15388,25 +15399,83 @@ elif page == "Operations":
                     else:
                         _v195_daily=pd.DataFrame()
 
-                    _v195_c1,_v195_c2,_v195_c3,_v195_c4=st.columns(4)
+                    _v195_mapped_ton=(
+                        float(_v195_mapped["Production Ton"].sum())
+                        if not _v195_mapped.empty else 0.0
+                    )
+                    _v195_ignored_ton=(
+                        float(_v195_ignored["Production Ton"].sum())
+                        if not _v195_ignored.empty else 0.0
+                    )
+                    _v195_mapping_pct=(
+                        (_v195_mapped_ton/_v195_total_ton)*100.0
+                        if _v195_total_ton>0 else 0.0
+                    )
+
+                    _v195_c1,_v195_c2,_v195_c3,_v195_c4,_v195_c5=st.columns(5)
                     _v195_c1.metric("Mapped Rows",f"{len(_v195_mapped):,}")
                     _v195_c2.metric("Daily ERP Rows",f"{len(_v195_daily):,}")
-                    _v195_c3.metric("Ignored / Review Rows",f"{len(_v195_ignored):,}")
+                    _v195_c3.metric("Mapped Weight",f"{_v195_mapped_ton:,.2f} T")
                     _v195_c4.metric(
-                        "Mapped Production",
-                        f"{float(_v195_mapped['Production Ton'].sum()) if not _v195_mapped.empty else 0:,.2f} T"
+                        "Unmapped Weight",
+                        f"{_v195_ignored_ton:,.2f} T",
+                        f"{len(_v195_ignored):,} source row(s)"
                     )
+                    _v195_c5.metric("Mapping Complete",f"{_v195_mapping_pct:.2f}%")
 
                     if not _v195_ignored.empty:
                         _v195_ignored_names=(
-                            _v195_ignored["Source Machine"].value_counts().rename_axis("Source Machine")
-                            .reset_index(name="Rows")
+                            _v195_ignored.groupby(
+                                ["Source Machine","Source Machine Group"],as_index=False
+                            )
+                            .agg(
+                                Rows=("Source Row","count"),
+                                Production_Ton=("Production Ton","sum"),
+                                Production_Qty=("Production Qty","sum"),
+                                Rejection_Qty=("Rejection Qty","sum"),
+                                Net_Qty=("Net Production Qty","sum"),
+                            )
                         )
+                        _v195_ignored_names["Production Ton"]=_v195_ignored_names["Production_Ton"].round(2)
+                        _v195_ignored_names["Production Qty"]=_v195_ignored_names["Production_Qty"].round(0)
+                        _v195_ignored_names["Rejection Qty"]=_v195_ignored_names["Rejection_Qty"].round(0)
+                        _v195_ignored_names["Net Production Qty"]=_v195_ignored_names["Net_Qty"].round(0)
+                        _v195_ignored_names=_v195_ignored_names[[
+                            "Source Machine","Source Machine Group","Rows","Production Ton",
+                            "Production Qty","Rejection Qty","Net Production Qty"
+                        ]].sort_values("Production Ton",ascending=False)
+
                         st.warning(
-                            "Ignored/review source rows will NOT be included in daily Production totals. "
-                            "Map them above if they belong to a real production machine."
+                            f"Production reconciliation: Finsys source weight is {_v195_total_ton:,.2f} T, "
+                            f"but only {_v195_mapped_ton:,.2f} T is currently mapped. "
+                            f"The difference is {_v195_ignored_ton:,.2f} T across {len(_v195_ignored):,} row(s). "
+                            "These rows will not enter ERP Production until their Target ERP Machine is mapped."
                         )
-                        st.dataframe(_v195_ignored_names,hide_index=True,use_container_width=True)
+                        st.markdown("#### Unmapped Production Reconciliation")
+                        st.dataframe(
+                            _v195_ignored_names,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "Production Ton":st.column_config.NumberColumn("Production Ton",format="%.2f"),
+                                "Production Qty":st.column_config.NumberColumn("Production Qty",format="%.0f"),
+                                "Rejection Qty":st.column_config.NumberColumn("Rejection Qty",format="%.0f"),
+                                "Net Production Qty":st.column_config.NumberColumn("Net Production Qty",format="%.0f"),
+                            }
+                        )
+
+                        _v195_legit_unmapped=_v195_ignored[
+                            ~_v195_ignored["Source Machine"].astype(str).str.upper().isin(
+                                ["NAME","DIESEL GENERATOR 25 KVA"]
+                            )
+                        ].copy()
+                        if not _v195_legit_unmapped.empty:
+                            st.error(
+                                f"{len(_v195_legit_unmapped):,} row(s) / "
+                                f"{float(_v195_legit_unmapped['Production Ton'].sum()):,.2f} T belong to "
+                                "recognizable production machines but are still unmapped. "
+                                "Map Die Cutting / Pasting rows to the correct ERP Machine before final import."
+                            )
 
                     st.markdown("#### Daily Import Preview")
                     if _v195_daily.empty:
@@ -15447,12 +15516,26 @@ elif page == "Operations":
                         key=f"v195_prod_confirm_{_v195_hash[:12]}",
                     )
 
+                    _v195_required_unmapped=(
+                        _v195_ignored[
+                            ~_v195_ignored["Source Machine"].astype(str).str.upper().isin(
+                                ["NAME","DIESEL GENERATOR 25 KVA"]
+                            )
+                        ]
+                        if not _v195_ignored.empty else pd.DataFrame()
+                    )
                     _v195_can_import=bool(
                         _v195_confirm
                         and not _v195_daily.empty
                         and not _v195_net_errors
                         and bool(_v195_machine_options)
+                        and _v195_required_unmapped.empty
                     )
+                    if not _v195_required_unmapped.empty:
+                        st.caption(
+                            "Import is locked because valid production-machine rows are still unmapped. "
+                            "Only the suspicious source labels 'Name' and 'DIESEL GENERATOR 25 KVA' may remain in Review."
+                        )
                     if st.button(
                         "Import Production to ERP",
                         type="primary",
