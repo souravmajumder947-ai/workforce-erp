@@ -16620,6 +16620,81 @@ elif page == "Operations":
                         },
                     )
 
+                    _v196_date_all=read_df(
+                        """
+                        SELECT time_taken_minutes AS "Time Taken",
+                               machine_ready_minutes AS "M/Rdy (Mins)",
+                               downtime_minutes AS "Tot.D/Time (Mins)",
+                               plan_qty AS "Plan Qty",
+                               production_qty AS "Prodn",
+                               rejection_qty AS "Rejn",
+                               net_production_qty AS "Net Prod.",
+                               production_weight_kg/1000.0 AS "Prodn Weight T",
+                               shift AS "Shift",
+                               erp_machine AS "ERP Machine"
+                        FROM production_job_entries
+                        WHERE work_date=?
+                          AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+                          AND COALESCE(erp_machine,'')<>''
+                        """,
+                        (_v196_job_date.isoformat(),),
+                    )
+                    for _v196_numcol in [
+                        "Time Taken","M/Rdy (Mins)","Tot.D/Time (Mins)",
+                        "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T"
+                    ]:
+                        if _v196_numcol in _v196_date_all.columns:
+                            _v196_date_all[_v196_numcol]=pd.to_numeric(
+                                _v196_date_all[_v196_numcol],errors="coerce"
+                            ).fillna(0.0)
+
+                    def _v196_make_total(label,frame):
+                        _p=float(frame["Prodn"].sum()) if not frame.empty else 0.0
+                        _r=float(frame["Rejn"].sum()) if not frame.empty else 0.0
+                        return {
+                            "Level":label,
+                            "Time Taken":float(frame["Time Taken"].sum()) if not frame.empty else 0.0,
+                            "M/Rdy (Mins)":float(frame["M/Rdy (Mins)"].sum()) if not frame.empty else 0.0,
+                            "Tot.D/Time (Mins)":float(frame["Tot.D/Time (Mins)"].sum()) if not frame.empty else 0.0,
+                            "Plan Qty":float(frame["Plan Qty"].sum()) if not frame.empty else 0.0,
+                            "Prodn":_p,
+                            "Rejn":_r,
+                            "Net Prod.":float(frame["Net Prod."].sum()) if not frame.empty else 0.0,
+                            "PPM":(_r/_p*1000000.0) if _p>0 else 0.0,
+                            "Wstg %":(_r/_p*100.0) if _p>0 else 0.0,
+                            "Prodn Weight T":float(frame["Prodn Weight T"].sum()) if not frame.empty else 0.0,
+                        }
+
+                    _v196_machine_all=_v196_date_all[
+                        _v196_date_all["ERP Machine"].astype(str)==str(_v196_job_machine)
+                    ].copy()
+                    _v196_shift_frame=_v196_machine_all[
+                        _v196_machine_all["Shift"].astype(str)==str(_v196_job_shift)
+                    ].copy()
+                    _v196_totals=pd.DataFrame([
+                        _v196_make_total("Shift Total",_v196_shift_frame),
+                        _v196_make_total("M/C Total",_v196_machine_all),
+                        _v196_make_total("Date Total",_v196_date_all),
+                    ])
+                    st.markdown("#### Finsys-style Totals")
+                    st.dataframe(
+                        _v196_totals,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Time Taken":st.column_config.NumberColumn("Time Taken",format="%.0f"),
+                            "M/Rdy (Mins)":st.column_config.NumberColumn("M/Rdy (Mins)",format="%.0f"),
+                            "Tot.D/Time (Mins)":st.column_config.NumberColumn("Tot.D/Time (Mins)",format="%.0f"),
+                            "Plan Qty":st.column_config.NumberColumn("Plan Qty",format="%.0f"),
+                            "Prodn":st.column_config.NumberColumn("Prodn",format="%.0f"),
+                            "Rejn":st.column_config.NumberColumn("Rejn",format="%.0f"),
+                            "Net Prod.":st.column_config.NumberColumn("Net Prod.",format="%.0f"),
+                            "PPM":st.column_config.NumberColumn("PPM",format="%.0f"),
+                            "Wstg %":st.column_config.NumberColumn("Wstg %",format="%.2f"),
+                            "Prodn Weight T":st.column_config.NumberColumn("Prodn Weight T",format="%.3f"),
+                        },
+                    )
+
                 _v196_day_summary=read_df(
                     """
                     SELECT shift AS "Shift",
