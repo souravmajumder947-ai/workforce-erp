@@ -3101,9 +3101,13 @@ def _v195_norm_machine(value):
     return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
 
 
-def _v195_suggest_machine(source_machine, machine_options):
-    """Suggest only when the current Machine Master gives a safe match."""
+def _v195_suggest_machine(source_machine, machine_options, alias_map=None):
+    """Suggest only when the current Machine Master or saved source alias gives a safe match."""
     source=_v195_norm_machine(source_machine)
+    alias_map=alias_map or {}
+    saved_alias=str(alias_map.get(str(source_machine or "").strip()) or "").strip()
+    if saved_alias and saved_alias in machine_options:
+        return saved_alias
     if not source:
         return ""
     option_map={_v195_norm_machine(x):str(x) for x in machine_options}
@@ -3178,8 +3182,14 @@ def _v195_parse_finsys_production_excel(file_bytes):
     work["Job No"]=_col("job_no").fillna("").astype(str).str.strip()
     work["Item Code"]=_col("icode").fillna("").astype(str).str.strip()
     work["Item"]=_col("item").fillna("").astype(str).str.strip()
+    work["Machine Code"]=_col("mchcode").fillna("").astype(str).str.strip() if "mchcode" in col_lookup else ""
+    work["Start"]=_col("mcstart").fillna("").astype(str).str.strip() if "mcstart" in col_lookup else ""
+    work["Stop"]=_col("mcstop").fillna("").astype(str).str.strip() if "mcstop" in col_lookup else ""
+    work["Work Order"]=_col("f1").fillna("").astype(str).str.strip() if "f1" in col_lookup else ""
+    work["Source Reference"]=_col("remarks2").fillna("").astype(str).str.strip() if "remarks2" in col_lookup else ""
     work["Operator"]=_col("opr_dtl").fillna("").astype(str).str.strip() if "opr_dtl" in col_lookup else ""
     work["Entered By"]=_col("ent_by").fillna("").astype(str).str.strip() if "ent_by" in col_lookup else ""
+    work["Time Taken Min"]=pd.to_numeric(_col("time taken"),errors="coerce").fillna(0.0) if "time taken" in col_lookup else 0.0
 
     numeric_map={
         "Plan Qty":"plan qty",
@@ -3206,6 +3216,244 @@ def _v195_parse_finsys_production_excel(file_bytes):
         work["Source Shift"].isin(["A","B"]),work["Source Shift"]
     )
     return work
+
+
+# ============================================================
+# V19.6 FINSYS-STYLE JOB-WISE PRODUCTION
+# Detailed DPR rows are the source of truth for output.
+# The existing production table remains the daily Date + Machine roll-up
+# used by dashboards, manpower productivity and management reports.
+# ============================================================
+def _v196_ensure_production_job_schema():
+    conn=get_pg_conn()
+    try:
+        cur=conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS production_job_entries(
+                entry_id BIGSERIAL PRIMARY KEY,
+                work_date DATE NOT NULL,
+                shift TEXT NOT NULL DEFAULT 'A',
+                stage TEXT,
+                erp_machine TEXT,
+                source_machine TEXT,
+                machine_code TEXT,
+                voucher_no TEXT,
+                job_no TEXT,
+                part_no TEXT,
+                item_description TEXT,
+                start_time TEXT,
+                stop_time TEXT,
+                time_taken_minutes NUMERIC(12,2) NOT NULL DEFAULT 0,
+                machine_ready_minutes NUMERIC(12,2) NOT NULL DEFAULT 0,
+                downtime_minutes NUMERIC(12,2) NOT NULL DEFAULT 0,
+                plan_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                production_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                rejection_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                net_production_qty NUMERIC(18,2) NOT NULL DEFAULT 0,
+                production_weight_kg NUMERIC(18,4) NOT NULL DEFAULT 0,
+                ppm NUMERIC(18,4) NOT NULL DEFAULT 0,
+                wastage_pct NUMERIC(12,4) NOT NULL DEFAULT 0,
+                operator_name TEXT,
+                source_entry_by TEXT,
+                work_order_label TEXT,
+                source_reference TEXT,
+                source_type TEXT NOT NULL DEFAULT 'MANUAL',
+                source_file_hash TEXT,
+                source_file_name TEXT,
+                source_row_no INTEGER,
+                import_status TEXT NOT NULL DEFAULT 'IMPORTED',
+                created_by TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_production_job_source_row
+            ON production_job_entries(source_file_hash,source_row_no)
+            WHERE source_file_hash IS NOT NULL AND source_row_no IS NOT NULL
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_production_job_date_machine
+            ON production_job_entries(work_date,erp_machine)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_production_job_date_shift
+            ON production_job_entries(work_date,shift)
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS production_machine_aliases(
+                source_machine TEXT PRIMARY KEY,
+                erp_machine TEXT NOT NULL,
+                source_stage TEXT,
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                updated_by TEXT,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _v196_machine_alias_map():
+    try:
+        _v196_ensure_production_job_schema()
+        df=read_df("""
+            SELECT source_machine,erp_machine
+            FROM production_machine_aliases
+            WHERE COALESCE(active,TRUE)=TRUE
+        """)
+        if df.empty:
+            return {}
+        return {
+            str(r["source_machine"] or "").strip():str(r["erp_machine"] or "").strip()
+            for _,r in df.iterrows()
+            if str(r["source_machine"] or "").strip()
+        }
+    except Exception:
+        return {}
+
+
+def _v196_time_minutes(start_value, stop_value):
+    """Elapsed minutes, including an overnight stop time."""
+    try:
+        def _parts(value):
+            if isinstance(value,time):
+                return int(value.hour),int(value.minute)
+            txt=str(value or "").strip()
+            if not txt:
+                return None
+            bits=txt.split(":")
+            return int(float(bits[0])),int(float(bits[1])) if len(bits)>1 else 0
+        stp=_parts(start_value)
+        enp=_parts(stop_value)
+        if not stp or not enp:
+            return 0.0
+        a=stp[0]*60+stp[1]
+        b=enp[0]*60+enp[1]
+        if b<a:
+            b+=1440
+        return float(max(b-a,0))
+    except Exception:
+        return 0.0
+
+
+def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system"):
+    """Roll job-wise DPR rows into the existing daily Production table without erasing material/reel fields."""
+    date_text=(
+        work_date_value.isoformat()
+        if hasattr(work_date_value,"isoformat")
+        else str(work_date_value)
+    )
+    machine=str(erp_machine or "").strip()
+    if not machine:
+        return
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) AS source_rows,
+            COALESCE(SUM(production_qty),0) AS production_qty,
+            COALESCE(SUM(rejection_qty),0) AS rejection_qty,
+            COALESCE(SUM(net_production_qty),0) AS net_qty,
+            COALESCE(SUM(production_weight_kg),0) AS good_weight_kg,
+            COALESCE(SUM(
+                CASE
+                    WHEN COALESCE(net_production_qty,0)>0
+                    THEN COALESCE(production_weight_kg,0)
+                         * COALESCE(rejection_qty,0)
+                         / NULLIF(net_production_qty,0)
+                    ELSE 0
+                END
+            ),0) AS estimated_waste_kg
+        FROM production_job_entries
+        WHERE work_date=%s
+          AND erp_machine=%s
+          AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+        """,
+        (date_text,machine),
+    )
+    row=cur.fetchone()
+    if not row or int(row[0] or 0)<=0:
+        return
+
+    source_rows=int(row[0] or 0)
+    prod_qty=float(row[1] or 0)
+    rej_qty=float(row[2] or 0)
+    net_qty=float(row[3] or 0)
+    good_ton=float(row[4] or 0)/1000.0
+    waste_ton=float(row[5] or 0)/1000.0
+    yield_pct=(net_qty/prod_qty*100.0) if prod_qty>0 else 0.0
+    waste_pct=(rej_qty/prod_qty*100.0) if prod_qty>0 else 0.0
+
+    cur.execute(
+        """
+        SELECT COALESCE(target_type,'MATERIAL_CONVERSION'),
+               COALESCE(daily_target_ton,0)
+        FROM machines
+        WHERE machine=%s
+        LIMIT 1
+        """,
+        (machine,),
+    )
+    profile=cur.fetchone()
+    target_type=str(profile[0] if profile else "MATERIAL_CONVERSION")
+    target_ton=(
+        float(profile[1] or 0)
+        if profile and target_type=="FIXED_TON" else 0.0
+    )
+    remark=(
+        f"JOB DPR SYNC | Rows={source_rows}; "
+        f"ProdnQty={prod_qty:.0f}; RejectionQty={rej_qty:.0f}; "
+        f"NetQty={net_qty:.0f}; Source={actor}"
+    )
+
+    cur.execute(
+        """
+        INSERT INTO production(
+            work_date,shift,machine,production_ton,target_ton,waste_ton,
+            breakdown_hours,paper_cost,ink_cost,glue_cost,other_material_cost,
+            target_type,good_output_ton,yield_pct,waste_pct,remark
+        ) VALUES (
+            %s,'DAY',%s,%s,%s,%s,
+            0,0,0,0,0,%s,%s,%s,%s,%s
+        )
+        ON CONFLICT(work_date,shift,machine) DO UPDATE SET
+            production_ton=excluded.production_ton,
+            target_ton=excluded.target_ton,
+            waste_ton=excluded.waste_ton,
+            target_type=excluded.target_type,
+            good_output_ton=excluded.good_output_ton,
+            yield_pct=excluded.yield_pct,
+            waste_pct=excluded.waste_pct,
+            remark=excluded.remark
+        """,
+        (
+            date_text,machine,good_ton,target_ton,waste_ton,
+            target_type,good_ton,yield_pct,waste_pct,remark,
+        ),
+    )
+
+
+def _v196_refresh_daily_for_file(cur, source_file_hash, actor="system"):
+    cur.execute(
+        """
+        SELECT DISTINCT work_date,erp_machine
+        FROM production_job_entries
+        WHERE source_file_hash=%s
+          AND COALESCE(erp_machine,'')<>''
+          AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+        ORDER BY work_date,erp_machine
+        """,
+        (source_file_hash,),
+    )
+    keys=cur.fetchall()
+    for work_date_value,machine in keys:
+        _v196_sync_daily_production(cur,work_date_value,machine,actor)
 
 
 def can_view_salary(role):
