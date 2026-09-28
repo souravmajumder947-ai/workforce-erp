@@ -14717,7 +14717,7 @@ elif page == "Payroll":
                 )
                 _v150_file=st.file_uploader(
                     "Greater Noida Final Salary Sheet",
-                    type=["xlsx","xls"],
+                    type=["xlsx"],
                     key="v150_final_salary_file"
                 )
                 _v150_replace=st.checkbox(
@@ -15547,8 +15547,7 @@ elif page == "Operations":
                                         (_v195_date.isoformat(),_v195_machine),
                                     )
 
-                                _v195_cur.execute(
-                                    """
+                                _v195_insert_sql="""
                                     INSERT INTO production(
                                         work_date,shift,machine,production_ton,target_ton,waste_ton,
                                         breakdown_hours,paper_cost,ink_cost,glue_cost,other_material_cost,
@@ -15559,15 +15558,24 @@ elif page == "Operations":
                                         %s,'DAY',%s,%s,%s,0,0,0,0,0,0,
                                         %s,0,0,0,0,%s,0,0,%s,%s,%s
                                     )
-                                    ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-                                        production_ton=excluded.production_ton,
-                                        target_ton=excluded.target_ton,
-                                        good_output_ton=excluded.good_output_ton,
-                                        target_type=excluded.target_type,
-                                        yield_pct=excluded.yield_pct,
-                                        waste_pct=excluded.waste_pct,
-                                        remark=excluded.remark
-                                    """,
+                                """
+                                if _v195_replace:
+                                    _v195_insert_sql += """
+                                        ON CONFLICT(work_date,shift,machine) DO UPDATE SET
+                                            production_ton=excluded.production_ton,
+                                            target_ton=excluded.target_ton,
+                                            good_output_ton=excluded.good_output_ton,
+                                            target_type=excluded.target_type,
+                                            yield_pct=excluded.yield_pct,
+                                            waste_pct=excluded.waste_pct,
+                                            remark=excluded.remark
+                                    """
+                                else:
+                                    _v195_insert_sql += """
+                                        ON CONFLICT(work_date,shift,machine) DO NOTHING
+                                    """
+                                _v195_cur.execute(
+                                    _v195_insert_sql,
                                     (
                                         _v195_date.isoformat(),_v195_machine,_v195_good,_v195_target,
                                         _v195_target_type,_v195_good,_v195_yield,_v195_source_waste,
