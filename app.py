@@ -15247,7 +15247,7 @@ elif page == "Operations":
             )
             _v195_prod_file=st.file_uploader(
                 "Production Excel",
-                type=["xlsx","xls"],
+                type=["xlsx"],
                 key="v195_finsys_production_excel",
             )
 
