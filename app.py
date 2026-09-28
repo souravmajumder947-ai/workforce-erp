@@ -16644,10 +16644,10 @@ elif page == "Operations":
                     )
 
         # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
-        st.markdown("### Daily Production Entry")
+        st.markdown("### Daily Machine Material / Output Summary")
         st.caption(
-            "One production record per Date + Machine. Attendance and manpower can remain shift-wise, "
-            "but production is captured as the complete 24-hour production day."
+            "Job-wise production above is the primary production entry. "
+            "Use this section for daily reel/material/WIP and machine-level summary values."
         )
 
         # Reel-consumption detail is stored separately and rolls up into the daily Corrugation record.
@@ -18267,6 +18267,7 @@ elif page == "Reports":
             "PF / ESIC Summary",
         ],
         "Production & Material": [
+            "Production Job-wise DPR",
             "Production Performance",
             "Reel Consumption - Monthly",
             "Reel Consumption - Day Wise",
@@ -18449,6 +18450,73 @@ elif page == "Reports":
     elif report_type=="Contractor Payable":
         report_df=contractor_month_summary(report_month)
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"): report_df=report_df.iloc[0:0]
+    elif report_type=="Production Job-wise DPR":
+        if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
+            report_df=pd.DataFrame()
+            report_note="Production Job-wise DPR is currently configured for Greater Noida Plant."
+        else:
+            try:
+                _v196_ensure_production_job_schema()
+                report_df=read_df(
+                    """SELECT work_date AS "Date",
+                              shift AS "Shift",
+                              stage AS "Stage",
+                              COALESCE(source_machine,erp_machine,'') AS "Machine",
+                              item_description AS "Item",
+                              job_no AS "Job No.",
+                              part_no AS "Part No.",
+                              start_time AS "Start",
+                              stop_time AS "Stop",
+                              time_taken_minutes AS "Time Taken (Mins)",
+                              machine_ready_minutes AS "M/Rdy (Mins)",
+                              downtime_minutes AS "Tot.D/Time (Mins)",
+                              plan_qty AS "Plan Qty",
+                              production_qty AS "Prodn",
+                              rejection_qty AS "Rejn",
+                              net_production_qty AS "Net Prod.",
+                              production_weight_kg/1000.0 AS "Prodn Weight T",
+                              ppm AS "PPM",
+                              wastage_pct AS "Wstg %",
+                              operator_name AS "Operator",
+                              source_entry_by AS "Entby",
+                              CASE
+                                  WHEN COALESCE(import_status,'IMPORTED')='IGNORED'
+                                  THEN 'Review'
+                                  ELSE 'Included'
+                              END AS "ERP Status"
+                       FROM production_job_entries
+                       WHERE work_date BETWEEN ? AND ?
+                       ORDER BY work_date,shift,COALESCE(source_machine,erp_machine,''),start_time,entry_id""",
+                    (first.isoformat(),last.isoformat()),
+                )
+                if not report_df.empty:
+                    for _v196_col in [
+                        "Time Taken (Mins)","M/Rdy (Mins)","Tot.D/Time (Mins)",
+                        "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T","PPM","Wstg %"
+                    ]:
+                        if _v196_col in report_df.columns:
+                            report_df[_v196_col]=pd.to_numeric(
+                                report_df[_v196_col],errors="coerce"
+                            ).fillna(0.0)
+                    _v196_report_prodn=float(report_df["Prodn"].sum())
+                    _v196_report_rejn=float(report_df["Rejn"].sum())
+                    _v196_report_net=float(report_df["Net Prod."].sum())
+                    _v196_report_ton=float(report_df["Prodn Weight T"].sum())
+                    _v196_report_review=float(
+                        report_df.loc[
+                            report_df["ERP Status"]=="Review","Prodn Weight T"
+                        ].sum()
+                    )
+                    report_note=(
+                        f"Finsys-style period total · Prodn {_v196_report_prodn:,.0f} · "
+                        f"Rejn {_v196_report_rejn:,.0f} · Net {_v196_report_net:,.0f} · "
+                        f"Production Weight {_v196_report_ton:,.2f} T. "
+                        f"Review / unmapped weight {_v196_report_review:,.2f} T."
+                    )
+            except Exception as _v196_report_exc:
+                report_df=pd.DataFrame()
+                report_note=f"Job-wise production report could not be loaded: {_v196_report_exc}"
+
     elif report_type=="Production Performance":
         if report_div not in (ALL_DIVISIONS,"Greater Noida Plant"):
             report_df=pd.DataFrame()
