@@ -3379,6 +3379,20 @@ def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system
     )
     row=cur.fetchone()
     if not row or int(row[0] or 0)<=0:
+        if replace_existing:
+            cur.execute(
+                """
+                UPDATE production
+                SET production_ton=0,
+                    good_output_ton=0,
+                    waste_ton=0,
+                    yield_pct=0,
+                    waste_pct=0,
+                    remark='JOB DPR SYNC | No active job rows'
+                WHERE work_date=%s AND shift='DAY' AND machine=%s
+                """,
+                (date_text,machine),
+            )
         return
 
     source_rows=int(row[0] or 0)
