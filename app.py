@@ -15519,6 +15519,7 @@ elif page == "Operations":
                         _v195_machine_df["machine"].dropna().astype(str).tolist()
                         if not _v195_machine_df.empty else []
                     )
+                    _v195_alias_map=_v196_machine_alias_map()
 
                     _v195_net_errors=int((_v195_source["Net Qty Difference"]>0.01).sum())
                     _v195_total_ton=float(_v195_source["Production Ton"].sum())
@@ -15566,7 +15567,9 @@ elif page == "Operations":
                     _v195_summary["Production Ton"]=_v195_summary["Production_Ton"].round(2)
                     _v195_summary["Rejection Qty"]=_v195_summary["Rejection_Qty"].round(0)
                     _v195_summary["Target ERP Machine"]=_v195_summary["Source Machine"].apply(
-                        lambda x:_v195_suggest_machine(x,_v195_machine_options)
+                        lambda x:_v195_suggest_machine(
+                            x,_v195_machine_options,_v195_alias_map
+                        )
                     )
                     _v195_summary["Target ERP Machine"]=_v195_summary["Target ERP Machine"].replace(
                         "","IGNORE / REVIEW"
@@ -15802,19 +15805,54 @@ elif page == "Operations":
                         key=f"v195_prod_import_{_v195_hash[:12]}",
                     ):
                         _v195_ensure_production_import_schema()
+                        _v196_ensure_production_job_schema()
                         _v195_conn=get_pg_conn()
                         _v195_cur=None
                         try:
                             _v195_cur=_v195_conn.cursor()
+                            _v195_actor=str(_current_user.get("username") or "system")
 
-                            # Same source file may be safely re-imported after correcting its mapping.
+                            # Same source file can be re-imported safely after mapping corrections.
                             _v195_cur.execute(
                                 "DELETE FROM production_import_detail WHERE source_file_hash=%s",
                                 (_v195_hash,),
                             )
+                            _v195_cur.execute(
+                                "DELETE FROM production_job_entries WHERE source_file_hash=%s",
+                                (_v195_hash,),
+                            )
 
+                            # Remember approved source-machine aliases for future uploads.
+                            for _,_maprow in _v195_mapping.iterrows():
+                                _src_machine=str(_maprow.get("Source Machine") or "").strip()
+                                _src_stage=str(_maprow.get("Source Machine Group") or "").strip()
+                                _erp_machine=str(_maprow.get("Target ERP Machine") or "").strip()
+                                if _src_machine and _erp_machine and _erp_machine!="IGNORE / REVIEW":
+                                    _v195_cur.execute(
+                                        """
+                                        INSERT INTO production_machine_aliases(
+                                            source_machine,erp_machine,source_stage,active,updated_by,updated_at
+                                        ) VALUES (%s,%s,%s,TRUE,%s,CURRENT_TIMESTAMP)
+                                        ON CONFLICT(source_machine) DO UPDATE SET
+                                            erp_machine=excluded.erp_machine,
+                                            source_stage=excluded.source_stage,
+                                            active=TRUE,
+                                            updated_by=excluded.updated_by,
+                                            updated_at=CURRENT_TIMESTAMP
+                                        """,
+                                        (_src_machine,_erp_machine,_src_stage,_v195_actor),
+                                    )
+
+                            # Keep a compact immutable-style import-detail audit copy.
                             _v195_detail_values=[]
+                            # Also store the complete DPR rows used for day-to-day ERP production.
+                            _v196_job_values=[]
                             for _,_r in _v195_source.iterrows():
+                                _erp_machine=(
+                                    ""
+                                    if str(_r["ERP Machine"])=="IGNORE / REVIEW"
+                                    else str(_r["ERP Machine"])
+                                )
                                 _v195_detail_values.append((
                                     _v195_hash,
                                     str(_v195_prod_file.name),
@@ -15823,7 +15861,7 @@ elif page == "Operations":
                                     str(_r["Source Shift"] or ""),
                                     str(_r["Source Machine Group"] or ""),
                                     str(_r["Source Machine"] or ""),
-                                    "" if str(_r["ERP Machine"])=="IGNORE / REVIEW" else str(_r["ERP Machine"]),
+                                    _erp_machine,
                                     str(_r["Import Status"]),
                                     str(_r["Voucher No"] or ""),
                                     str(_r["Job No"] or ""),
@@ -15837,7 +15875,41 @@ elif page == "Operations":
                                     float(_r["Production Weight Kg"] or 0),
                                     float(_r["Production Ton"] or 0),
                                     str(_r["Operator"] or ""),
-                                    str(_current_user.get("username") or ""),
+                                    _v195_actor,
+                                ))
+                                _v196_job_values.append((
+                                    _r["Production Date"],
+                                    str(_r["Source Shift"] or "A"),
+                                    str(_r["Source Machine Group"] or ""),
+                                    _erp_machine,
+                                    str(_r["Source Machine"] or ""),
+                                    str(_r["Machine Code"] or ""),
+                                    str(_r["Voucher No"] or ""),
+                                    str(_r["Job No"] or ""),
+                                    str(_r["Item Code"] or ""),
+                                    str(_r["Item"] or ""),
+                                    str(_r["Start"] or ""),
+                                    str(_r["Stop"] or ""),
+                                    float(_r["Time Taken Min"] or 0),
+                                    0.0,
+                                    0.0,
+                                    float(_r["Plan Qty"] or 0),
+                                    float(_r["Production Qty"] or 0),
+                                    float(_r["Rejection Qty"] or 0),
+                                    float(_r["Net Production Qty"] or 0),
+                                    float(_r["Production Weight Kg"] or 0),
+                                    0.0,
+                                    float(_r["Wastage %"] or 0),
+                                    str(_r["Operator"] or ""),
+                                    str(_r["Entered By"] or ""),
+                                    str(_r["Work Order"] or ""),
+                                    str(_r["Source Reference"] or ""),
+                                    "FINSYS_EXCEL",
+                                    _v195_hash,
+                                    str(_v195_prod_file.name),
+                                    int(_r["Source Row"]),
+                                    str(_r["Import Status"]),
+                                    _v195_actor,
                                 ))
 
                             execute_values(
@@ -15855,78 +15927,33 @@ elif page == "Operations":
                                 page_size=1000,
                             )
 
-                            _v195_profiles={
-                                str(r["machine"]):r.to_dict()
-                                for _,r in _v195_machine_df.iterrows()
-                            }
-
-                            for _,_r in _v195_daily.iterrows():
-                                _v195_date=_r["Production Date"]
-                                _v195_machine=str(_r["ERP Machine"])
-                                _v195_profile=_v195_profiles.get(_v195_machine,{})
-                                _v195_target_type=str(
-                                    _v195_profile.get("target_type") or "MATERIAL_CONVERSION"
-                                )
-                                _v195_target=(
-                                    float(_v195_profile.get("daily_target_ton") or 0)
-                                    if _v195_target_type=="FIXED_TON" else 0.0
-                                )
-                                _v195_good=float(_r["Production_Ton"] or 0)
-                                _v195_source_waste=float(_r["Source Waste %"] or 0)
-                                _v195_yield=float(_r["Yield %"] or 0)
-                                _v195_remark=(
-                                    f"FINSYS PRODUCTION IMPORT | {_v195_prod_file.name} | "
-                                    f"SourceRows={int(_r['Source_Rows'])}; "
-                                    f"ProductionQty={float(_r['Production_Qty']):.0f}; "
-                                    f"RejectionQty={float(_r['Rejection_Qty']):.0f}; "
-                                    f"NetQty={float(_r['Net_Qty']):.0f}"
-                                )
-
-                                if _v195_replace:
-                                    _v195_cur.execute(
-                                        "DELETE FROM production WHERE work_date=%s AND shift='DAY' AND machine=%s",
-                                        (_v195_date.isoformat(),_v195_machine),
-                                    )
-
-                                _v195_insert_sql="""
-                                    INSERT INTO production(
-                                        work_date,shift,machine,production_ton,target_ton,waste_ton,
-                                        breakdown_hours,paper_cost,ink_cost,glue_cost,other_material_cost,
-                                        target_type,opening_wip_ton,material_received_ton,
-                                        material_available_ton,material_processed_ton,good_output_ton,
-                                        closing_wip_ton,conversion_pct,yield_pct,waste_pct,remark
-                                    ) VALUES (
-                                        %s,'DAY',%s,%s,%s,0,0,0,0,0,0,
-                                        %s,0,0,0,0,%s,0,0,%s,%s,%s
-                                    )
+                            execute_values(
+                                _v195_cur,
                                 """
-                                if _v195_replace:
-                                    _v195_insert_sql += """
-                                        ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-                                            production_ton=excluded.production_ton,
-                                            target_ton=excluded.target_ton,
-                                            good_output_ton=excluded.good_output_ton,
-                                            target_type=excluded.target_type,
-                                            yield_pct=excluded.yield_pct,
-                                            waste_pct=excluded.waste_pct,
-                                            remark=excluded.remark
-                                    """
-                                else:
-                                    _v195_insert_sql += """
-                                        ON CONFLICT(work_date,shift,machine) DO NOTHING
-                                    """
-                                _v195_cur.execute(
-                                    _v195_insert_sql,
-                                    (
-                                        _v195_date.isoformat(),_v195_machine,_v195_good,_v195_target,
-                                        _v195_target_type,_v195_good,_v195_yield,_v195_source_waste,
-                                        _v195_remark,
-                                    ),
-                                )
+                                INSERT INTO production_job_entries(
+                                    work_date,shift,stage,erp_machine,source_machine,machine_code,
+                                    voucher_no,job_no,part_no,item_description,start_time,stop_time,
+                                    time_taken_minutes,machine_ready_minutes,downtime_minutes,
+                                    plan_qty,production_qty,rejection_qty,net_production_qty,
+                                    production_weight_kg,ppm,wastage_pct,operator_name,source_entry_by,
+                                    work_order_label,source_reference,source_type,source_file_hash,
+                                    source_file_name,source_row_no,import_status,created_by
+                                ) VALUES %s
+                                """,
+                                _v196_job_values,
+                                page_size=1000,
+                            )
+
+                            # Rebuild only output metrics in the existing daily Production rows.
+                            # Material/reel/WIP fields already entered elsewhere are preserved.
+                            _v196_refresh_daily_for_file(
+                                _v195_cur,_v195_hash,_v195_actor,
+                                replace_existing=bool(_v195_replace),
+                            )
 
                             _v195_conn.commit()
                             record_audit_event(
-                                _current_user["username"],
+                                _v195_actor,
                                 "PRODUCTION_EXCEL_IMPORT",
                                 "Operations",
                                 "Production Import",
@@ -15939,9 +15966,11 @@ elif page == "Operations":
                                 ),
                             )
                             st.success(
-                                f"Production import completed: {len(_v195_daily):,} Date + Machine daily row(s), "
-                                f"{float(_v195_mapped['Production Ton'].sum()):,.2f} T mapped production. "
-                                f"{len(_v195_ignored):,} source row(s) kept for audit as ignored/review."
+                                f"Production imported from the full job-wise DPR: "
+                                f"{len(_v195_source):,} source row(s), "
+                                f"{float(_v195_mapped['Production Ton'].sum()):,.2f} T mapped output, "
+                                f"{len(_v195_daily):,} daily Date + Machine roll-up row(s). "
+                                "The detailed job rows are retained for the Finsys-style production report."
                             )
                             st.rerun()
                         except Exception as _v195_import_exc:
