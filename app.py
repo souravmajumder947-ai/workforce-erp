@@ -16003,6 +16003,29 @@ elif page == "Operations":
                             _v195_actor=str(_current_user.get("username") or "system")
 
                             # Same source file can be re-imported safely after mapping corrections.
+                            # Remember its previous daily keys so old mappings are also recalculated.
+                            _v195_cur.execute(
+                                """
+                                SELECT DISTINCT work_date,erp_machine
+                                FROM production_job_entries
+                                WHERE source_file_hash=%s
+                                  AND COALESCE(erp_machine,'')<>''
+                                """,
+                                (_v195_hash,),
+                            )
+                            _v196_old_import_keys=_v195_cur.fetchall()
+                            _v195_cur.execute(
+                                """
+                                SELECT DISTINCT work_date
+                                FROM production_job_entries
+                                WHERE source_file_hash=%s
+                                """,
+                                (_v195_hash,),
+                            )
+                            _v196_old_import_dates=[
+                                r[0] for r in _v195_cur.fetchall()
+                            ]
+
                             _v195_cur.execute(
                                 "DELETE FROM production_import_detail WHERE source_file_hash=%s",
                                 (_v195_hash,),
@@ -16141,10 +16164,21 @@ elif page == "Operations":
 
                             # Rebuild only output metrics in the existing daily Production rows.
                             # Material/reel/WIP fields already entered elsewhere are preserved.
+                            # Recalculate both previous and current mappings. This prevents
+                            # stale daily totals if an alias was changed during re-import.
+                            for _old_date,_old_machine in _v196_old_import_keys:
+                                _v196_sync_daily_production(
+                                    _v195_cur,_old_date,_old_machine,_v195_actor,
+                                    replace_existing=bool(_v195_replace),
+                                )
                             _v196_refresh_daily_for_file(
                                 _v195_cur,_v195_hash,_v195_actor,
                                 replace_existing=bool(_v195_replace),
                             )
+                            for _old_date in _v196_old_import_dates:
+                                _v196_sync_review_bucket(
+                                    _v195_cur,_old_date,_v195_actor
+                                )
                             _v196_refresh_review_for_file(
                                 _v195_cur,_v195_hash,_v195_actor
                             )
@@ -16165,10 +16199,12 @@ elif page == "Operations":
                             )
                             st.success(
                                 f"Production imported from the full job-wise DPR: "
-                                f"{len(_v195_source):,} source row(s), "
-                                f"{float(_v195_mapped['Production Ton'].sum()):,.2f} T mapped output, "
-                                f"{len(_v195_daily):,} daily Date + Machine roll-up row(s). "
-                                "The detailed job rows are retained for the Finsys-style production report."
+                                f"{len(_v195_source):,} source row(s) · "
+                                f"Source weight {_v195_total_ton:,.2f} T · "
+                                f"Mapped {_v195_mapped_ton:,.2f} T · "
+                                f"Review {_v195_ignored_ton:,.2f} T. "
+                                "Overall ERP production keeps the full source weight; unresolved rows are held "
+                                "in Production Review (Unmapped) until their machine is confirmed."
                             )
                             st.rerun()
                         except Exception as _v195_import_exc:
