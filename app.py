@@ -15998,6 +15998,565 @@ elif page == "Operations":
                 except Exception as _v195_parse_exc:
                     st.error(f"Unable to preview production Excel: {_v195_parse_exc}")
 
+        # V19.6 FINSYS-STYLE JOB-WISE PRODUCTION ENTRY
+        st.markdown("### Job-wise Production Entry")
+        st.caption(
+            "This is the live production-entry format based on your Finsys DPR: "
+            "Date · Shift · Stage · Machine · Item · Job/Part · Start/Stop · Time · "
+            "Plan · Production · Rejection · Net Production · Weight · PPM · Wastage."
+        )
+
+        try:
+            _v196_ensure_production_job_schema()
+            _v196_schema_ready=True
+        except Exception as _v196_schema_exc:
+            _v196_schema_ready=False
+            st.error(f"Unable to prepare job-wise production storage: {_v196_schema_exc}")
+
+        if _v196_schema_ready:
+            _v196_machine_df=get_machine_list_cached()
+            _v196_machine_options=(
+                _v196_machine_df["machine"].dropna().astype(str).tolist()
+                if not _v196_machine_df.empty else []
+            )
+
+            if not _v196_machine_options:
+                st.warning(
+                    "Machine Master is empty. Create/activate production machines in Master Centre first."
+                )
+            else:
+                _v196_stage_options=[
+                    "AUTO CORRUGATION",
+                    "PRINTING/SLOTTING",
+                    "PRINTING",
+                    "SLOTTING",
+                    "PRINTING/SLOTTING/DIECUTTING",
+                    "AUTO FOLDING/GLUING",
+                    "DIE CUTTING",
+                    "ROTTERY / DIE",
+                    "MANUAL STITCHING",
+                    "MANUAL PASTING",
+                    "LINER INSERTION",
+                ]
+
+                _v196_f1,_v196_f2,_v196_f3,_v196_f4=st.columns([1,0.8,1.2,1.2])
+                _v196_job_date=_v196_f1.date_input(
+                    "Production Date",
+                    value=global_work_date,
+                    format="DD/MM/YYYY",
+                    key="v196_job_date",
+                )
+                _v196_job_shift=_v196_f2.selectbox(
+                    "Shift",["A","B"],key="v196_job_shift"
+                )
+                _v196_job_machine=_v196_f3.selectbox(
+                    "ERP Machine",_v196_machine_options,key="v196_job_machine"
+                )
+                _v196_stage=_v196_f4.selectbox(
+                    "Stage",_v196_stage_options,key="v196_job_stage"
+                )
+
+                _v196_existing=read_df(
+                    """
+                    SELECT *
+                    FROM production_job_entries
+                    WHERE work_date=? AND shift=? AND erp_machine=?
+                      AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+                    ORDER BY start_time,entry_id
+                    """,
+                    (
+                        _v196_job_date.isoformat(),
+                        _v196_job_shift,
+                        _v196_job_machine,
+                    ),
+                )
+                _v196_choices=["➕ New Production Job"]
+                _v196_labels={}
+                if not _v196_existing.empty:
+                    for _,_row in _v196_existing.iterrows():
+                        _id=str(int(_row["entry_id"]))
+                        _v196_choices.append(_id)
+                        _v196_labels[_id]=(
+                            f"#{_id} · {_clean_text(_row.get('job_no')) or 'No Job'} · "
+                            f"{_clean_text(_row.get('item_description'))[:65]}"
+                        )
+
+                _v196_selected=st.selectbox(
+                    "Production Job",
+                    _v196_choices,
+                    format_func=lambda x:_v196_labels.get(x,x),
+                    key="v196_job_select",
+                )
+                _v196_er={}
+                if _v196_selected!="➕ New Production Job":
+                    _v196_match=_v196_existing[
+                        _v196_existing["entry_id"].astype(str)==str(_v196_selected)
+                    ]
+                    if not _v196_match.empty:
+                        _v196_er=_v196_match.iloc[0].to_dict()
+
+                _v196_token=(
+                    "new" if not _v196_er else str(int(_v196_er.get("entry_id")))
+                )
+                _v196_stage_existing=_clean_text(_v196_er.get("stage")) or _v196_stage
+                if _v196_stage_existing not in _v196_stage_options:
+                    _v196_stage_options=[_v196_stage_existing]+_v196_stage_options
+
+                with st.expander(
+                    "Production Job Details",
+                    expanded=True,
+                ):
+                    _v196_a1,_v196_a2,_v196_a3,_v196_a4=st.columns(4)
+                    _v196_source_machine=_v196_a1.text_input(
+                        "Source / Finsys Machine Name",
+                        value=_clean_text(_v196_er.get("source_machine")) or _v196_job_machine,
+                        key=f"v196_source_machine_{_v196_token}",
+                    )
+                    _v196_machine_code=_v196_a2.text_input(
+                        "Machine Code",
+                        value=_clean_text(_v196_er.get("machine_code")),
+                        key=f"v196_machine_code_{_v196_token}",
+                    )
+                    _v196_operator=_v196_a3.text_input(
+                        "Operator",
+                        value=_clean_text(_v196_er.get("operator_name")),
+                        key=f"v196_operator_{_v196_token}",
+                    )
+                    _v196_entry_by=_v196_a4.text_input(
+                        "Entry By",
+                        value=(
+                            _clean_text(_v196_er.get("source_entry_by"))
+                            or str(_current_user.get("full_name") or _current_user.get("username") or "")
+                        ),
+                        key=f"v196_entry_by_{_v196_token}",
+                    )
+
+                    _v196_b1,_v196_b2,_v196_b3,_v196_b4=st.columns([1,1,1,2.2])
+                    _v196_voucher=_v196_b1.text_input(
+                        "Voucher No.",
+                        value=_clean_text(_v196_er.get("voucher_no")),
+                        key=f"v196_voucher_{_v196_token}",
+                    )
+                    _v196_job_no=_v196_b2.text_input(
+                        "Job No.",
+                        value=_clean_text(_v196_er.get("job_no")),
+                        key=f"v196_job_no_{_v196_token}",
+                    )
+                    _v196_part_no=_v196_b3.text_input(
+                        "Part No. / Item Code",
+                        value=_clean_text(_v196_er.get("part_no")),
+                        key=f"v196_part_{_v196_token}",
+                    )
+                    _v196_item=_v196_b4.text_input(
+                        "Item / Product Description",
+                        value=_clean_text(_v196_er.get("item_description")),
+                        key=f"v196_item_{_v196_token}",
+                    )
+
+                    _v196_c1,_v196_c2,_v196_c3,_v196_c4,_v196_c5=st.columns(5)
+                    _v196_start=_v196_c1.text_input(
+                        "Start (HH:MM)",
+                        value=_clean_text(_v196_er.get("start_time")),
+                        placeholder="09:35",
+                        key=f"v196_start_{_v196_token}",
+                    )
+                    _v196_stop=_v196_c2.text_input(
+                        "Stop (HH:MM)",
+                        value=_clean_text(_v196_er.get("stop_time")),
+                        placeholder="10:00",
+                        key=f"v196_stop_{_v196_token}",
+                    )
+                    _v196_auto_time=_v196_time_minutes(_v196_start,_v196_stop)
+                    _v196_use_auto_time=_v196_c3.checkbox(
+                        "Use Start/Stop Time",
+                        value=True,
+                        key=f"v196_use_auto_time_{_v196_token}",
+                    )
+                    _v196_manual_time=_v196_c4.number_input(
+                        "Time Taken (Mins)",
+                        min_value=0.0,
+                        value=float(_v196_er.get("time_taken_minutes") or _v196_auto_time or 0),
+                        step=1.0,
+                        key=f"v196_time_{_v196_token}",
+                        disabled=_v196_use_auto_time,
+                    )
+                    _v196_ppm=_v196_c5.number_input(
+                        "PPM",
+                        min_value=0.0,
+                        value=float(_v196_er.get("ppm") or 0),
+                        step=1.0,
+                        key=f"v196_ppm_{_v196_token}",
+                    )
+                    _v196_time_taken=(
+                        float(_v196_auto_time)
+                        if _v196_use_auto_time else float(_v196_manual_time)
+                    )
+
+                    _v196_d1,_v196_d2,_v196_d3,_v196_d4,_v196_d5,_v196_d6=st.columns(6)
+                    _v196_mready=_v196_d1.number_input(
+                        "M/Rdy (Mins)",
+                        min_value=0.0,
+                        value=float(_v196_er.get("machine_ready_minutes") or 0),
+                        step=1.0,
+                        key=f"v196_mready_{_v196_token}",
+                    )
+                    _v196_downtime=_v196_d2.number_input(
+                        "Tot.D/Time (Mins)",
+                        min_value=0.0,
+                        value=float(_v196_er.get("downtime_minutes") or 0),
+                        step=1.0,
+                        key=f"v196_downtime_{_v196_token}",
+                    )
+                    _v196_plan=_v196_d3.number_input(
+                        "Plan Qty",
+                        min_value=0.0,
+                        value=float(_v196_er.get("plan_qty") or 0),
+                        step=1.0,
+                        key=f"v196_plan_{_v196_token}",
+                    )
+                    _v196_prodn=_v196_d4.number_input(
+                        "Prodn",
+                        min_value=0.0,
+                        value=float(_v196_er.get("production_qty") or 0),
+                        step=1.0,
+                        key=f"v196_prodn_{_v196_token}",
+                    )
+                    _v196_rejn=_v196_d5.number_input(
+                        "Rejn",
+                        min_value=0.0,
+                        value=float(_v196_er.get("rejection_qty") or 0),
+                        step=1.0,
+                        key=f"v196_rejn_{_v196_token}",
+                    )
+                    _v196_weight=_v196_d6.number_input(
+                        "Prodn Weight (Kg)",
+                        min_value=0.0,
+                        value=float(_v196_er.get("production_weight_kg") or 0),
+                        step=0.1,
+                        format="%.3f",
+                        key=f"v196_weight_{_v196_token}",
+                    )
+
+                    _v196_net=max(float(_v196_prodn)-float(_v196_rejn),0.0)
+                    _v196_waste_pct=(
+                        float(_v196_rejn)/float(_v196_prodn)*100.0
+                        if float(_v196_prodn)>0 else 0.0
+                    )
+                    _v196_m1,_v196_m2,_v196_m3,_v196_m4=st.columns(4)
+                    _v196_m1.metric("Time Taken",f"{_v196_time_taken:.0f} min")
+                    _v196_m2.metric("Net Production",f"{_v196_net:,.0f}")
+                    _v196_m3.metric("Wstg %",f"{_v196_waste_pct:.2f}%")
+                    _v196_m4.metric("Production Ton",f"{float(_v196_weight)/1000.0:.3f} T")
+
+                    if float(_v196_rejn)>float(_v196_prodn):
+                        st.error("Rejection cannot be greater than Production.")
+                    elif float(_v196_prodn)>0 and float(_v196_weight)<=0:
+                        st.warning(
+                            "Production Weight is zero. The quantity can be saved, but tonnage/productivity reports "
+                            "will not increase until the production weight is entered."
+                        )
+
+                    _v196_save_col,_v196_delete_col=st.columns([3,1])
+                    _v196_save_clicked=_v196_save_col.button(
+                        "Save / Update Production Job",
+                        type="primary",
+                        use_container_width=True,
+                        disabled=float(_v196_rejn)>float(_v196_prodn),
+                        key=f"v196_save_job_{_v196_token}",
+                    )
+                    _v196_delete_clicked=_v196_delete_col.button(
+                        "Delete Job",
+                        use_container_width=True,
+                        disabled=not bool(_v196_er),
+                        key=f"v196_delete_job_{_v196_token}",
+                    )
+
+                    if _v196_save_clicked:
+                        _v196_conn=get_pg_conn()
+                        _v196_cur=None
+                        try:
+                            _v196_cur=_v196_conn.cursor()
+                            _v196_actor=str(_current_user.get("username") or "system")
+                            _v196_old_date=(
+                                _v196_er.get("work_date") if _v196_er else None
+                            )
+                            _v196_old_machine=(
+                                _clean_text(_v196_er.get("erp_machine")) if _v196_er else ""
+                            )
+
+                            if _v196_er:
+                                _v196_cur.execute(
+                                    """
+                                    UPDATE production_job_entries SET
+                                        work_date=%s,shift=%s,stage=%s,erp_machine=%s,
+                                        source_machine=%s,machine_code=%s,voucher_no=%s,
+                                        job_no=%s,part_no=%s,item_description=%s,
+                                        start_time=%s,stop_time=%s,time_taken_minutes=%s,
+                                        machine_ready_minutes=%s,downtime_minutes=%s,
+                                        plan_qty=%s,production_qty=%s,rejection_qty=%s,
+                                        net_production_qty=%s,production_weight_kg=%s,
+                                        ppm=%s,wastage_pct=%s,operator_name=%s,
+                                        source_entry_by=%s,source_type='MANUAL',
+                                        import_status='IMPORTED',updated_at=CURRENT_TIMESTAMP
+                                    WHERE entry_id=%s
+                                    """,
+                                    (
+                                        _v196_job_date.isoformat(),_v196_job_shift,_v196_stage,
+                                        _v196_job_machine,_v196_source_machine.strip(),
+                                        _v196_machine_code.strip(),_v196_voucher.strip(),
+                                        _v196_job_no.strip(),_v196_part_no.strip(),_v196_item.strip(),
+                                        _v196_start.strip(),_v196_stop.strip(),_v196_time_taken,
+                                        float(_v196_mready),float(_v196_downtime),
+                                        float(_v196_plan),float(_v196_prodn),float(_v196_rejn),
+                                        _v196_net,float(_v196_weight),float(_v196_ppm),
+                                        _v196_waste_pct,_v196_operator.strip(),_v196_entry_by.strip(),
+                                        int(_v196_er["entry_id"]),
+                                    ),
+                                )
+                                _v196_action="PRODUCTION_JOB_UPDATE"
+                                _v196_entity=str(int(_v196_er["entry_id"]))
+                            else:
+                                _v196_cur.execute(
+                                    """
+                                    INSERT INTO production_job_entries(
+                                        work_date,shift,stage,erp_machine,source_machine,machine_code,
+                                        voucher_no,job_no,part_no,item_description,start_time,stop_time,
+                                        time_taken_minutes,machine_ready_minutes,downtime_minutes,
+                                        plan_qty,production_qty,rejection_qty,net_production_qty,
+                                        production_weight_kg,ppm,wastage_pct,operator_name,
+                                        source_entry_by,source_type,import_status,created_by
+                                    ) VALUES (
+                                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                                        'MANUAL','IMPORTED',%s
+                                    )
+                                    RETURNING entry_id
+                                    """,
+                                    (
+                                        _v196_job_date.isoformat(),_v196_job_shift,_v196_stage,
+                                        _v196_job_machine,_v196_source_machine.strip(),
+                                        _v196_machine_code.strip(),_v196_voucher.strip(),
+                                        _v196_job_no.strip(),_v196_part_no.strip(),_v196_item.strip(),
+                                        _v196_start.strip(),_v196_stop.strip(),_v196_time_taken,
+                                        float(_v196_mready),float(_v196_downtime),
+                                        float(_v196_plan),float(_v196_prodn),float(_v196_rejn),
+                                        _v196_net,float(_v196_weight),float(_v196_ppm),
+                                        _v196_waste_pct,_v196_operator.strip(),_v196_entry_by.strip(),
+                                        _v196_actor,
+                                    ),
+                                )
+                                _v196_new_id=_v196_cur.fetchone()[0]
+                                _v196_action="PRODUCTION_JOB_CREATE"
+                                _v196_entity=str(_v196_new_id)
+
+                            if _v196_source_machine.strip():
+                                _v196_cur.execute(
+                                    """
+                                    INSERT INTO production_machine_aliases(
+                                        source_machine,erp_machine,source_stage,active,updated_by,updated_at
+                                    ) VALUES (%s,%s,%s,TRUE,%s,CURRENT_TIMESTAMP)
+                                    ON CONFLICT(source_machine) DO UPDATE SET
+                                        erp_machine=excluded.erp_machine,
+                                        source_stage=excluded.source_stage,
+                                        active=TRUE,
+                                        updated_by=excluded.updated_by,
+                                        updated_at=CURRENT_TIMESTAMP
+                                    """,
+                                    (
+                                        _v196_source_machine.strip(),_v196_job_machine,
+                                        _v196_stage,_v196_actor,
+                                    ),
+                                )
+
+                            _v196_sync_daily_production(
+                                _v196_cur,_v196_job_date,_v196_job_machine,
+                                _v196_actor,replace_existing=True,
+                            )
+                            if (
+                                _v196_old_date
+                                and _v196_old_machine
+                                and (
+                                    str(_v196_old_date)!=_v196_job_date.isoformat()
+                                    or _v196_old_machine!=_v196_job_machine
+                                )
+                            ):
+                                _v196_sync_daily_production(
+                                    _v196_cur,_v196_old_date,_v196_old_machine,
+                                    _v196_actor,replace_existing=True,
+                                )
+
+                            _v196_conn.commit()
+                            record_audit_event(
+                                _v196_actor,_v196_action,"Operations",
+                                "Production Job",_v196_entity,
+                                (
+                                    f"Date={_v196_job_date.isoformat()}; Shift={_v196_job_shift}; "
+                                    f"Machine={_v196_job_machine}; Job={_v196_job_no}; "
+                                    f"Prodn={float(_v196_prodn):.0f}; Rejn={float(_v196_rejn):.0f}; "
+                                    f"Net={_v196_net:.0f}; WeightKg={float(_v196_weight):.3f}"
+                                ),
+                            )
+                            st.success("Production job saved and daily production updated.")
+                            st.rerun()
+                        except Exception as _v196_save_exc:
+                            if _v196_conn is not None:
+                                _v196_conn.rollback()
+                            st.error(f"Production job could not be saved: {_v196_save_exc}")
+                        finally:
+                            if _v196_cur is not None:
+                                _v196_cur.close()
+                            if _v196_conn is not None:
+                                _v196_conn.close()
+
+                    if _v196_delete_clicked and _v196_er:
+                        _v196_conn=get_pg_conn()
+                        _v196_cur=None
+                        try:
+                            _v196_cur=_v196_conn.cursor()
+                            _v196_actor=str(_current_user.get("username") or "system")
+                            _v196_old_date=_v196_er.get("work_date")
+                            _v196_old_machine=_clean_text(_v196_er.get("erp_machine"))
+                            _v196_cur.execute(
+                                "DELETE FROM production_job_entries WHERE entry_id=%s",
+                                (int(_v196_er["entry_id"]),),
+                            )
+                            _v196_sync_daily_production(
+                                _v196_cur,_v196_old_date,_v196_old_machine,
+                                _v196_actor,replace_existing=True,
+                            )
+                            _v196_conn.commit()
+                            record_audit_event(
+                                _v196_actor,"PRODUCTION_JOB_DELETE","Operations",
+                                "Production Job",str(int(_v196_er["entry_id"])),
+                                (
+                                    f"Date={_v196_old_date}; Machine={_v196_old_machine}; "
+                                    f"Job={_clean_text(_v196_er.get('job_no'))}"
+                                ),
+                            )
+                            st.success("Production job deleted and daily production recalculated.")
+                            st.rerun()
+                        except Exception as _v196_delete_exc:
+                            if _v196_conn is not None:
+                                _v196_conn.rollback()
+                            st.error(f"Production job could not be deleted: {_v196_delete_exc}")
+                        finally:
+                            if _v196_cur is not None:
+                                _v196_cur.close()
+                            if _v196_conn is not None:
+                                _v196_conn.close()
+
+                _v196_day_jobs=read_df(
+                    """
+                    SELECT entry_id AS "ID",
+                           shift AS "Shift",
+                           stage AS "Stage",
+                           COALESCE(source_machine,erp_machine) AS "Machine",
+                           item_description AS "Item",
+                           job_no AS "Job No.",
+                           part_no AS "Part No.",
+                           start_time AS "Start",
+                           stop_time AS "Stop",
+                           time_taken_minutes AS "Time Taken",
+                           machine_ready_minutes AS "M/Rdy (Mins)",
+                           downtime_minutes AS "Tot.D/Time (Mins)",
+                           plan_qty AS "Plan Qty",
+                           production_qty AS "Prodn",
+                           rejection_qty AS "Rejn",
+                           net_production_qty AS "Net Prod.",
+                           production_weight_kg/1000.0 AS "Prodn Weight T",
+                           ppm AS "PPM",
+                           wastage_pct AS "Wstg %",
+                           operator_name AS "Operator",
+                           source_entry_by AS "Entby"
+                    FROM production_job_entries
+                    WHERE work_date=? AND erp_machine=?
+                      AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+                    ORDER BY shift,start_time,entry_id
+                    """,
+                    (_v196_job_date.isoformat(),_v196_job_machine),
+                )
+
+                st.markdown("#### Daily Production Report")
+                if _v196_day_jobs.empty:
+                    st.info(
+                        f"No job-wise production is saved for "
+                        f"{_v196_job_date.strftime('%d/%m/%Y')} · {_v196_job_machine}."
+                    )
+                else:
+                    for _nc in [
+                        "Time Taken","M/Rdy (Mins)","Tot.D/Time (Mins)",
+                        "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T","PPM","Wstg %"
+                    ]:
+                        if _nc in _v196_day_jobs.columns:
+                            _v196_day_jobs[_nc]=pd.to_numeric(
+                                _v196_day_jobs[_nc],errors="coerce"
+                            ).fillna(0.0)
+
+                    _v196_plan_total=float(_v196_day_jobs["Plan Qty"].sum())
+                    _v196_prodn_total=float(_v196_day_jobs["Prodn"].sum())
+                    _v196_rejn_total=float(_v196_day_jobs["Rejn"].sum())
+                    _v196_net_total=float(_v196_day_jobs["Net Prod."].sum())
+                    _v196_ton_total=float(_v196_day_jobs["Prodn Weight T"].sum())
+                    _v196_waste_total=(
+                        _v196_rejn_total/_v196_prodn_total*100.0
+                        if _v196_prodn_total>0 else 0.0
+                    )
+                    _v196_s1,_v196_s2,_v196_s3,_v196_s4,_v196_s5,_v196_s6=st.columns(6)
+                    _v196_s1.metric("Jobs",f"{len(_v196_day_jobs):,}")
+                    _v196_s2.metric("Plan Qty",f"{_v196_plan_total:,.0f}")
+                    _v196_s3.metric("Prodn",f"{_v196_prodn_total:,.0f}")
+                    _v196_s4.metric("Rejn",f"{_v196_rejn_total:,.0f}")
+                    _v196_s5.metric("Net Prod.",f"{_v196_net_total:,.0f}")
+                    _v196_s6.metric("Weight",f"{_v196_ton_total:,.2f} T",f"Wstg {_v196_waste_total:.2f}%")
+
+                    _v196_show=_v196_day_jobs.copy()
+                    _v196_show.insert(0,"S.No",range(1,len(_v196_show)+1))
+                    st.dataframe(
+                        _v196_show,
+                        hide_index=True,
+                        use_container_width=True,
+                        height=min(620,max(260,35*min(len(_v196_show)+1,17))),
+                        column_config={
+                            "Prodn Weight T":st.column_config.NumberColumn(
+                                "Prodn Weight T",format="%.3f"
+                            ),
+                            "Wstg %":st.column_config.NumberColumn("Wstg %",format="%.2f"),
+                            "PPM":st.column_config.NumberColumn("PPM",format="%.2f"),
+                        },
+                    )
+
+                _v196_day_summary=read_df(
+                    """
+                    SELECT shift AS "Shift",
+                           COALESCE(source_machine,erp_machine) AS "Machine",
+                           COUNT(*) AS "Jobs",
+                           COALESCE(SUM(plan_qty),0) AS "Plan Qty",
+                           COALESCE(SUM(production_qty),0) AS "Prodn",
+                           COALESCE(SUM(rejection_qty),0) AS "Rejn",
+                           COALESCE(SUM(net_production_qty),0) AS "Net Prod.",
+                           COALESCE(SUM(production_weight_kg),0)/1000.0 AS "Prodn Weight T"
+                    FROM production_job_entries
+                    WHERE work_date=?
+                      AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+                      AND COALESCE(erp_machine,'')<>''
+                    GROUP BY shift,COALESCE(source_machine,erp_machine)
+                    ORDER BY shift,"Machine"
+                    """,
+                    (_v196_job_date.isoformat(),),
+                )
+                if not _v196_day_summary.empty:
+                    st.markdown("#### Date Total by Shift / Machine")
+                    st.dataframe(
+                        _v196_day_summary,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Prodn Weight T":st.column_config.NumberColumn(
+                                "Prodn Weight T",format="%.2f"
+                            )
+                        },
+                    )
+
         # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
         st.markdown("### Daily Production Entry")
         st.caption(
