@@ -19214,6 +19214,27 @@ elif page == "Reports":
                         "Go to Operations → Production Entry and save production for the same Date + Machine."
                     )
 
+    if report_type=="Production Job-wise DPR" and not report_df.empty:
+        _pj_prodn=float(pd.to_numeric(report_df["Prodn"],errors="coerce").fillna(0).sum())
+        _pj_rejn=float(pd.to_numeric(report_df["Rejn"],errors="coerce").fillna(0).sum())
+        _pj_net=float(pd.to_numeric(report_df["Net Prod."],errors="coerce").fillna(0).sum())
+        _pj_ton=float(pd.to_numeric(report_df["Prodn Weight T"],errors="coerce").fillna(0).sum())
+        _pj_review=float(
+            pd.to_numeric(
+                report_df.loc[report_df["ERP Status"]=="Review","Prodn Weight T"],
+                errors="coerce",
+            ).fillna(0).sum()
+        )
+        _pj_waste_pct=(_pj_rejn/_pj_prodn*100.0) if _pj_prodn>0 else 0.0
+        v5_kpis([
+            ("Jobs",f"{len(report_df):,}","Finsys-style production rows","blue"),
+            ("Prodn",f"{_pj_prodn:,.0f}","Production quantity",""),
+            ("Rejection",f"{_pj_rejn:,.0f}",f"{_pj_waste_pct:.2f}%",""),
+            ("Net Prod.",f"{_pj_net:,.0f}","Prodn − Rejection","good"),
+            ("Production Weight",f"{_pj_ton:,.2f} T","prodn_wt",""),
+            ("Review Weight",f"{_pj_review:,.2f} T","Unmapped source rows","warn" if _pj_review else "good"),
+        ])
+
     if report_type=="Reel Consumption - Day Wise" and not report_df.empty:
         _rd_issue=float(pd.to_numeric(report_df["Reel Issue Ton"],errors="coerce").fillna(0).sum())
         _rd_return=float(pd.to_numeric(report_df["Reel Return Ton"],errors="coerce").fillna(0).sum())
