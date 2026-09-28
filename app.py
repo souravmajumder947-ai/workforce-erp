@@ -16192,23 +16192,29 @@ elif page == "Operations":
                     "Production Job Details",
                     expanded=True,
                 ):
-                    _v196_a1,_v196_a2,_v196_a3,_v196_a4=st.columns(4)
-                    _v196_source_machine=_v196_a1.text_input(
-                        "Source / Finsys Machine Name",
+                    _v196_a1,_v196_a2,_v196_a3,_v196_a4,_v196_a5=st.columns([1.3,1,1.2,1,1])
+                    _v196_entry_stage=_v196_a1.selectbox(
+                        "Production Stage",
+                        _v196_stage_options,
+                        index=_v196_stage_options.index(_v196_stage_existing),
+                        key=f"v196_entry_stage_{_v196_token}",
+                    )
+                    _v196_source_machine=_v196_a2.text_input(
+                        "Source / Finsys Machine",
                         value=_clean_text(_v196_er.get("source_machine")) or _v196_job_machine,
                         key=f"v196_source_machine_{_v196_token}",
                     )
-                    _v196_machine_code=_v196_a2.text_input(
+                    _v196_machine_code=_v196_a3.text_input(
                         "Machine Code",
                         value=_clean_text(_v196_er.get("machine_code")),
                         key=f"v196_machine_code_{_v196_token}",
                     )
-                    _v196_operator=_v196_a3.text_input(
+                    _v196_operator=_v196_a4.text_input(
                         "Operator",
                         value=_clean_text(_v196_er.get("operator_name")),
                         key=f"v196_operator_{_v196_token}",
                     )
-                    _v196_entry_by=_v196_a4.text_input(
+                    _v196_entry_by=_v196_a5.text_input(
                         "Entry By",
                         value=(
                             _clean_text(_v196_er.get("source_entry_by"))
@@ -16387,7 +16393,7 @@ elif page == "Operations":
                                     WHERE entry_id=%s
                                     """,
                                     (
-                                        _v196_job_date.isoformat(),_v196_job_shift,_v196_stage,
+                                        _v196_job_date.isoformat(),_v196_job_shift,_v196_entry_stage,
                                         _v196_job_machine,_v196_source_machine.strip(),
                                         _v196_machine_code.strip(),_v196_voucher.strip(),
                                         _v196_job_no.strip(),_v196_part_no.strip(),_v196_item.strip(),
@@ -16419,7 +16425,7 @@ elif page == "Operations":
                                     RETURNING entry_id
                                     """,
                                     (
-                                        _v196_job_date.isoformat(),_v196_job_shift,_v196_stage,
+                                        _v196_job_date.isoformat(),_v196_job_shift,_v196_entry_stage,
                                         _v196_job_machine,_v196_source_machine.strip(),
                                         _v196_machine_code.strip(),_v196_voucher.strip(),
                                         _v196_job_no.strip(),_v196_part_no.strip(),_v196_item.strip(),
@@ -16450,7 +16456,7 @@ elif page == "Operations":
                                     """,
                                     (
                                         _v196_source_machine.strip(),_v196_job_machine,
-                                        _v196_stage,_v196_actor,
+                                        _v196_entry_stage,_v196_actor,
                                     ),
                                 )
 
