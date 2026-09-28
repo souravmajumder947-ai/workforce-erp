@@ -16732,7 +16732,7 @@ elif page == "Operations":
                            net_production_qty AS "Net Prod.",
                            production_weight_kg/1000.0 AS "Prodn Weight T",
                            ppm AS "PPM",
-                           wastage_pct AS "Wstg %",
+                           wastage_pct AS "Wstg Pct",
                            operator_name AS "Operator",
                            source_entry_by AS "Entby"
                     FROM production_job_entries
@@ -16742,6 +16742,8 @@ elif page == "Operations":
                     """,
                     (_v196_job_date.isoformat(),_v196_job_machine),
                 )
+                if "Wstg Pct" in _v196_day_jobs.columns:
+                    _v196_day_jobs=_v196_day_jobs.rename(columns={"Wstg Pct":"Wstg %"})
 
                 st.markdown("#### Daily Production Report")
                 if _v196_day_jobs.empty:
@@ -18900,7 +18902,7 @@ elif page == "Reports":
                               net_production_qty AS "Net Prod.",
                               production_weight_kg/1000.0 AS "Prodn Weight T",
                               ppm AS "PPM",
-                              wastage_pct AS "Wstg %",
+                              wastage_pct AS "Wstg Pct",
                               operator_name AS "Operator",
                               source_entry_by AS "Entby",
                               CASE
@@ -18913,6 +18915,8 @@ elif page == "Reports":
                        ORDER BY work_date,shift,COALESCE(source_machine,erp_machine,''),start_time,entry_id""",
                     (first.isoformat(),last.isoformat()),
                 )
+                if "Wstg Pct" in report_df.columns:
+                    report_df=report_df.rename(columns={"Wstg Pct":"Wstg %"})
                 if not report_df.empty:
                     for _v196_col in [
                         "Time Taken (Mins)","M/Rdy (Mins)","Tot.D/Time (Mins)",
