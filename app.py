@@ -3342,7 +3342,7 @@ def _v196_time_minutes(start_value, stop_value):
         return 0.0
 
 
-def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system"):
+def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system", replace_existing=True):
     """Roll job-wise DPR rows into the existing daily Production table without erasing material/reel fields."""
     date_text=(
         work_date_value.isoformat()
@@ -3412,8 +3412,7 @@ def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system
         f"NetQty={net_qty:.0f}; Source={actor}"
     )
 
-    cur.execute(
-        """
+    sync_sql="""
         INSERT INTO production(
             work_date,shift,machine,production_ton,target_ton,waste_ton,
             breakdown_hours,paper_cost,ink_cost,glue_cost,other_material_cost,
@@ -3422,16 +3421,25 @@ def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system
             %s,'DAY',%s,%s,%s,%s,
             0,0,0,0,0,%s,%s,%s,%s,%s
         )
-        ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-            production_ton=excluded.production_ton,
-            target_ton=excluded.target_ton,
-            waste_ton=excluded.waste_ton,
-            target_type=excluded.target_type,
-            good_output_ton=excluded.good_output_ton,
-            yield_pct=excluded.yield_pct,
-            waste_pct=excluded.waste_pct,
-            remark=excluded.remark
-        """,
+    """
+    if replace_existing:
+        sync_sql += """
+            ON CONFLICT(work_date,shift,machine) DO UPDATE SET
+                production_ton=excluded.production_ton,
+                target_ton=excluded.target_ton,
+                waste_ton=excluded.waste_ton,
+                target_type=excluded.target_type,
+                good_output_ton=excluded.good_output_ton,
+                yield_pct=excluded.yield_pct,
+                waste_pct=excluded.waste_pct,
+                remark=excluded.remark
+        """
+    else:
+        sync_sql += """
+            ON CONFLICT(work_date,shift,machine) DO NOTHING
+        """
+    cur.execute(
+        sync_sql,
         (
             date_text,machine,good_ton,target_ton,waste_ton,
             target_type,good_ton,yield_pct,waste_pct,remark,
@@ -3439,7 +3447,7 @@ def _v196_sync_daily_production(cur, work_date_value, erp_machine, actor="system
     )
 
 
-def _v196_refresh_daily_for_file(cur, source_file_hash, actor="system"):
+def _v196_refresh_daily_for_file(cur, source_file_hash, actor="system", replace_existing=True):
     cur.execute(
         """
         SELECT DISTINCT work_date,erp_machine
@@ -3453,7 +3461,9 @@ def _v196_refresh_daily_for_file(cur, source_file_hash, actor="system"):
     )
     keys=cur.fetchall()
     for work_date_value,machine in keys:
-        _v196_sync_daily_production(cur,work_date_value,machine,actor)
+        _v196_sync_daily_production(
+            cur,work_date_value,machine,actor,replace_existing=replace_existing
+        )
 
 
 def can_view_salary(role):
