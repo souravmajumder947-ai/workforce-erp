@@ -3559,6 +3559,96 @@ def _v196_refresh_daily_for_file(cur, source_file_hash, actor="system", replace_
         )
 
 
+def _v196_sync_review_bucket(cur, work_date_value, actor="system"):
+    """Keep unresolved source production in the overall total without assigning it to a wrong machine."""
+    date_text=(
+        work_date_value.isoformat()
+        if hasattr(work_date_value,"isoformat")
+        else str(work_date_value)
+    )
+    review_machine="Production Review (Unmapped)"
+    cur.execute(
+        """
+        SELECT COUNT(*),
+               COALESCE(SUM(production_qty),0),
+               COALESCE(SUM(rejection_qty),0),
+               COALESCE(SUM(net_production_qty),0),
+               COALESCE(SUM(production_weight_kg),0),
+               COALESCE(SUM(
+                   CASE
+                       WHEN COALESCE(net_production_qty,0)>0
+                       THEN COALESCE(production_weight_kg,0)
+                            * COALESCE(rejection_qty,0)
+                            / NULLIF(net_production_qty,0)
+                       ELSE 0
+                   END
+               ),0)
+        FROM production_job_entries
+        WHERE work_date=%s
+          AND COALESCE(import_status,'IMPORTED')='IGNORED'
+        """,
+        (date_text,),
+    )
+    row=cur.fetchone()
+    rows=int(row[0] or 0) if row else 0
+    if rows<=0:
+        cur.execute(
+            "DELETE FROM production WHERE work_date=%s AND shift='DAY' AND machine=%s",
+            (date_text,review_machine),
+        )
+        return
+
+    prod_qty=float(row[1] or 0)
+    rej_qty=float(row[2] or 0)
+    net_qty=float(row[3] or 0)
+    good_ton=float(row[4] or 0)/1000.0
+    waste_ton=float(row[5] or 0)/1000.0
+    yield_pct=(net_qty/prod_qty*100.0) if prod_qty>0 else 0.0
+    waste_pct=(rej_qty/prod_qty*100.0) if prod_qty>0 else 0.0
+    remark=(
+        f"JOB DPR REVIEW | Rows={rows}; ProdnQty={prod_qty:.0f}; "
+        f"RejectionQty={rej_qty:.0f}; NetQty={net_qty:.0f}; Source={actor}"
+    )
+    cur.execute(
+        """
+        INSERT INTO production(
+            work_date,shift,machine,production_ton,target_ton,waste_ton,
+            breakdown_hours,paper_cost,ink_cost,glue_cost,other_material_cost,
+            target_type,good_output_ton,yield_pct,waste_pct,remark
+        ) VALUES (
+            %s,'DAY',%s,%s,0,%s,0,0,0,0,0,
+            'MATERIAL_CONVERSION',%s,%s,%s,%s
+        )
+        ON CONFLICT(work_date,shift,machine) DO UPDATE SET
+            production_ton=excluded.production_ton,
+            waste_ton=excluded.waste_ton,
+            target_type=excluded.target_type,
+            good_output_ton=excluded.good_output_ton,
+            yield_pct=excluded.yield_pct,
+            waste_pct=excluded.waste_pct,
+            remark=excluded.remark
+        """,
+        (
+            date_text,review_machine,good_ton,waste_ton,
+            good_ton,yield_pct,waste_pct,remark,
+        ),
+    )
+
+
+def _v196_refresh_review_for_file(cur, source_file_hash, actor="system"):
+    cur.execute(
+        """
+        SELECT DISTINCT work_date
+        FROM production_job_entries
+        WHERE source_file_hash=%s
+        ORDER BY work_date
+        """,
+        (source_file_hash,),
+    )
+    for (work_date_value,) in cur.fetchall():
+        _v196_sync_review_bucket(cur,work_date_value,actor)
+
+
 def can_view_salary(role):
     return str(role) in {"Owner", "Admin", "HR", "Manager"}
 
@@ -16055,6 +16145,9 @@ elif page == "Operations":
                                 _v195_cur,_v195_hash,_v195_actor,
                                 replace_existing=bool(_v195_replace),
                             )
+                            _v196_refresh_review_for_file(
+                                _v195_cur,_v195_hash,_v195_actor
+                            )
 
                             _v195_conn.commit()
                             record_audit_event(
@@ -16867,6 +16960,9 @@ elif page == "Operations":
                                 _v196_cur,_v196_row.get("Date"),
                                 _v196_review_machine,_v196_actor,
                                 replace_existing=True,
+                            )
+                            _v196_sync_review_bucket(
+                                _v196_cur,_v196_row.get("Date"),_v196_actor
                             )
                             _v196_conn.commit()
                             record_audit_event(
