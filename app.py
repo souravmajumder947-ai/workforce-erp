@@ -15698,10 +15698,9 @@ elif page == "Operations":
 
     if _v141_ops_section=="Production Entry":
         # V19.5 FINSYS JOB-WISE PRODUCTION IMPORT
-        with st.expander("Import Finsys Production Excel",expanded=False):
+        with st.expander("Upload Production Excel",expanded=False):
             st.caption(
-                "Upload the original job-wise Finsys Daily Production export. "
-                "The source rows are preserved for audit and the ERP saves one daily total per Date + Machine."
+                "Upload the Finsys production Excel. The ERP validates quantities, weight and machine mapping automatically before import."
             )
             _v195_prod_file=st.file_uploader(
                 "Production Excel",
@@ -15787,37 +15786,49 @@ elif page == "Operations":
                             "Machine Master is empty. Create/activate production machines before importing production."
                         )
 
-                    st.markdown("#### Machine Mapping")
-                    st.caption(
-                        "Known source machines are mapped automatically. Die Cutting and Pasting are kept active "
-                        "as core production machines. Only clearly suspicious source labels (for example 'Name' or a "
-                        "non-production asset) should remain in Production Review so their weight is preserved without "
-                        "assigning it to the wrong machine."
+                    _v195_mapping=_v195_summary[[
+                        "Source Machine","Source Machine Group","Rows","Production Ton",
+                        "Rejection Qty","First_Date","Last_Date","Target ERP Machine"
+                    ]].copy()
+                    _v195_auto_review=int(
+                        (_v195_mapping["Target ERP Machine"].astype(str)=="IGNORE / REVIEW").sum()
                     )
-                    _v195_mapping=st.data_editor(
-                        _v195_summary[[
-                            "Source Machine","Source Machine Group","Rows","Production Ton",
-                            "Rejection Qty","First_Date","Last_Date","Target ERP Machine"
-                        ]],
-                        hide_index=True,
-                        use_container_width=True,
-                        disabled=[
-                            "Source Machine","Source Machine Group","Rows","Production Ton",
-                            "Rejection Qty","First_Date","Last_Date"
-                        ],
-                        column_config={
-                            "Production Ton":st.column_config.NumberColumn("Production Ton",format="%.2f"),
-                            "Rejection Qty":st.column_config.NumberColumn("Rejection Qty",format="%.0f"),
-                            "First_Date":st.column_config.DateColumn("First Date",format="DD/MM/YYYY"),
-                            "Last_Date":st.column_config.DateColumn("Last Date",format="DD/MM/YYYY"),
-                            "Target ERP Machine":st.column_config.SelectboxColumn(
-                                "Target ERP Machine",
-                                options=["IGNORE / REVIEW"]+_v195_machine_options,
-                                required=True,
-                            ),
-                        },
-                        key=f"v195_prod_mapping_{_v195_hash[:12]}",
-                    )
+                    if _v195_auto_review:
+                        st.warning(
+                            f"{_v195_auto_review} machine/stage mapping(s) need review before final import."
+                        )
+                        _v195_show_mapping=True
+                    else:
+                        st.success("Machine mapping completed automatically.")
+                        _v195_show_mapping=st.checkbox(
+                            "Review machine mapping (optional)",
+                            value=False,
+                            key=f"v195_show_mapping_{_v195_hash[:12]}",
+                        )
+
+                    if _v195_show_mapping:
+                        st.markdown("#### Machine Mapping Review")
+                        _v195_mapping=st.data_editor(
+                            _v195_mapping,
+                            hide_index=True,
+                            use_container_width=True,
+                            disabled=[
+                                "Source Machine","Source Machine Group","Rows","Production Ton",
+                                "Rejection Qty","First_Date","Last_Date"
+                            ],
+                            column_config={
+                                "Production Ton":st.column_config.NumberColumn("Production Ton",format="%.2f"),
+                                "Rejection Qty":st.column_config.NumberColumn("Rejection Qty",format="%.0f"),
+                                "First_Date":st.column_config.DateColumn("First Date",format="DD/MM/YYYY"),
+                                "Last_Date":st.column_config.DateColumn("Last Date",format="DD/MM/YYYY"),
+                                "Target ERP Machine":st.column_config.SelectboxColumn(
+                                    "Target ERP Machine",
+                                    options=["IGNORE / REVIEW"]+_v195_machine_options,
+                                    required=True,
+                                ),
+                            },
+                            key=f"v195_prod_mapping_{_v195_hash[:12]}",
+                        )
 
                     # Mapping is stage-aware. The same physical/source machine can appear
                     # under more than one Finsys process group, so Source Machine alone is
@@ -16262,11 +16273,10 @@ elif page == "Operations":
                     st.error(f"Unable to preview production Excel: {_v195_parse_exc}")
 
         # V19.6 FINSYS-STYLE JOB-WISE PRODUCTION ENTRY
-        st.markdown("### Job-wise Production Entry")
+        st.markdown("### Manual Production Entry")
         st.caption(
-            "This is the live production-entry format based on your Finsys DPR: "
-            "Date · Shift · Stage · Machine · Item · Job/Part · Start/Stop · Time · "
-            "Plan · Production · Rejection · Net Production · Weight · PPM · Wastage."
+            "Simple entry: select Date, Shift and Machine, enter the job quantity, then Save. "
+            "Additional technical details are optional."
         )
 
         try:
@@ -16302,7 +16312,8 @@ elif page == "Operations":
                     "LINER INSERTION",
                 ]
 
-                _v196_f1,_v196_f2,_v196_f3,_v196_f4=st.columns([1,0.8,1.2,1.2])
+                st.markdown("#### Step 1 · Select Date, Shift and Machine")
+                _v196_f1,_v196_f2,_v196_f3=st.columns([1,0.8,1.4])
                 _v196_job_date=_v196_f1.date_input(
                     "Production Date",
                     value=global_work_date,
@@ -16313,11 +16324,10 @@ elif page == "Operations":
                     "Shift",["A","B"],key="v196_job_shift"
                 )
                 _v196_job_machine=_v196_f3.selectbox(
-                    "ERP Machine",_v196_machine_options,key="v196_job_machine"
+                    "Machine",_v196_machine_options,key="v196_job_machine"
                 )
-                _v196_stage=_v196_f4.selectbox(
-                    "Stage",_v196_stage_options,key="v196_job_stage"
-                )
+                _v196_stage=_v196_stage_options[0]
+                st.caption("Then enter the job quantity below and Save. Net Production, PPM, wastage and tonnage are calculated automatically.")
 
                 _v196_existing=read_df(
                     """
@@ -16366,138 +16376,163 @@ elif page == "Operations":
                     _v196_stage_options=[_v196_stage_existing]+_v196_stage_options
 
                 with st.expander(
-                    "Production Job Details",
+                    "Step 2 · Production Entry",
                     expanded=True,
                 ):
-                    _v196_a1,_v196_a2,_v196_a3,_v196_a4,_v196_a5=st.columns([1.3,1,1.2,1,1])
+                    st.caption(
+                        "Only the main production fields are shown. Use Optional Details only when you actually need them."
+                    )
+
+                    _v196_a1,_v196_a2,_v196_a3,_v196_a4=st.columns([1.2,1,2.2,1.1])
                     _v196_entry_stage=_v196_a1.selectbox(
-                        "Production Stage",
+                        "Process / Stage",
                         _v196_stage_options,
                         index=_v196_stage_options.index(_v196_stage_existing),
                         key=f"v196_entry_stage_{_v196_token}",
                     )
-                    _v196_source_machine=_v196_a2.text_input(
-                        "Source / Finsys Machine",
-                        value=_clean_text(_v196_er.get("source_machine")) or _v196_job_machine,
-                        key=f"v196_source_machine_{_v196_token}",
+                    _v196_job_no=_v196_a2.text_input(
+                        "Job No.",
+                        value=_clean_text(_v196_er.get("job_no")),
+                        key=f"v196_job_no_{_v196_token}",
                     )
-                    _v196_machine_code=_v196_a3.text_input(
-                        "Machine Code",
-                        value=_clean_text(_v196_er.get("machine_code")),
-                        key=f"v196_machine_code_{_v196_token}",
+                    _v196_item=_v196_a3.text_input(
+                        "Item / Product",
+                        value=_clean_text(_v196_er.get("item_description")),
+                        key=f"v196_item_{_v196_token}",
                     )
                     _v196_operator=_v196_a4.text_input(
                         "Operator",
                         value=_clean_text(_v196_er.get("operator_name")),
                         key=f"v196_operator_{_v196_token}",
                     )
-                    _v196_entry_by=_v196_a5.text_input(
-                        "Entry By",
-                        value=(
-                            _clean_text(_v196_er.get("source_entry_by"))
-                            or str(_current_user.get("full_name") or _current_user.get("username") or "")
-                        ),
-                        key=f"v196_entry_by_{_v196_token}",
-                    )
 
-                    _v196_b1,_v196_b2,_v196_b3,_v196_b4=st.columns([1,1,1,2.2])
-                    _v196_voucher=_v196_b1.text_input(
-                        "Voucher No.",
-                        value=_clean_text(_v196_er.get("voucher_no")),
-                        key=f"v196_voucher_{_v196_token}",
-                    )
-                    _v196_job_no=_v196_b2.text_input(
-                        "Job No.",
-                        value=_clean_text(_v196_er.get("job_no")),
-                        key=f"v196_job_no_{_v196_token}",
-                    )
-                    _v196_part_no=_v196_b3.text_input(
-                        "Part No. / Item Code",
-                        value=_clean_text(_v196_er.get("part_no")),
-                        key=f"v196_part_{_v196_token}",
-                    )
-                    _v196_item=_v196_b4.text_input(
-                        "Item / Product Description",
-                        value=_clean_text(_v196_er.get("item_description")),
-                        key=f"v196_item_{_v196_token}",
-                    )
-
-                    _v196_c1,_v196_c2,_v196_c3,_v196_c4=st.columns(4)
-                    _v196_start=_v196_c1.text_input(
-                        "Start (HH:MM)",
-                        value=_clean_text(_v196_er.get("start_time")),
-                        placeholder="09:35",
-                        key=f"v196_start_{_v196_token}",
-                    )
-                    _v196_stop=_v196_c2.text_input(
-                        "Stop (HH:MM)",
-                        value=_clean_text(_v196_er.get("stop_time")),
-                        placeholder="10:00",
-                        key=f"v196_stop_{_v196_token}",
-                    )
-                    _v196_auto_time=_v196_time_minutes(_v196_start,_v196_stop)
-                    _v196_use_auto_time=_v196_c3.checkbox(
-                        "Use Start/Stop Time",
-                        value=True,
-                        key=f"v196_use_auto_time_{_v196_token}",
-                    )
-                    _v196_manual_time=_v196_c4.number_input(
-                        "Time Taken (Mins)",
-                        min_value=0.0,
-                        value=float(_v196_er.get("time_taken_minutes") or _v196_auto_time or 0),
-                        step=1.0,
-                        key=f"v196_time_{_v196_token}",
-                        disabled=_v196_use_auto_time,
-                    )
-                    _v196_time_taken=(
-                        float(_v196_auto_time)
-                        if _v196_use_auto_time else float(_v196_manual_time)
-                    )
-
-                    _v196_d1,_v196_d2,_v196_d3,_v196_d4,_v196_d5,_v196_d6=st.columns(6)
-                    _v196_mready=_v196_d1.number_input(
-                        "M/Rdy (Mins)",
-                        min_value=0.0,
-                        value=float(_v196_er.get("machine_ready_minutes") or 0),
-                        step=1.0,
-                        key=f"v196_mready_{_v196_token}",
-                    )
-                    _v196_downtime=_v196_d2.number_input(
-                        "Tot.D/Time (Mins)",
-                        min_value=0.0,
-                        value=float(_v196_er.get("downtime_minutes") or 0),
-                        step=1.0,
-                        key=f"v196_downtime_{_v196_token}",
-                    )
-                    _v196_plan=_v196_d3.number_input(
+                    _v196_d1,_v196_d2,_v196_d3,_v196_d4=st.columns(4)
+                    _v196_plan=_v196_d1.number_input(
                         "Plan Qty",
                         min_value=0.0,
                         value=float(_v196_er.get("plan_qty") or 0),
                         step=1.0,
                         key=f"v196_plan_{_v196_token}",
                     )
-                    _v196_prodn=_v196_d4.number_input(
-                        "Prodn",
+                    _v196_prodn=_v196_d2.number_input(
+                        "Production Qty",
                         min_value=0.0,
                         value=float(_v196_er.get("production_qty") or 0),
                         step=1.0,
                         key=f"v196_prodn_{_v196_token}",
                     )
-                    _v196_rejn=_v196_d5.number_input(
-                        "Rejn",
+                    _v196_rejn=_v196_d3.number_input(
+                        "Rejection Qty",
                         min_value=0.0,
                         value=float(_v196_er.get("rejection_qty") or 0),
                         step=1.0,
                         key=f"v196_rejn_{_v196_token}",
                     )
-                    _v196_weight=_v196_d6.number_input(
-                        "Prodn Weight (Kg)",
+                    _v196_weight=_v196_d4.number_input(
+                        "Production Weight (Kg)",
                         min_value=0.0,
                         value=float(_v196_er.get("production_weight_kg") or 0),
                         step=0.1,
                         format="%.3f",
                         key=f"v196_weight_{_v196_token}",
                     )
+
+                    # Preserve advanced/source fields without forcing users to see them.
+                    _v196_source_machine=_clean_text(_v196_er.get("source_machine")) or _v196_job_machine
+                    _v196_machine_code=_clean_text(_v196_er.get("machine_code"))
+                    _v196_entry_by=(
+                        _clean_text(_v196_er.get("source_entry_by"))
+                        or str(_current_user.get("full_name") or _current_user.get("username") or "")
+                    )
+                    _v196_voucher=_clean_text(_v196_er.get("voucher_no"))
+                    _v196_part_no=_clean_text(_v196_er.get("part_no"))
+                    _v196_start=_clean_text(_v196_er.get("start_time"))
+                    _v196_stop=_clean_text(_v196_er.get("stop_time"))
+                    _v196_mready=float(_v196_er.get("machine_ready_minutes") or 0)
+                    _v196_downtime=float(_v196_er.get("downtime_minutes") or 0)
+                    _v196_time_taken=float(_v196_er.get("time_taken_minutes") or 0)
+
+                    _v196_show_optional=st.checkbox(
+                        "Show optional details",
+                        value=False,
+                        key=f"v196_optional_{_v196_token}",
+                        help="Source machine, voucher, item code, start/stop time, machine-ready time and downtime.",
+                    )
+                    if _v196_show_optional:
+                        _v196_o1,_v196_o2,_v196_o3,_v196_o4,_v196_o5=st.columns(5)
+                        _v196_source_machine=_v196_o1.text_input(
+                            "Source / Finsys Machine",
+                            value=_v196_source_machine,
+                            key=f"v196_source_machine_{_v196_token}",
+                        )
+                        _v196_machine_code=_v196_o2.text_input(
+                            "Machine Code",
+                            value=_v196_machine_code,
+                            key=f"v196_machine_code_{_v196_token}",
+                        )
+                        _v196_voucher=_v196_o3.text_input(
+                            "Voucher No.",
+                            value=_v196_voucher,
+                            key=f"v196_voucher_{_v196_token}",
+                        )
+                        _v196_part_no=_v196_o4.text_input(
+                            "Part / Item Code",
+                            value=_v196_part_no,
+                            key=f"v196_part_{_v196_token}",
+                        )
+                        _v196_entry_by=_v196_o5.text_input(
+                            "Entry By",
+                            value=_v196_entry_by,
+                            key=f"v196_entry_by_{_v196_token}",
+                        )
+
+                        _v196_t1,_v196_t2,_v196_t3,_v196_t4=st.columns(4)
+                        _v196_start=_v196_t1.text_input(
+                            "Start (HH:MM)",
+                            value=_v196_start,
+                            placeholder="09:35",
+                            key=f"v196_start_{_v196_token}",
+                        )
+                        _v196_stop=_v196_t2.text_input(
+                            "Stop (HH:MM)",
+                            value=_v196_stop,
+                            placeholder="10:00",
+                            key=f"v196_stop_{_v196_token}",
+                        )
+                        _v196_auto_time=_v196_time_minutes(_v196_start,_v196_stop)
+                        _v196_use_auto_time=_v196_t3.checkbox(
+                            "Use Start / Stop",
+                            value=bool(_v196_start and _v196_stop),
+                            key=f"v196_use_auto_time_{_v196_token}",
+                        )
+                        _v196_manual_time=_v196_t4.number_input(
+                            "Time Taken (Mins)",
+                            min_value=0.0,
+                            value=float(_v196_time_taken or _v196_auto_time or 0),
+                            step=1.0,
+                            key=f"v196_time_{_v196_token}",
+                            disabled=_v196_use_auto_time,
+                        )
+                        _v196_time_taken=(
+                            float(_v196_auto_time)
+                            if _v196_use_auto_time else float(_v196_manual_time)
+                        )
+
+                        _v196_x1,_v196_x2=st.columns(2)
+                        _v196_mready=_v196_x1.number_input(
+                            "Machine Ready (Mins)",
+                            min_value=0.0,
+                            value=float(_v196_mready),
+                            step=1.0,
+                            key=f"v196_mready_{_v196_token}",
+                        )
+                        _v196_downtime=_v196_x2.number_input(
+                            "Downtime (Mins)",
+                            min_value=0.0,
+                            value=float(_v196_downtime),
+                            step=1.0,
+                            key=f"v196_downtime_{_v196_token}",
+                        )
 
                     _v196_net=max(float(_v196_prodn)-float(_v196_rejn),0.0)
                     _v196_waste_pct=(
@@ -16508,12 +16543,11 @@ elif page == "Operations":
                         float(_v196_rejn)/float(_v196_prodn)*1000000.0
                         if float(_v196_prodn)>0 else 0.0
                     )
-                    _v196_m1,_v196_m2,_v196_m3,_v196_m4,_v196_m5=st.columns(5)
-                    _v196_m1.metric("Time Taken",f"{_v196_time_taken:.0f} min")
-                    _v196_m2.metric("Net Production",f"{_v196_net:,.0f}")
+                    _v196_m1,_v196_m2,_v196_m3,_v196_m4=st.columns(4)
+                    _v196_m1.metric("Net Production",f"{_v196_net:,.0f}")
+                    _v196_m2.metric("Production Ton",f"{float(_v196_weight)/1000.0:.3f} T")
                     _v196_m3.metric("PPM",f"{_v196_ppm:,.0f}")
-                    _v196_m4.metric("Wstg %",f"{_v196_waste_pct:.2f}%")
-                    _v196_m5.metric("Production Ton",f"{float(_v196_weight)/1000.0:.3f} T")
+                    _v196_m4.metric("Wastage",f"{_v196_waste_pct:.2f}%")
 
                     if float(_v196_rejn)>float(_v196_prodn):
                         st.error("Rejection cannot be greater than Production.")
@@ -16525,14 +16559,14 @@ elif page == "Operations":
 
                     _v196_save_col,_v196_delete_col=st.columns([3,1])
                     _v196_save_clicked=_v196_save_col.button(
-                        "Save / Update Production Job",
+                        "Save Production",
                         type="primary",
                         use_container_width=True,
                         disabled=float(_v196_rejn)>float(_v196_prodn),
                         key=f"v196_save_job_{_v196_token}",
                     )
                     _v196_delete_clicked=_v196_delete_col.button(
-                        "Delete Job",
+                        "Delete Entry",
                         use_container_width=True,
                         disabled=not bool(_v196_er),
                         key=f"v196_delete_job_{_v196_token}",
@@ -16712,91 +16746,19 @@ elif page == "Operations":
                             if _v196_conn is not None:
                                 _v196_conn.close()
 
-                _v196_day_jobs=read_df(
-                    """
-                    SELECT entry_id AS "ID",
-                           shift AS "Shift",
-                           stage AS "Stage",
-                           COALESCE(source_machine,erp_machine) AS "Machine",
-                           item_description AS "Item",
-                           job_no AS "Job No.",
-                           part_no AS "Part No.",
-                           start_time AS "Start",
-                           stop_time AS "Stop",
-                           time_taken_minutes AS "Time Taken",
-                           machine_ready_minutes AS "M/Rdy (Mins)",
-                           downtime_minutes AS "Tot.D/Time (Mins)",
-                           plan_qty AS "Plan Qty",
-                           production_qty AS "Prodn",
-                           rejection_qty AS "Rejn",
-                           net_production_qty AS "Net Prod.",
-                           production_weight_kg/1000.0 AS "Prodn Weight T",
-                           ppm AS "PPM",
-                           wastage_pct AS "Wstg Pct",
-                           operator_name AS "Operator",
-                           source_entry_by AS "Entby"
-                    FROM production_job_entries
-                    WHERE work_date=? AND erp_machine=?
-                      AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
-                    ORDER BY shift,start_time,entry_id
-                    """,
-                    (_v196_job_date.isoformat(),_v196_job_machine),
-                )
-                if "Wstg Pct" in _v196_day_jobs.columns:
-                    _v196_day_jobs=_v196_day_jobs.rename(columns={"Wstg Pct":"Wstg %"})
-
-                st.markdown("#### Daily Production Report")
-                if _v196_day_jobs.empty:
-                    st.info(
-                        f"No job-wise production is saved for "
-                        f"{_v196_job_date.strftime('%d/%m/%Y')} · {_v196_job_machine}."
-                    )
-                else:
-                    for _nc in [
-                        "Time Taken","M/Rdy (Mins)","Tot.D/Time (Mins)",
-                        "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T","PPM","Wstg %"
-                    ]:
-                        if _nc in _v196_day_jobs.columns:
-                            _v196_day_jobs[_nc]=pd.to_numeric(
-                                _v196_day_jobs[_nc],errors="coerce"
-                            ).fillna(0.0)
-
-                    _v196_plan_total=float(_v196_day_jobs["Plan Qty"].sum())
-                    _v196_prodn_total=float(_v196_day_jobs["Prodn"].sum())
-                    _v196_rejn_total=float(_v196_day_jobs["Rejn"].sum())
-                    _v196_net_total=float(_v196_day_jobs["Net Prod."].sum())
-                    _v196_ton_total=float(_v196_day_jobs["Prodn Weight T"].sum())
-                    _v196_waste_total=(
-                        _v196_rejn_total/_v196_prodn_total*100.0
-                        if _v196_prodn_total>0 else 0.0
-                    )
-                    _v196_s1,_v196_s2,_v196_s3,_v196_s4,_v196_s5,_v196_s6=st.columns(6)
-                    _v196_s1.metric("Jobs",f"{len(_v196_day_jobs):,}")
-                    _v196_s2.metric("Plan Qty",f"{_v196_plan_total:,.0f}")
-                    _v196_s3.metric("Prodn",f"{_v196_prodn_total:,.0f}")
-                    _v196_s4.metric("Rejn",f"{_v196_rejn_total:,.0f}")
-                    _v196_s5.metric("Net Prod.",f"{_v196_net_total:,.0f}")
-                    _v196_s6.metric("Weight",f"{_v196_ton_total:,.2f} T",f"Wstg {_v196_waste_total:.2f}%")
-
-                    _v196_show=_v196_day_jobs.copy()
-                    _v196_show.insert(0,"S.No",range(1,len(_v196_show)+1))
-                    st.dataframe(
-                        _v196_show,
-                        hide_index=True,
-                        use_container_width=True,
-                        height=min(620,max(260,35*min(len(_v196_show)+1,17))),
-                        column_config={
-                            "Prodn Weight T":st.column_config.NumberColumn(
-                                "Prodn Weight T",format="%.3f"
-                            ),
-                            "Wstg %":st.column_config.NumberColumn("Wstg %",format="%.2f"),
-                            "PPM":st.column_config.NumberColumn("PPM",format="%.2f"),
-                        },
-                    )
-
-                    _v196_date_all=read_df(
+                with st.expander("Saved Production / Daily Summary",expanded=False):
+                    _v196_day_jobs=read_df(
                         """
-                        SELECT time_taken_minutes AS "Time Taken",
+                        SELECT entry_id AS "ID",
+                               shift AS "Shift",
+                               stage AS "Stage",
+                               COALESCE(source_machine,erp_machine) AS "Machine",
+                               item_description AS "Item",
+                               job_no AS "Job No.",
+                               part_no AS "Part No.",
+                               start_time AS "Start",
+                               stop_time AS "Stop",
+                               time_taken_minutes AS "Time Taken",
                                machine_ready_minutes AS "M/Rdy (Mins)",
                                downtime_minutes AS "Tot.D/Time (Mins)",
                                plan_qty AS "Plan Qty",
@@ -16804,102 +16766,175 @@ elif page == "Operations":
                                rejection_qty AS "Rejn",
                                net_production_qty AS "Net Prod.",
                                production_weight_kg/1000.0 AS "Prodn Weight T",
-                               shift AS "Shift",
-                               erp_machine AS "ERP Machine"
+                               ppm AS "PPM",
+                               wastage_pct AS "Wstg Pct",
+                               operator_name AS "Operator",
+                               source_entry_by AS "Entby"
+                        FROM production_job_entries
+                        WHERE work_date=? AND erp_machine=?
+                          AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+                        ORDER BY shift,start_time,entry_id
+                        """,
+                        (_v196_job_date.isoformat(),_v196_job_machine),
+                    )
+                    if "Wstg Pct" in _v196_day_jobs.columns:
+                        _v196_day_jobs=_v196_day_jobs.rename(columns={"Wstg Pct":"Wstg %"})
+
+                    st.markdown("#### Daily Production Report")
+                    if _v196_day_jobs.empty:
+                        st.info(
+                            f"No job-wise production is saved for "
+                            f"{_v196_job_date.strftime('%d/%m/%Y')} · {_v196_job_machine}."
+                        )
+                    else:
+                        for _nc in [
+                            "Time Taken","M/Rdy (Mins)","Tot.D/Time (Mins)",
+                            "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T","PPM","Wstg %"
+                        ]:
+                            if _nc in _v196_day_jobs.columns:
+                                _v196_day_jobs[_nc]=pd.to_numeric(
+                                    _v196_day_jobs[_nc],errors="coerce"
+                                ).fillna(0.0)
+
+                        _v196_plan_total=float(_v196_day_jobs["Plan Qty"].sum())
+                        _v196_prodn_total=float(_v196_day_jobs["Prodn"].sum())
+                        _v196_rejn_total=float(_v196_day_jobs["Rejn"].sum())
+                        _v196_net_total=float(_v196_day_jobs["Net Prod."].sum())
+                        _v196_ton_total=float(_v196_day_jobs["Prodn Weight T"].sum())
+                        _v196_waste_total=(
+                            _v196_rejn_total/_v196_prodn_total*100.0
+                            if _v196_prodn_total>0 else 0.0
+                        )
+                        _v196_s1,_v196_s2,_v196_s3,_v196_s4,_v196_s5,_v196_s6=st.columns(6)
+                        _v196_s1.metric("Jobs",f"{len(_v196_day_jobs):,}")
+                        _v196_s2.metric("Plan Qty",f"{_v196_plan_total:,.0f}")
+                        _v196_s3.metric("Prodn",f"{_v196_prodn_total:,.0f}")
+                        _v196_s4.metric("Rejn",f"{_v196_rejn_total:,.0f}")
+                        _v196_s5.metric("Net Prod.",f"{_v196_net_total:,.0f}")
+                        _v196_s6.metric("Weight",f"{_v196_ton_total:,.2f} T",f"Wstg {_v196_waste_total:.2f}%")
+
+                        _v196_show=_v196_day_jobs.copy()
+                        _v196_show.insert(0,"S.No",range(1,len(_v196_show)+1))
+                        st.dataframe(
+                            _v196_show,
+                            hide_index=True,
+                            use_container_width=True,
+                            height=min(620,max(260,35*min(len(_v196_show)+1,17))),
+                            column_config={
+                                "Prodn Weight T":st.column_config.NumberColumn(
+                                    "Prodn Weight T",format="%.3f"
+                                ),
+                                "Wstg %":st.column_config.NumberColumn("Wstg %",format="%.2f"),
+                                "PPM":st.column_config.NumberColumn("PPM",format="%.2f"),
+                            },
+                        )
+
+                        _v196_date_all=read_df(
+                            """
+                            SELECT time_taken_minutes AS "Time Taken",
+                                   machine_ready_minutes AS "M/Rdy (Mins)",
+                                   downtime_minutes AS "Tot.D/Time (Mins)",
+                                   plan_qty AS "Plan Qty",
+                                   production_qty AS "Prodn",
+                                   rejection_qty AS "Rejn",
+                                   net_production_qty AS "Net Prod.",
+                                   production_weight_kg/1000.0 AS "Prodn Weight T",
+                                   shift AS "Shift",
+                                   erp_machine AS "ERP Machine"
+                            FROM production_job_entries
+                            WHERE work_date=?
+                              AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
+                              AND COALESCE(erp_machine,'')<>''
+                            """,
+                            (_v196_job_date.isoformat(),),
+                        )
+                        for _v196_numcol in [
+                            "Time Taken","M/Rdy (Mins)","Tot.D/Time (Mins)",
+                            "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T"
+                        ]:
+                            if _v196_numcol in _v196_date_all.columns:
+                                _v196_date_all[_v196_numcol]=pd.to_numeric(
+                                    _v196_date_all[_v196_numcol],errors="coerce"
+                                ).fillna(0.0)
+
+                        def _v196_make_total(label,frame):
+                            _p=float(frame["Prodn"].sum()) if not frame.empty else 0.0
+                            _r=float(frame["Rejn"].sum()) if not frame.empty else 0.0
+                            return {
+                                "Level":label,
+                                "Time Taken":float(frame["Time Taken"].sum()) if not frame.empty else 0.0,
+                                "M/Rdy (Mins)":float(frame["M/Rdy (Mins)"].sum()) if not frame.empty else 0.0,
+                                "Tot.D/Time (Mins)":float(frame["Tot.D/Time (Mins)"].sum()) if not frame.empty else 0.0,
+                                "Plan Qty":float(frame["Plan Qty"].sum()) if not frame.empty else 0.0,
+                                "Prodn":_p,
+                                "Rejn":_r,
+                                "Net Prod.":float(frame["Net Prod."].sum()) if not frame.empty else 0.0,
+                                "PPM":(_r/_p*1000000.0) if _p>0 else 0.0,
+                                "Wstg %":(_r/_p*100.0) if _p>0 else 0.0,
+                                "Prodn Weight T":float(frame["Prodn Weight T"].sum()) if not frame.empty else 0.0,
+                            }
+
+                        _v196_machine_all=_v196_date_all[
+                            _v196_date_all["ERP Machine"].astype(str)==str(_v196_job_machine)
+                        ].copy()
+                        _v196_shift_frame=_v196_machine_all[
+                            _v196_machine_all["Shift"].astype(str)==str(_v196_job_shift)
+                        ].copy()
+                        _v196_totals=pd.DataFrame([
+                            _v196_make_total("Shift Total",_v196_shift_frame),
+                            _v196_make_total("M/C Total",_v196_machine_all),
+                            _v196_make_total("Date Total",_v196_date_all),
+                        ])
+                        st.markdown("#### Finsys-style Totals")
+                        st.dataframe(
+                            _v196_totals,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "Time Taken":st.column_config.NumberColumn("Time Taken",format="%.0f"),
+                                "M/Rdy (Mins)":st.column_config.NumberColumn("M/Rdy (Mins)",format="%.0f"),
+                                "Tot.D/Time (Mins)":st.column_config.NumberColumn("Tot.D/Time (Mins)",format="%.0f"),
+                                "Plan Qty":st.column_config.NumberColumn("Plan Qty",format="%.0f"),
+                                "Prodn":st.column_config.NumberColumn("Prodn",format="%.0f"),
+                                "Rejn":st.column_config.NumberColumn("Rejn",format="%.0f"),
+                                "Net Prod.":st.column_config.NumberColumn("Net Prod.",format="%.0f"),
+                                "PPM":st.column_config.NumberColumn("PPM",format="%.0f"),
+                                "Wstg %":st.column_config.NumberColumn("Wstg %",format="%.2f"),
+                                "Prodn Weight T":st.column_config.NumberColumn("Prodn Weight T",format="%.3f"),
+                            },
+                        )
+
+                    _v196_day_summary=read_df(
+                        """
+                        SELECT shift AS "Shift",
+                               COALESCE(source_machine,erp_machine) AS "Machine",
+                               COUNT(*) AS "Jobs",
+                               COALESCE(SUM(plan_qty),0) AS "Plan Qty",
+                               COALESCE(SUM(production_qty),0) AS "Prodn",
+                               COALESCE(SUM(rejection_qty),0) AS "Rejn",
+                               COALESCE(SUM(net_production_qty),0) AS "Net Prod.",
+                               COALESCE(SUM(production_weight_kg),0)/1000.0 AS "Prodn Weight T"
                         FROM production_job_entries
                         WHERE work_date=?
                           AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
                           AND COALESCE(erp_machine,'')<>''
+                        GROUP BY shift,COALESCE(source_machine,erp_machine)
+                        ORDER BY shift,"Machine"
                         """,
                         (_v196_job_date.isoformat(),),
                     )
-                    for _v196_numcol in [
-                        "Time Taken","M/Rdy (Mins)","Tot.D/Time (Mins)",
-                        "Plan Qty","Prodn","Rejn","Net Prod.","Prodn Weight T"
-                    ]:
-                        if _v196_numcol in _v196_date_all.columns:
-                            _v196_date_all[_v196_numcol]=pd.to_numeric(
-                                _v196_date_all[_v196_numcol],errors="coerce"
-                            ).fillna(0.0)
-
-                    def _v196_make_total(label,frame):
-                        _p=float(frame["Prodn"].sum()) if not frame.empty else 0.0
-                        _r=float(frame["Rejn"].sum()) if not frame.empty else 0.0
-                        return {
-                            "Level":label,
-                            "Time Taken":float(frame["Time Taken"].sum()) if not frame.empty else 0.0,
-                            "M/Rdy (Mins)":float(frame["M/Rdy (Mins)"].sum()) if not frame.empty else 0.0,
-                            "Tot.D/Time (Mins)":float(frame["Tot.D/Time (Mins)"].sum()) if not frame.empty else 0.0,
-                            "Plan Qty":float(frame["Plan Qty"].sum()) if not frame.empty else 0.0,
-                            "Prodn":_p,
-                            "Rejn":_r,
-                            "Net Prod.":float(frame["Net Prod."].sum()) if not frame.empty else 0.0,
-                            "PPM":(_r/_p*1000000.0) if _p>0 else 0.0,
-                            "Wstg %":(_r/_p*100.0) if _p>0 else 0.0,
-                            "Prodn Weight T":float(frame["Prodn Weight T"].sum()) if not frame.empty else 0.0,
-                        }
-
-                    _v196_machine_all=_v196_date_all[
-                        _v196_date_all["ERP Machine"].astype(str)==str(_v196_job_machine)
-                    ].copy()
-                    _v196_shift_frame=_v196_machine_all[
-                        _v196_machine_all["Shift"].astype(str)==str(_v196_job_shift)
-                    ].copy()
-                    _v196_totals=pd.DataFrame([
-                        _v196_make_total("Shift Total",_v196_shift_frame),
-                        _v196_make_total("M/C Total",_v196_machine_all),
-                        _v196_make_total("Date Total",_v196_date_all),
-                    ])
-                    st.markdown("#### Finsys-style Totals")
-                    st.dataframe(
-                        _v196_totals,
-                        hide_index=True,
-                        use_container_width=True,
-                        column_config={
-                            "Time Taken":st.column_config.NumberColumn("Time Taken",format="%.0f"),
-                            "M/Rdy (Mins)":st.column_config.NumberColumn("M/Rdy (Mins)",format="%.0f"),
-                            "Tot.D/Time (Mins)":st.column_config.NumberColumn("Tot.D/Time (Mins)",format="%.0f"),
-                            "Plan Qty":st.column_config.NumberColumn("Plan Qty",format="%.0f"),
-                            "Prodn":st.column_config.NumberColumn("Prodn",format="%.0f"),
-                            "Rejn":st.column_config.NumberColumn("Rejn",format="%.0f"),
-                            "Net Prod.":st.column_config.NumberColumn("Net Prod.",format="%.0f"),
-                            "PPM":st.column_config.NumberColumn("PPM",format="%.0f"),
-                            "Wstg %":st.column_config.NumberColumn("Wstg %",format="%.2f"),
-                            "Prodn Weight T":st.column_config.NumberColumn("Prodn Weight T",format="%.3f"),
-                        },
-                    )
-
-                _v196_day_summary=read_df(
-                    """
-                    SELECT shift AS "Shift",
-                           COALESCE(source_machine,erp_machine) AS "Machine",
-                           COUNT(*) AS "Jobs",
-                           COALESCE(SUM(plan_qty),0) AS "Plan Qty",
-                           COALESCE(SUM(production_qty),0) AS "Prodn",
-                           COALESCE(SUM(rejection_qty),0) AS "Rejn",
-                           COALESCE(SUM(net_production_qty),0) AS "Net Prod.",
-                           COALESCE(SUM(production_weight_kg),0)/1000.0 AS "Prodn Weight T"
-                    FROM production_job_entries
-                    WHERE work_date=?
-                      AND COALESCE(import_status,'IMPORTED')<>'IGNORED'
-                      AND COALESCE(erp_machine,'')<>''
-                    GROUP BY shift,COALESCE(source_machine,erp_machine)
-                    ORDER BY shift,"Machine"
-                    """,
-                    (_v196_job_date.isoformat(),),
-                )
-                if not _v196_day_summary.empty:
-                    st.markdown("#### Date Total by Shift / Machine")
-                    st.dataframe(
-                        _v196_day_summary,
-                        hide_index=True,
-                        use_container_width=True,
-                        column_config={
-                            "Prodn Weight T":st.column_config.NumberColumn(
-                                "Prodn Weight T",format="%.2f"
-                            )
-                        },
-                    )
+                    if not _v196_day_summary.empty:
+                        st.markdown("#### Date Total by Shift / Machine")
+                        st.dataframe(
+                            _v196_day_summary,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "Prodn Weight T":st.column_config.NumberColumn(
+                                    "Prodn Weight T",format="%.2f"
+                                )
+                            },
+                        )
 
         # V19.6 UNMAPPED PRODUCTION REVIEW
         if _v196_schema_ready and _v196_machine_options:
@@ -17069,648 +17104,654 @@ elif page == "Operations":
                             if _v196_conn is not None:
                                 _v196_conn.close()
 
-        # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
-        st.markdown("### Daily Machine Material / Output Summary")
-        st.caption(
-            "Job-wise production above is the primary production entry. "
-            "Use this section for daily reel/material/WIP and machine-level summary values."
-        )
+        if st.checkbox(
+            "Show advanced daily material / WIP entry",
+            value=False,
+            key="v200_show_daily_material",
+            help="Use only when you need daily material, WIP or detailed reel-consumption adjustments."
+        ):
+            # V11.8 DAY-WISE PRODUCTION + REEL CONSUMPTION
+            st.markdown("### Daily Machine Material / Output Summary")
+            st.caption(
+                "Job-wise production above is the primary production entry. "
+                "Use this section for daily reel/material/WIP and machine-level summary values."
+            )
 
-        # Reel-consumption detail is stored separately and rolls up into the daily Corrugation record.
-        try:
-            _v118_conn = get_pg_conn()
-            _v118_cur = _v118_conn.cursor()
-            _v118_cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS production_reel_consumption(
-                    id BIGSERIAL PRIMARY KEY,
-                    work_date DATE NOT NULL,
-                    machine TEXT NOT NULL,
-                    line_no INTEGER NOT NULL,
-                    reel_reference TEXT,
-                    paper_grade TEXT,
-                    quantity_ton NUMERIC(14,4) NOT NULL DEFAULT 0,
-                    value_amount NUMERIC(16,2) NOT NULL DEFAULT 0,
-                    remark TEXT,
-                    entered_by TEXT,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(work_date,machine,line_no)
-                )
-                """
-            )
-            # V12.3 REEL ISSUE RETURN CONSUMPTION FLOW
-            for _v123_stmt in [
-                "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS opening_wip_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
-                "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS reel_issue_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
-                "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS reel_return_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
-                "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS net_issue_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
-                "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS closing_wip_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
-                "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS consumption_ton NUMERIC(14,4) NOT NULL DEFAULT 0"
-            ]:
-                _v118_cur.execute(_v123_stmt)
-            # Preserve older valid consumption rows without inventing issue/return history.
-            _v118_cur.execute(
-                """UPDATE production_reel_consumption
-                   SET consumption_ton=quantity_ton
-                   WHERE COALESCE(consumption_ton,0)=0 AND COALESCE(quantity_ton,0)>0"""
-            )
-            _v118_conn.commit()
-            _v118_cur.close()
-            _v118_conn.close()
-        except Exception as _v118_schema_exc:
+            # Reel-consumption detail is stored separately and rolls up into the daily Corrugation record.
             try:
-                _v118_conn.rollback()
+                _v118_conn = get_pg_conn()
+                _v118_cur = _v118_conn.cursor()
+                _v118_cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS production_reel_consumption(
+                        id BIGSERIAL PRIMARY KEY,
+                        work_date DATE NOT NULL,
+                        machine TEXT NOT NULL,
+                        line_no INTEGER NOT NULL,
+                        reel_reference TEXT,
+                        paper_grade TEXT,
+                        quantity_ton NUMERIC(14,4) NOT NULL DEFAULT 0,
+                        value_amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+                        remark TEXT,
+                        entered_by TEXT,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(work_date,machine,line_no)
+                    )
+                    """
+                )
+                # V12.3 REEL ISSUE RETURN CONSUMPTION FLOW
+                for _v123_stmt in [
+                    "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS opening_wip_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
+                    "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS reel_issue_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
+                    "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS reel_return_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
+                    "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS net_issue_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
+                    "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS closing_wip_ton NUMERIC(14,4) NOT NULL DEFAULT 0",
+                    "ALTER TABLE production_reel_consumption ADD COLUMN IF NOT EXISTS consumption_ton NUMERIC(14,4) NOT NULL DEFAULT 0"
+                ]:
+                    _v118_cur.execute(_v123_stmt)
+                # Preserve older valid consumption rows without inventing issue/return history.
+                _v118_cur.execute(
+                    """UPDATE production_reel_consumption
+                       SET consumption_ton=quantity_ton
+                       WHERE COALESCE(consumption_ton,0)=0 AND COALESCE(quantity_ton,0)>0"""
+                )
+                _v118_conn.commit()
+                _v118_cur.close()
                 _v118_conn.close()
-            except Exception:
-                pass
-            st.error(f"Unable to prepare reel-consumption storage: {_v118_schema_exc}")
-            st.stop()
+            except Exception as _v118_schema_exc:
+                try:
+                    _v118_conn.rollback()
+                    _v118_conn.close()
+                except Exception:
+                    pass
+                st.error(f"Unable to prepare reel-consumption storage: {_v118_schema_exc}")
+                st.stop()
 
-        c1,c2=st.columns([1,1.4])
-        pdate=c1.date_input(
-            "Production Date",value=global_work_date,format="DD/MM/YYYY",key="v118_prod_date"
-        )
-        machine_df=get_machine_list_cached()
-        machine_options=machine_df["machine"].astype(str).tolist() if not machine_df.empty else []
-        machine=c2.selectbox(
-            "Machine",machine_options,key="v118_prod_machine"
-        ) if machine_options else None
-        production_shift="DAY"
-
-        if not machine_options:
-            st.warning("Machine Master is empty. Create Machine & Shift Master first.")
-
-        if machine:
-            profile=get_machine_target_profile(machine)
-            target_type=profile["target_type"]
-            existing=read_df(
-                "SELECT * FROM production WHERE work_date=? AND shift='DAY' AND machine=?",
-                (pdate.isoformat(),machine)
+            c1,c2=st.columns([1,1.4])
+            pdate=c1.date_input(
+                "Production Date",value=global_work_date,format="DD/MM/YYYY",key="v118_prod_date"
             )
-            legacy_shift_rows=read_df(
-                "SELECT shift,production_ton,good_output_ton,waste_ton FROM production "
-                "WHERE work_date=? AND machine=? AND shift IN ('A','B') ORDER BY shift",
-                (pdate.isoformat(),machine)
-            )
-            er=existing.iloc[0].to_dict() if not existing.empty else {}
+            machine_df=get_machine_list_cached()
+            machine_options=machine_df["machine"].astype(str).tolist() if not machine_df.empty else []
+            machine=c2.selectbox(
+                "Machine",machine_options,key="v118_prod_machine"
+            ) if machine_options else None
+            production_shift="DAY"
 
-            _prod_master_row = machine_df[machine_df["machine"].astype(str) == str(machine)]
-            _prod_department = (
-                str(_prod_master_row.iloc[0].get("department") or "—")
-                if not _prod_master_row.empty else "—"
-            )
-            pinfo1,pinfo2,pinfo3,pinfo4 = st.columns(4)
-            pinfo1.metric("Division","Greater Noida Plant")
-            pinfo2.metric("Department",_prod_department)
-            pinfo3.metric("Machine",str(machine))
-            pinfo4.metric("Entry Status","Update Existing" if not existing.empty else "New Daily Entry")
-            if not existing.empty:
-                st.info(
-                    f"A daily entry already exists for {pdate.strftime('%d/%m/%Y')} · {machine}. "
-                    "Saving will update that same Date + Machine record."
-                )
-            if not legacy_shift_rows.empty:
-                st.warning(
-                    "Legacy Shift A / B production rows exist for this Date + Machine. "
-                    "They are kept for history and are not automatically merged into the new daily record."
-                )
+            if not machine_options:
+                st.warning("Machine Master is empty. Create Machine & Shift Master first.")
 
-            if target_type=="FIXED_TON":
-                # V11.8 CORRUGATION DAILY REEL CONSUMPTION
-                daily_target=float(profile.get("daily_target_ton") or 0)
-                st.info(
-                    f"🎯 **Corrugation Daily Target** · **{daily_target:.2f} T / production day**"
-                )
-                st.caption(
-                    "Enter reel issue, return, WIP and actual consumption for the full production day. "
-                    "Net Issue, expected consumption, value and rate are calculated automatically."
-                )
-
-                # V12.8 SIMPLE PRODUCTION REPORTS
-                _reels_existing = read_df(
-                    """SELECT line_no,reel_reference,paper_grade,
-                              reel_issue_ton,reel_return_ton,consumption_ton,
-                              quantity_ton,value_amount,remark
-                       FROM production_reel_consumption
-                       WHERE work_date=? AND machine=?
-                       ORDER BY line_no""",
+            if machine:
+                profile=get_machine_target_profile(machine)
+                target_type=profile["target_type"]
+                existing=read_df(
+                    "SELECT * FROM production WHERE work_date=? AND shift='DAY' AND machine=?",
                     (pdate.isoformat(),machine)
                 )
+                legacy_shift_rows=read_df(
+                    "SELECT shift,production_ton,good_output_ton,waste_ton FROM production "
+                    "WHERE work_date=? AND machine=? AND shift IN ('A','B') ORDER BY shift",
+                    (pdate.isoformat(),machine)
+                )
+                er=existing.iloc[0].to_dict() if not existing.empty else {}
 
-                if _reels_existing.empty:
-                    _legacy_qty=float(er.get("material_processed_ton") or 0)
-                    _legacy_value=float(er.get("paper_cost") or 0)
-                    _reel_seed=pd.DataFrame([{
-                        "Reel / ERP Code":"",
-                        "Paper Description / GSM":"",
-                        "Reel Issue Ton":0.0,
-                        "Reel Return Ton":0.0,
-                        "Actual Consumption Ton":_legacy_qty,
-                        "Consumption Value ₹":_legacy_value,
-                        "Remark":""
-                    }])
-                else:
-                    _reel_seed=_reels_existing.copy()
-                    _reel_seed["consumption_ton"]=pd.to_numeric(
-                        _reel_seed["consumption_ton"],errors="coerce"
-                    ).fillna(0.0)
-                    _reel_seed["quantity_ton"]=pd.to_numeric(
-                        _reel_seed["quantity_ton"],errors="coerce"
-                    ).fillna(0.0)
-                    _reel_seed["consumption_ton"]=_reel_seed["consumption_ton"].where(
-                        _reel_seed["consumption_ton"]>0,_reel_seed["quantity_ton"]
+                _prod_master_row = machine_df[machine_df["machine"].astype(str) == str(machine)]
+                _prod_department = (
+                    str(_prod_master_row.iloc[0].get("department") or "—")
+                    if not _prod_master_row.empty else "—"
+                )
+                pinfo1,pinfo2,pinfo3,pinfo4 = st.columns(4)
+                pinfo1.metric("Division","Greater Noida Plant")
+                pinfo2.metric("Department",_prod_department)
+                pinfo3.metric("Machine",str(machine))
+                pinfo4.metric("Entry Status","Update Existing" if not existing.empty else "New Daily Entry")
+                if not existing.empty:
+                    st.info(
+                        f"A daily entry already exists for {pdate.strftime('%d/%m/%Y')} · {machine}. "
+                        "Saving will update that same Date + Machine record."
                     )
-                    _reel_seed=_reel_seed.rename(columns={
-                        "reel_reference":"Reel / ERP Code",
-                        "paper_grade":"Paper Description / GSM",
-                        "reel_issue_ton":"Reel Issue Ton",
-                        "reel_return_ton":"Reel Return Ton",
-                        "consumption_ton":"Actual Consumption Ton",
-                        "value_amount":"Consumption Value ₹",
-                        "remark":"Remark"
-                    })[[
-                        "Reel / ERP Code","Paper Description / GSM",
-                        "Reel Issue Ton","Reel Return Ton",
-                        "Actual Consumption Ton","Consumption Value ₹","Remark"
-                    ]].copy()
-
-                st.markdown("#### Reel Issue / Return / Consumption")
-                st.caption(
-                    "Keep it simple: enter Issue, Return and actual Consumption. "
-                    "Net Issue = Issue − Return. Consumption is never assumed from Net Issue."
-                )
-                reel_editor=st.data_editor(
-                    _reel_seed,
-                    hide_index=True,use_container_width=True,num_rows="dynamic",
-                    key=f"v128_reel_editor_{pdate.isoformat()}_{machine}",
-                    column_config={
-                        "Reel / ERP Code":st.column_config.TextColumn("Reel / ERP Code"),
-                        "Paper Description / GSM":st.column_config.TextColumn("Paper Description / GSM"),
-                        "Reel Issue Ton":st.column_config.NumberColumn(
-                            "Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"
-                        ),
-                        "Reel Return Ton":st.column_config.NumberColumn(
-                            "Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"
-                        ),
-                        "Actual Consumption Ton":st.column_config.NumberColumn(
-                            "Actual Consumption Ton",min_value=0.0,step=0.001,format="%.3f"
-                        ),
-                        "Consumption Value ₹":st.column_config.NumberColumn(
-                            "Consumption Value ₹",min_value=0.0,step=1.0,format="₹%.2f"
-                        ),
-                        "Remark":st.column_config.TextColumn("Remark"),
-                    }
-                )
-
-                _reel_work=reel_editor.copy()
-                for _c in [
-                    "Reel Issue Ton","Reel Return Ton",
-                    "Actual Consumption Ton","Consumption Value ₹"
-                ]:
-                    _reel_work[_c]=pd.to_numeric(_reel_work[_c],errors="coerce").fillna(0.0)
-
-                _reel_work=_reel_work[
-                    (_reel_work["Reel Issue Ton"]>0)
-                    | (_reel_work["Reel Return Ton"]>0)
-                    | (_reel_work["Actual Consumption Ton"]>0)
-                    | (_reel_work["Consumption Value ₹"]>0)
-                    | (_reel_work["Reel / ERP Code"].fillna("").astype(str).str.strip()!="")
-                    | (_reel_work["Paper Description / GSM"].fillna("").astype(str).str.strip()!="")
-                ].copy()
-
-                if not _reel_work.empty:
-                    _reel_work["Net Issue Ton"]=(
-                        _reel_work["Reel Issue Ton"]-_reel_work["Reel Return Ton"]
+                if not legacy_shift_rows.empty:
+                    st.warning(
+                        "Legacy Shift A / B production rows exist for this Date + Machine. "
+                        "They are kept for history and are not automatically merged into the new daily record."
                     )
-                    _reel_work["Effective Consumption Ton"]=_reel_work["Actual Consumption Ton"]
-                    _reel_work["Value ₹"]=_reel_work["Consumption Value ₹"]
-                    _reel_work["Rate ₹/Kg"]=_reel_work.apply(
-                        lambda r:(
-                            float(r["Consumption Value ₹"])/
-                            (float(r["Actual Consumption Ton"])*1000.0)
-                            if float(r["Actual Consumption Ton"])>0 else 0.0
-                        ),axis=1
+
+                if target_type=="FIXED_TON":
+                    # V11.8 CORRUGATION DAILY REEL CONSUMPTION
+                    daily_target=float(profile.get("daily_target_ton") or 0)
+                    st.info(
+                        f"🎯 **Corrugation Daily Target** · **{daily_target:.2f} T / production day**"
                     )
-                else:
-                    for _c in [
-                        "Net Issue Ton","Effective Consumption Ton","Value ₹","Rate ₹/Kg"
-                    ]:
-                        _reel_work[_c]=pd.Series(dtype=float)
+                    st.caption(
+                        "Enter reel issue, return, WIP and actual consumption for the full production day. "
+                        "Net Issue, expected consumption, value and rate are calculated automatically."
+                    )
 
-                # Compatibility columns for existing save logic; no WIP is used.
-                _reel_work["Reel / Reference"]=_reel_work.get("Reel / ERP Code","")
-                _reel_work["Paper Grade"]=_reel_work.get("Paper Description / GSM","")
-                _reel_work["Opening WIP Ton"]=0.0
-                _reel_work["Closing WIP Ton"]=0.0
-                _reel_work["Expected Consumption Ton"]=0.0
-                _reel_work["Flow Variance Ton"]=0.0
+                    # V12.8 SIMPLE PRODUCTION REPORTS
+                    _reels_existing = read_df(
+                        """SELECT line_no,reel_reference,paper_grade,
+                                  reel_issue_ton,reel_return_ton,consumption_ton,
+                                  quantity_ton,value_amount,remark
+                           FROM production_reel_consumption
+                           WHERE work_date=? AND machine=?
+                           ORDER BY line_no""",
+                        (pdate.isoformat(),machine)
+                    )
 
-                paper_consumed=float(
-                    _reel_work["Actual Consumption Ton"].sum()
-                ) if not _reel_work.empty else 0.0
-                paper_value=float(
-                    _reel_work["Consumption Value ₹"].sum()
-                ) if not _reel_work.empty else 0.0
-                total_reel_issue=float(
-                    _reel_work["Reel Issue Ton"].sum()
-                ) if not _reel_work.empty else 0.0
-                total_reel_return=float(
-                    _reel_work["Reel Return Ton"].sum()
-                ) if not _reel_work.empty else 0.0
-                total_net_issue=total_reel_issue-total_reel_return
-                total_opening_wip=0.0
-                total_closing_wip=0.0
-                total_expected_consumption=0.0
-                total_flow_variance=0.0
-                avg_paper_rate=(
-                    paper_value/(paper_consumed*1000.0)
-                    if paper_consumed>0 else 0.0
-                )
-                _reel_flow_errors=[]
-
-                k1,k2,k3,k4=st.columns(4)
-                k1.metric("Reel Issue",f"{total_reel_issue:.2f} T")
-                k2.metric("Reel Return",f"{total_reel_return:.2f} T")
-                k3.metric("Net Issue",f"{total_net_issue:.2f} T")
-                k4.metric(
-                    "Actual Consumption",
-                    f"{paper_consumed:.2f} T" if paper_consumed>0 else "PENDING"
-                )
-
-                if not _reel_work.empty:
-                    st.dataframe(
-                        _reel_work[[
+                    if _reels_existing.empty:
+                        _legacy_qty=float(er.get("material_processed_ton") or 0)
+                        _legacy_value=float(er.get("paper_cost") or 0)
+                        _reel_seed=pd.DataFrame([{
+                            "Reel / ERP Code":"",
+                            "Paper Description / GSM":"",
+                            "Reel Issue Ton":0.0,
+                            "Reel Return Ton":0.0,
+                            "Actual Consumption Ton":_legacy_qty,
+                            "Consumption Value ₹":_legacy_value,
+                            "Remark":""
+                        }])
+                    else:
+                        _reel_seed=_reels_existing.copy()
+                        _reel_seed["consumption_ton"]=pd.to_numeric(
+                            _reel_seed["consumption_ton"],errors="coerce"
+                        ).fillna(0.0)
+                        _reel_seed["quantity_ton"]=pd.to_numeric(
+                            _reel_seed["quantity_ton"],errors="coerce"
+                        ).fillna(0.0)
+                        _reel_seed["consumption_ton"]=_reel_seed["consumption_ton"].where(
+                            _reel_seed["consumption_ton"]>0,_reel_seed["quantity_ton"]
+                        )
+                        _reel_seed=_reel_seed.rename(columns={
+                            "reel_reference":"Reel / ERP Code",
+                            "paper_grade":"Paper Description / GSM",
+                            "reel_issue_ton":"Reel Issue Ton",
+                            "reel_return_ton":"Reel Return Ton",
+                            "consumption_ton":"Actual Consumption Ton",
+                            "value_amount":"Consumption Value ₹",
+                            "remark":"Remark"
+                        })[[
                             "Reel / ERP Code","Paper Description / GSM",
-                            "Reel Issue Ton","Reel Return Ton","Net Issue Ton",
-                            "Actual Consumption Ton","Consumption Value ₹","Rate ₹/Kg","Remark"
-                        ]],
-                        hide_index=True,use_container_width=True,
+                            "Reel Issue Ton","Reel Return Ton",
+                            "Actual Consumption Ton","Consumption Value ₹","Remark"
+                        ]].copy()
+
+                    st.markdown("#### Reel Issue / Return / Consumption")
+                    st.caption(
+                        "Keep it simple: enter Issue, Return and actual Consumption. "
+                        "Net Issue = Issue − Return. Consumption is never assumed from Net Issue."
+                    )
+                    reel_editor=st.data_editor(
+                        _reel_seed,
+                        hide_index=True,use_container_width=True,num_rows="dynamic",
+                        key=f"v128_reel_editor_{pdate.isoformat()}_{machine}",
                         column_config={
-                            "Reel Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
-                            "Reel Return Ton":st.column_config.NumberColumn(format="%.2f T"),
-                            "Net Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
-                            "Actual Consumption Ton":st.column_config.NumberColumn(format="%.2f T"),
-                            "Consumption Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
-                            "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
+                            "Reel / ERP Code":st.column_config.TextColumn("Reel / ERP Code"),
+                            "Paper Description / GSM":st.column_config.TextColumn("Paper Description / GSM"),
+                            "Reel Issue Ton":st.column_config.NumberColumn(
+                                "Reel Issue Ton",min_value=0.0,step=0.001,format="%.3f"
+                            ),
+                            "Reel Return Ton":st.column_config.NumberColumn(
+                                "Reel Return Ton",min_value=0.0,step=0.001,format="%.3f"
+                            ),
+                            "Actual Consumption Ton":st.column_config.NumberColumn(
+                                "Actual Consumption Ton",min_value=0.0,step=0.001,format="%.3f"
+                            ),
+                            "Consumption Value ₹":st.column_config.NumberColumn(
+                                "Consumption Value ₹",min_value=0.0,step=1.0,format="₹%.2f"
+                            ),
+                            "Remark":st.column_config.TextColumn("Remark"),
                         }
                     )
 
-                _existing_good=float(er.get("good_output_ton") or er.get("production_ton") or 0)
-                _existing_waste=float(er.get("waste_ton") or 0)
-                _existing_remark=str(er.get("remark") or "")
-                _existing_break_reason=""
-                _existing_prod_remark=_existing_remark
-                if "Breakdown Reason:" in _existing_remark:
-                    _parts=_existing_remark.split("Breakdown Reason:",1)
-                    _existing_prod_remark=_parts[0].strip(" |")
-                    _existing_break_reason=_parts[1].strip()
+                    _reel_work=reel_editor.copy()
+                    for _c in [
+                        "Reel Issue Ton","Reel Return Ton",
+                        "Actual Consumption Ton","Consumption Value ₹"
+                    ]:
+                        _reel_work[_c]=pd.to_numeric(_reel_work[_c],errors="coerce").fillna(0.0)
 
-                with st.form("v118_daily_corrugation_form"):
-                    c1,c2,c3=st.columns(3)
-                    good_output=c1.number_input(
-                        "Good Corrugated Output Ton",min_value=0.0,
-                        value=_existing_good,step=0.1
-                    )
-                    _is_finsys_history = _existing_remark.startswith("FINSYS DPR IMPORT")
-                    waste_ton=c2.number_input(
-                        "Reel Wastage / Rejection Ton",
-                        value=_existing_waste,step=0.1,
-                        help=(
-                            "Historical Finsys DPR rows may contain signed Reel Wastage values. "
-                            "For new manual production, enter the actual wastage/rejection for the day."
-                        )
-                    )
-                    breakdown_hours=c3.number_input(
-                        "Breakdown Hours",min_value=0.0,max_value=24.0,
-                        value=float(er.get("breakdown_hours") or 0),step=0.25
-                    )
-                    breakdown_reason=st.text_input(
-                        "Breakdown Reason",
-                        value=_existing_break_reason,
-                        placeholder="Required when Breakdown Hours is greater than 0"
-                    )
-                    remark=st.text_input(
-                        "Production Remark",
-                        value=_existing_prod_remark,
-                        placeholder="Optional production / quality remark"
-                    )
-                    save_prod=st.form_submit_button(
-                        "Save / Update Daily Corrugation Production",
-                        type="primary",use_container_width=True
-                    )
+                    _reel_work=_reel_work[
+                        (_reel_work["Reel Issue Ton"]>0)
+                        | (_reel_work["Reel Return Ton"]>0)
+                        | (_reel_work["Actual Consumption Ton"]>0)
+                        | (_reel_work["Consumption Value ₹"]>0)
+                        | (_reel_work["Reel / ERP Code"].fillna("").astype(str).str.strip()!="")
+                        | (_reel_work["Paper Description / GSM"].fillna("").astype(str).str.strip()!="")
+                    ].copy()
 
-                achievement=(good_output/daily_target*100.0) if daily_target>0 else 0.0
-                yield_pct=(good_output/paper_consumed*100.0) if paper_consumed>0 else 0.0
-                waste_pct=(waste_ton/paper_consumed*100.0) if paper_consumed>0 else 0.0
-                material_variance=paper_consumed-good_output-waste_ton
-                paper_cost_per_output=paper_value/good_output if good_output>0 else 0.0
-
-                r1,r2,r3,r4=st.columns(4)
-                r1.metric("Paper Consumed",f"{paper_consumed:.2f} T")
-                r2.metric("Paper Value",v5_money(paper_value))
-                r3.metric("Avg Paper Rate",f"₹{avg_paper_rate:.2f} / Kg")
-                r4.metric("Paper Cost / Output Ton",v5_money(paper_cost_per_output))
-
-                k1,k2,k3,k4,k5=st.columns(5)
-                k1.metric("Daily Target",f"{daily_target:.2f} T")
-                k2.metric("Achievement",f"{achievement:.2f}%")
-                k3.metric("Yield",f"{yield_pct:.2f}%")
-                k4.metric("Waste",f"{waste_pct:.2f}%")
-                k5.metric("Material Variance",f"{material_variance:.2f} T")
-
-                if paper_consumed>0 and abs(material_variance)>0.01:
-                    st.warning(
-                        f"Material balance variance is {material_variance:.3f} T. "
-                        "Paper Consumed should normally equal Good Output + Waste/Rejection."
-                    )
-
-                if save_prod:
-                    _fixed_errors=[]
-                    if waste_ton < 0 and not _is_finsys_history:
-                        _fixed_errors.append(
-                            "Negative wastage is allowed only for historical Finsys DPR records."
-                        )
-                    if (
-                        paper_consumed>0
-                        and (not _is_finsys_history)
-                        and good_output+waste_ton > paper_consumed + 0.01
-                    ):
-                        _fixed_errors.append(
-                            "Good Output + Waste/Rejection cannot be greater than Actual Consumption."
-                        )
-                    if breakdown_hours>0 and not str(breakdown_reason or "").strip():
-                        _fixed_errors.append(
-                            "Breakdown Reason is required when Breakdown Hours is greater than 0."
-                        )
-                    if _reel_flow_errors:
-                        _fixed_errors.extend(_reel_flow_errors)
                     if not _reel_work.empty:
-                        _blank_reference=_reel_work[
-                            (_reel_work["Reel / Reference"].fillna("").astype(str).str.strip()=="")
-                            & (_reel_work["Paper Grade"].fillna("").astype(str).str.strip()=="")
-                        ]
-                        if not _blank_reference.empty:
-                            _fixed_errors.append(
-                                "Each reel movement line must have a Reel / ERP Code or Paper Description / GSM."
-                            )
-
-                    if _fixed_errors:
-                        for _err in _fixed_errors:
-                            st.error(_err)
+                        _reel_work["Net Issue Ton"]=(
+                            _reel_work["Reel Issue Ton"]-_reel_work["Reel Return Ton"]
+                        )
+                        _reel_work["Effective Consumption Ton"]=_reel_work["Actual Consumption Ton"]
+                        _reel_work["Value ₹"]=_reel_work["Consumption Value ₹"]
+                        _reel_work["Rate ₹/Kg"]=_reel_work.apply(
+                            lambda r:(
+                                float(r["Consumption Value ₹"])/
+                                (float(r["Actual Consumption Ton"])*1000.0)
+                                if float(r["Actual Consumption Ton"])>0 else 0.0
+                            ),axis=1
+                        )
                     else:
-                        _save_remark=str(remark or "").strip()
-                        if breakdown_hours>0:
-                            _br=str(breakdown_reason or "").strip()
-                            _save_remark=(
-                                f"{_save_remark} | Breakdown Reason: {_br}"
-                                if _save_remark else f"Breakdown Reason: {_br}"
-                            )
+                        for _c in [
+                            "Net Issue Ton","Effective Consumption Ton","Value ₹","Rate ₹/Kg"
+                        ]:
+                            _reel_work[_c]=pd.Series(dtype=float)
 
-                        conn=get_pg_conn()
-                        try:
-                            cur=conn.cursor()
-                            cur.execute(
+                    # Compatibility columns for existing save logic; no WIP is used.
+                    _reel_work["Reel / Reference"]=_reel_work.get("Reel / ERP Code","")
+                    _reel_work["Paper Grade"]=_reel_work.get("Paper Description / GSM","")
+                    _reel_work["Opening WIP Ton"]=0.0
+                    _reel_work["Closing WIP Ton"]=0.0
+                    _reel_work["Expected Consumption Ton"]=0.0
+                    _reel_work["Flow Variance Ton"]=0.0
+
+                    paper_consumed=float(
+                        _reel_work["Actual Consumption Ton"].sum()
+                    ) if not _reel_work.empty else 0.0
+                    paper_value=float(
+                        _reel_work["Consumption Value ₹"].sum()
+                    ) if not _reel_work.empty else 0.0
+                    total_reel_issue=float(
+                        _reel_work["Reel Issue Ton"].sum()
+                    ) if not _reel_work.empty else 0.0
+                    total_reel_return=float(
+                        _reel_work["Reel Return Ton"].sum()
+                    ) if not _reel_work.empty else 0.0
+                    total_net_issue=total_reel_issue-total_reel_return
+                    total_opening_wip=0.0
+                    total_closing_wip=0.0
+                    total_expected_consumption=0.0
+                    total_flow_variance=0.0
+                    avg_paper_rate=(
+                        paper_value/(paper_consumed*1000.0)
+                        if paper_consumed>0 else 0.0
+                    )
+                    _reel_flow_errors=[]
+
+                    k1,k2,k3,k4=st.columns(4)
+                    k1.metric("Reel Issue",f"{total_reel_issue:.2f} T")
+                    k2.metric("Reel Return",f"{total_reel_return:.2f} T")
+                    k3.metric("Net Issue",f"{total_net_issue:.2f} T")
+                    k4.metric(
+                        "Actual Consumption",
+                        f"{paper_consumed:.2f} T" if paper_consumed>0 else "PENDING"
+                    )
+
+                    if not _reel_work.empty:
+                        st.dataframe(
+                            _reel_work[[
+                                "Reel / ERP Code","Paper Description / GSM",
+                                "Reel Issue Ton","Reel Return Ton","Net Issue Ton",
+                                "Actual Consumption Ton","Consumption Value ₹","Rate ₹/Kg","Remark"
+                            ]],
+                            hide_index=True,use_container_width=True,
+                            column_config={
+                                "Reel Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
+                                "Reel Return Ton":st.column_config.NumberColumn(format="%.2f T"),
+                                "Net Issue Ton":st.column_config.NumberColumn(format="%.2f T"),
+                                "Actual Consumption Ton":st.column_config.NumberColumn(format="%.2f T"),
+                                "Consumption Value ₹":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Rate ₹/Kg":st.column_config.NumberColumn(format="₹%.2f"),
+                            }
+                        )
+
+                    _existing_good=float(er.get("good_output_ton") or er.get("production_ton") or 0)
+                    _existing_waste=float(er.get("waste_ton") or 0)
+                    _existing_remark=str(er.get("remark") or "")
+                    _existing_break_reason=""
+                    _existing_prod_remark=_existing_remark
+                    if "Breakdown Reason:" in _existing_remark:
+                        _parts=_existing_remark.split("Breakdown Reason:",1)
+                        _existing_prod_remark=_parts[0].strip(" |")
+                        _existing_break_reason=_parts[1].strip()
+
+                    with st.form("v118_daily_corrugation_form"):
+                        c1,c2,c3=st.columns(3)
+                        good_output=c1.number_input(
+                            "Good Corrugated Output Ton",min_value=0.0,
+                            value=_existing_good,step=0.1
+                        )
+                        _is_finsys_history = _existing_remark.startswith("FINSYS DPR IMPORT")
+                        waste_ton=c2.number_input(
+                            "Reel Wastage / Rejection Ton",
+                            value=_existing_waste,step=0.1,
+                            help=(
+                                "Historical Finsys DPR rows may contain signed Reel Wastage values. "
+                                "For new manual production, enter the actual wastage/rejection for the day."
+                            )
+                        )
+                        breakdown_hours=c3.number_input(
+                            "Breakdown Hours",min_value=0.0,max_value=24.0,
+                            value=float(er.get("breakdown_hours") or 0),step=0.25
+                        )
+                        breakdown_reason=st.text_input(
+                            "Breakdown Reason",
+                            value=_existing_break_reason,
+                            placeholder="Required when Breakdown Hours is greater than 0"
+                        )
+                        remark=st.text_input(
+                            "Production Remark",
+                            value=_existing_prod_remark,
+                            placeholder="Optional production / quality remark"
+                        )
+                        save_prod=st.form_submit_button(
+                            "Save / Update Daily Corrugation Production",
+                            type="primary",use_container_width=True
+                        )
+
+                    achievement=(good_output/daily_target*100.0) if daily_target>0 else 0.0
+                    yield_pct=(good_output/paper_consumed*100.0) if paper_consumed>0 else 0.0
+                    waste_pct=(waste_ton/paper_consumed*100.0) if paper_consumed>0 else 0.0
+                    material_variance=paper_consumed-good_output-waste_ton
+                    paper_cost_per_output=paper_value/good_output if good_output>0 else 0.0
+
+                    r1,r2,r3,r4=st.columns(4)
+                    r1.metric("Paper Consumed",f"{paper_consumed:.2f} T")
+                    r2.metric("Paper Value",v5_money(paper_value))
+                    r3.metric("Avg Paper Rate",f"₹{avg_paper_rate:.2f} / Kg")
+                    r4.metric("Paper Cost / Output Ton",v5_money(paper_cost_per_output))
+
+                    k1,k2,k3,k4,k5=st.columns(5)
+                    k1.metric("Daily Target",f"{daily_target:.2f} T")
+                    k2.metric("Achievement",f"{achievement:.2f}%")
+                    k3.metric("Yield",f"{yield_pct:.2f}%")
+                    k4.metric("Waste",f"{waste_pct:.2f}%")
+                    k5.metric("Material Variance",f"{material_variance:.2f} T")
+
+                    if paper_consumed>0 and abs(material_variance)>0.01:
+                        st.warning(
+                            f"Material balance variance is {material_variance:.3f} T. "
+                            "Paper Consumed should normally equal Good Output + Waste/Rejection."
+                        )
+
+                    if save_prod:
+                        _fixed_errors=[]
+                        if waste_ton < 0 and not _is_finsys_history:
+                            _fixed_errors.append(
+                                "Negative wastage is allowed only for historical Finsys DPR records."
+                            )
+                        if (
+                            paper_consumed>0
+                            and (not _is_finsys_history)
+                            and good_output+waste_ton > paper_consumed + 0.01
+                        ):
+                            _fixed_errors.append(
+                                "Good Output + Waste/Rejection cannot be greater than Actual Consumption."
+                            )
+                        if breakdown_hours>0 and not str(breakdown_reason or "").strip():
+                            _fixed_errors.append(
+                                "Breakdown Reason is required when Breakdown Hours is greater than 0."
+                            )
+                        if _reel_flow_errors:
+                            _fixed_errors.extend(_reel_flow_errors)
+                        if not _reel_work.empty:
+                            _blank_reference=_reel_work[
+                                (_reel_work["Reel / Reference"].fillna("").astype(str).str.strip()=="")
+                                & (_reel_work["Paper Grade"].fillna("").astype(str).str.strip()=="")
+                            ]
+                            if not _blank_reference.empty:
+                                _fixed_errors.append(
+                                    "Each reel movement line must have a Reel / ERP Code or Paper Description / GSM."
+                                )
+
+                        if _fixed_errors:
+                            for _err in _fixed_errors:
+                                st.error(_err)
+                        else:
+                            _save_remark=str(remark or "").strip()
+                            if breakdown_hours>0:
+                                _br=str(breakdown_reason or "").strip()
+                                _save_remark=(
+                                    f"{_save_remark} | Breakdown Reason: {_br}"
+                                    if _save_remark else f"Breakdown Reason: {_br}"
+                                )
+
+                            conn=get_pg_conn()
+                            try:
+                                cur=conn.cursor()
+                                cur.execute(
+                                    """INSERT INTO production(
+                                       work_date,shift,machine,production_ton,target_ton,waste_ton,breakdown_hours,
+                                       paper_cost,ink_cost,glue_cost,other_material_cost,target_type,
+                                       opening_wip_ton,material_received_ton,material_available_ton,
+                                       material_processed_ton,good_output_ton,closing_wip_ton,
+                                       conversion_pct,yield_pct,waste_pct,remark
+                                       ) VALUES (%s,'DAY',%s,%s,%s,%s,%s,%s,0,0,0,'FIXED_TON',
+                                                 0,0,%s,%s,%s,0,0,%s,%s,%s)
+                                       ON CONFLICT(work_date,shift,machine) DO UPDATE SET
+                                       production_ton=excluded.production_ton,
+                                       target_ton=excluded.target_ton,
+                                       waste_ton=excluded.waste_ton,
+                                       breakdown_hours=excluded.breakdown_hours,
+                                       paper_cost=excluded.paper_cost,
+                                       target_type='FIXED_TON',
+                                       material_available_ton=excluded.material_available_ton,
+                                       material_processed_ton=excluded.material_processed_ton,
+                                       good_output_ton=excluded.good_output_ton,
+                                       yield_pct=excluded.yield_pct,
+                                       waste_pct=excluded.waste_pct,
+                                       remark=excluded.remark""",
+                                    (
+                                        pdate.isoformat(),machine,good_output,daily_target,waste_ton,
+                                        breakdown_hours,paper_value,paper_consumed,paper_consumed,
+                                        good_output,yield_pct,waste_pct,_save_remark
+                                    )
+                                )
+                                cur.execute(
+                                    "DELETE FROM production_reel_consumption WHERE work_date=%s AND machine=%s",
+                                    (pdate.isoformat(),machine)
+                                )
+                                for _line_no,(_, _rr) in enumerate(_reel_work.reset_index(drop=True).iterrows(),start=1):
+                                    cur.execute(
+                                        """INSERT INTO production_reel_consumption(
+                                           work_date,machine,line_no,reel_reference,paper_grade,
+                                           opening_wip_ton,reel_issue_ton,reel_return_ton,net_issue_ton,
+                                           closing_wip_ton,consumption_ton,quantity_ton,
+                                           value_amount,remark,entered_by,updated_at
+                                           ) VALUES (
+                                           %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP
+                                           )""",
+                                        (
+                                            pdate.isoformat(),machine,_line_no,
+                                            str(_rr.get("Reel / Reference") or "").strip(),
+                                            str(_rr.get("Paper Grade") or "").strip(),
+                                            float(_rr.get("Opening WIP Ton") or 0),
+                                            float(_rr.get("Reel Issue Ton") or 0),
+                                            float(_rr.get("Reel Return Ton") or 0),
+                                            float(_rr.get("Net Issue Ton") or 0),
+                                            float(_rr.get("Closing WIP Ton") or 0),
+                                            float(_rr.get("Effective Consumption Ton") or 0),
+                                            float(_rr.get("Effective Consumption Ton") or 0),
+                                            float(_rr.get("Value ₹") or 0),
+                                            str(_rr.get("Remark") or "").strip(),
+                                            _current_user["username"]
+                                        )
+                                    )
+                                conn.commit()
+                                cur.close()
+                            except Exception:
+                                conn.rollback()
+                                raise
+                            finally:
+                                conn.close()
+
+                            record_audit_event(
+                                _current_user["username"],"PRODUCTION_SAVE","Operations",
+                                "Production",f"{pdate.isoformat()}|DAY|{machine}",
+                                (
+                                    f"Daily; ReelLines={len(_reel_work)}; OpeningWIP={total_opening_wip:.3f}; "
+                                    f"ReelIssue={total_reel_issue:.3f}; ReelReturn={total_reel_return:.3f}; "
+                                    f"NetIssue={total_net_issue:.3f}; ClosingWIP={total_closing_wip:.3f}; "
+                                    f"PaperConsumed={paper_consumed:.3f}; FlowVariance={total_flow_variance:.3f}; "
+                                    f"PaperValue={paper_value:.2f}; AvgRateKg={avg_paper_rate:.2f}; "
+                                    f"GoodOutput={good_output:.2f}; Target={daily_target:.2f}; "
+                                    f"Achievement={achievement:.2f}%; Waste={waste_ton:.2f}; "
+                                    f"Yield={yield_pct:.2f}%; WastePct={waste_pct:.2f}%; "
+                                    f"MaterialVariance={material_variance:.3f}; Breakdown={breakdown_hours:.2f}"
+                                )
+                            )
+                            st.success("Daily Corrugation production saved successfully.")
+                            st.rerun()
+
+                else:
+                    target_pct=float(profile.get("conversion_target_pct") or 100)
+                    suggested_opening=get_previous_closing_wip(machine,pdate,production_shift)
+                    opening_default=float(er.get("opening_wip_ton") or suggested_opening or 0)
+                    st.info(
+                        f"🔄 **Daily Material Conversion Target** · Target completion: **{target_pct:.2f}%** · "
+                        "This is one complete production-day record; no A/B production split is required."
+                    )
+
+                    with st.form("v66_conversion_prod_form"):
+                        c1,c2,c3=st.columns(3)
+                        opening_wip=c1.number_input(
+                            "Opening WIP Ton",min_value=0.0,value=opening_default,step=0.1,
+                            help="Suggested from the previous saved closing WIP for this machine."
+                        )
+                        material_received=c2.number_input(
+                            "Material Released / Received Ton",min_value=0.0,
+                            value=float(er.get("material_received_ton") or 0),step=0.1
+                        )
+                        material_processed=c3.number_input(
+                            "Material Processed Ton",min_value=0.0,
+                            value=float(er.get("material_processed_ton") or 0),step=0.1
+                        )
+                        c1,c2,c3=st.columns(3)
+                        good_output=c1.number_input(
+                            "Good Output Ton",min_value=0.0,
+                            value=float(er.get("good_output_ton") or er.get("production_ton") or 0),step=0.1
+                        )
+                        waste_ton=c2.number_input(
+                            "Waste / Rejection Ton",min_value=0.0,
+                            value=float(er.get("waste_ton") or 0),step=0.1
+                        )
+                        breakdown_hours=c3.number_input(
+                            "Breakdown Hours",min_value=0.0,max_value=24.0,
+                            value=float(er.get("breakdown_hours") or 0),step=0.25
+                        )
+                        remark=st.text_input("Production Remark",value=str(er.get("remark") or ""))
+                        save_prod=st.form_submit_button("Save / Update Production Entry",type="primary",use_container_width=True)
+
+                    available=opening_wip+material_received
+                    closing=max(available-material_processed,0.0)
+                    conversion_pct=(material_processed/available*100.0) if available>0 else 0.0
+                    yield_pct=(good_output/material_processed*100.0) if material_processed>0 else 0.0
+                    waste_pct=(waste_ton/material_processed*100.0) if material_processed>0 else 0.0
+                    variance=material_processed-good_output-waste_ton
+
+                    k1,k2,k3,k4,k5=st.columns(5)
+                    k1.metric("Available",f"{available:.2f} T")
+                    k2.metric("Processed",f"{material_processed:.2f} T")
+                    k3.metric("Closing WIP",f"{closing:.2f} T")
+                    k4.metric("Conversion",f"{conversion_pct:.2f}%")
+                    k5.metric("Yield",f"{yield_pct:.2f}%")
+                    if abs(variance)>0.01:
+                        st.caption(f"Process balance variance: {variance:.2f} T (Processed − Good Output − Waste).")
+
+                    if save_prod:
+                        if material_processed > available + 1e-9:
+                            st.error("Material Processed cannot be greater than Opening WIP + Material Received.")
+                        elif good_output + waste_ton > material_processed + 1e-9:
+                            st.error("Good Output + Waste cannot be greater than Material Processed.")
+                        else:
+                            upsert(
                                 """INSERT INTO production(
                                    work_date,shift,machine,production_ton,target_ton,waste_ton,breakdown_hours,
                                    paper_cost,ink_cost,glue_cost,other_material_cost,target_type,
                                    opening_wip_ton,material_received_ton,material_available_ton,
                                    material_processed_ton,good_output_ton,closing_wip_ton,
                                    conversion_pct,yield_pct,waste_pct,remark
-                                   ) VALUES (%s,'DAY',%s,%s,%s,%s,%s,%s,0,0,0,'FIXED_TON',
-                                             0,0,%s,%s,%s,0,0,%s,%s,%s)
+                                   ) VALUES (?,?,?,?,?,?,?,0,0,0,0,?,?,?,?,?,?,?,?,?,?,?)
                                    ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-                                   production_ton=excluded.production_ton,
-                                   target_ton=excluded.target_ton,
-                                   waste_ton=excluded.waste_ton,
-                                   breakdown_hours=excluded.breakdown_hours,
-                                   paper_cost=excluded.paper_cost,
-                                   target_type='FIXED_TON',
+                                   production_ton=excluded.production_ton,target_ton=excluded.target_ton,
+                                   waste_ton=excluded.waste_ton,breakdown_hours=excluded.breakdown_hours,
+                                   target_type=excluded.target_type,opening_wip_ton=excluded.opening_wip_ton,
+                                   material_received_ton=excluded.material_received_ton,
                                    material_available_ton=excluded.material_available_ton,
                                    material_processed_ton=excluded.material_processed_ton,
                                    good_output_ton=excluded.good_output_ton,
-                                   yield_pct=excluded.yield_pct,
-                                   waste_pct=excluded.waste_pct,
-                                   remark=excluded.remark""",
+                                   closing_wip_ton=excluded.closing_wip_ton,
+                                   conversion_pct=excluded.conversion_pct,yield_pct=excluded.yield_pct,
+                                   waste_pct=excluded.waste_pct,remark=excluded.remark""",
                                 (
-                                    pdate.isoformat(),machine,good_output,daily_target,waste_ton,
-                                    breakdown_hours,paper_value,paper_consumed,paper_consumed,
-                                    good_output,yield_pct,waste_pct,_save_remark
+                                    pdate.isoformat(),production_shift,machine,good_output,0.0,waste_ton,breakdown_hours,
+                                    "MATERIAL_CONVERSION",opening_wip,material_received,available,
+                                    material_processed,good_output,closing,conversion_pct,yield_pct,waste_pct,remark
                                 )
                             )
-                            cur.execute(
-                                "DELETE FROM production_reel_consumption WHERE work_date=%s AND machine=%s",
-                                (pdate.isoformat(),machine)
-                            )
-                            for _line_no,(_, _rr) in enumerate(_reel_work.reset_index(drop=True).iterrows(),start=1):
-                                cur.execute(
-                                    """INSERT INTO production_reel_consumption(
-                                       work_date,machine,line_no,reel_reference,paper_grade,
-                                       opening_wip_ton,reel_issue_ton,reel_return_ton,net_issue_ton,
-                                       closing_wip_ton,consumption_ton,quantity_ton,
-                                       value_amount,remark,entered_by,updated_at
-                                       ) VALUES (
-                                       %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP
-                                       )""",
-                                    (
-                                        pdate.isoformat(),machine,_line_no,
-                                        str(_rr.get("Reel / Reference") or "").strip(),
-                                        str(_rr.get("Paper Grade") or "").strip(),
-                                        float(_rr.get("Opening WIP Ton") or 0),
-                                        float(_rr.get("Reel Issue Ton") or 0),
-                                        float(_rr.get("Reel Return Ton") or 0),
-                                        float(_rr.get("Net Issue Ton") or 0),
-                                        float(_rr.get("Closing WIP Ton") or 0),
-                                        float(_rr.get("Effective Consumption Ton") or 0),
-                                        float(_rr.get("Effective Consumption Ton") or 0),
-                                        float(_rr.get("Value ₹") or 0),
-                                        str(_rr.get("Remark") or "").strip(),
-                                        _current_user["username"]
-                                    )
+                            record_audit_event(
+                                _current_user["username"], "PRODUCTION_SAVE", "Operations",
+                                "Production", f"{pdate.isoformat()}|DAY|{machine}",
+                                (
+                                    f"Type=MATERIAL_CONVERSION; Available={available:.2f}; Processed={material_processed:.2f}; "
+                                    f"Good={good_output:.2f}; Waste={waste_ton:.2f}; Closing={closing:.2f}; "
+                                    f"Conversion={conversion_pct:.2f}%; Yield={yield_pct:.2f}%"
                                 )
-                            conn.commit()
-                            cur.close()
-                        except Exception:
-                            conn.rollback()
-                            raise
-                        finally:
-                            conn.close()
-
-                        record_audit_event(
-                            _current_user["username"],"PRODUCTION_SAVE","Operations",
-                            "Production",f"{pdate.isoformat()}|DAY|{machine}",
-                            (
-                                f"Daily; ReelLines={len(_reel_work)}; OpeningWIP={total_opening_wip:.3f}; "
-                                f"ReelIssue={total_reel_issue:.3f}; ReelReturn={total_reel_return:.3f}; "
-                                f"NetIssue={total_net_issue:.3f}; ClosingWIP={total_closing_wip:.3f}; "
-                                f"PaperConsumed={paper_consumed:.3f}; FlowVariance={total_flow_variance:.3f}; "
-                                f"PaperValue={paper_value:.2f}; AvgRateKg={avg_paper_rate:.2f}; "
-                                f"GoodOutput={good_output:.2f}; Target={daily_target:.2f}; "
-                                f"Achievement={achievement:.2f}%; Waste={waste_ton:.2f}; "
-                                f"Yield={yield_pct:.2f}%; WastePct={waste_pct:.2f}%; "
-                                f"MaterialVariance={material_variance:.3f}; Breakdown={breakdown_hours:.2f}"
                             )
-                        )
-                        st.success("Daily Corrugation production saved successfully.")
-                        st.rerun()
+                            st.success("Production entry saved successfully.")
+                            st.rerun()
 
+            # The daily summary follows the Production Date selected above, not the global Working Date.
+            prod_day=read_df(
+                """SELECT p.work_date,p.shift,p.machine,m.department,m.target_type,
+                          p.production_ton,p.target_ton,p.opening_wip_ton,p.material_received_ton,
+                          p.material_available_ton,p.material_processed_ton,p.good_output_ton,
+                          p.closing_wip_ton,p.waste_ton,p.conversion_pct,p.yield_pct,p.waste_pct,
+                          p.breakdown_hours,p.remark
+                   FROM production p LEFT JOIN machines m ON m.machine=p.machine
+                   WHERE p.work_date=? AND p.shift='DAY' ORDER BY p.machine""",
+                (pdate.isoformat(),)
+            )
+            if not prod_day.empty:
+                _pd_good = pd.to_numeric(
+                    prod_day["good_output_ton"].where(
+                        pd.to_numeric(prod_day["good_output_ton"], errors="coerce").fillna(0) > 0,
+                        prod_day["production_ton"]
+                    ),
+                    errors="coerce"
+                ).fillna(0)
+                _pd_waste = pd.to_numeric(prod_day["waste_ton"], errors="coerce").fillna(0)
+                _pd_break = pd.to_numeric(prod_day["breakdown_hours"], errors="coerce").fillna(0)
+                _pd_fixed = prod_day[prod_day["target_type"].astype(str) == "FIXED_TON"].copy()
+                _pd_fixed_output = (
+                    pd.to_numeric(_pd_fixed["good_output_ton"], errors="coerce").fillna(0)
+                    if not _pd_fixed.empty else pd.Series(dtype=float)
+                )
+                if not _pd_fixed.empty:
+                    _pd_fixed_output = _pd_fixed_output.where(
+                        _pd_fixed_output > 0,
+                        pd.to_numeric(_pd_fixed["production_ton"], errors="coerce").fillna(0)
+                    )
+                _pd_fixed_target = (
+                    pd.to_numeric(_pd_fixed["target_ton"], errors="coerce").fillna(0).sum()
+                    if not _pd_fixed.empty else 0.0
+                )
+                _pd_fixed_achievement = (
+                    float(_pd_fixed_output.sum()) / float(_pd_fixed_target) * 100.0
+                    if float(_pd_fixed_target) > 0 else 0.0
+                )
+
+                st.markdown(f"#### Production Summary · {pdate.strftime('%d %b %Y')}")
+                ds1,ds2,ds3,ds4,ds5 = st.columns(5)
+                ds1.metric("Entries",f"{len(prod_day):,}")
+                ds2.metric("Good Output",f"{float(_pd_good.sum()):.2f} T")
+                ds3.metric("Waste / Rejection",f"{float(_pd_waste.sum()):.2f} T")
+                ds4.metric("Breakdown",f"{float(_pd_break.sum()):.2f} Hrs")
+                ds5.metric("Corrugation Achievement",f"{_pd_fixed_achievement:.2f}%")
+
+                display=prod_day.rename(columns={
+                    "work_date":"Date","shift":"Period","machine":"Machine","department":"Department",
+                    "target_type":"Target Type","production_ton":"Good Output Ton","target_ton":"Fixed Target Ton",
+                    "opening_wip_ton":"Opening WIP","material_received_ton":"Material Received",
+                    "material_available_ton":"Material Available","material_processed_ton":"Material Processed",
+                    "closing_wip_ton":"Closing WIP","waste_ton":"Waste Ton","conversion_pct":"Conversion %",
+                    "yield_pct":"Yield %","waste_pct":"Waste %","breakdown_hours":"Breakdown Hrs","remark":"Remark"
+                })
+                st.markdown("#### Saved Production Entries")
+                st.dataframe(display,hide_index=True,use_container_width=True)
             else:
-                target_pct=float(profile.get("conversion_target_pct") or 100)
-                suggested_opening=get_previous_closing_wip(machine,pdate,production_shift)
-                opening_default=float(er.get("opening_wip_ton") or suggested_opening or 0)
-                st.info(
-                    f"🔄 **Daily Material Conversion Target** · Target completion: **{target_pct:.2f}%** · "
-                    "This is one complete production-day record; no A/B production split is required."
-                )
-
-                with st.form("v66_conversion_prod_form"):
-                    c1,c2,c3=st.columns(3)
-                    opening_wip=c1.number_input(
-                        "Opening WIP Ton",min_value=0.0,value=opening_default,step=0.1,
-                        help="Suggested from the previous saved closing WIP for this machine."
-                    )
-                    material_received=c2.number_input(
-                        "Material Released / Received Ton",min_value=0.0,
-                        value=float(er.get("material_received_ton") or 0),step=0.1
-                    )
-                    material_processed=c3.number_input(
-                        "Material Processed Ton",min_value=0.0,
-                        value=float(er.get("material_processed_ton") or 0),step=0.1
-                    )
-                    c1,c2,c3=st.columns(3)
-                    good_output=c1.number_input(
-                        "Good Output Ton",min_value=0.0,
-                        value=float(er.get("good_output_ton") or er.get("production_ton") or 0),step=0.1
-                    )
-                    waste_ton=c2.number_input(
-                        "Waste / Rejection Ton",min_value=0.0,
-                        value=float(er.get("waste_ton") or 0),step=0.1
-                    )
-                    breakdown_hours=c3.number_input(
-                        "Breakdown Hours",min_value=0.0,max_value=24.0,
-                        value=float(er.get("breakdown_hours") or 0),step=0.25
-                    )
-                    remark=st.text_input("Production Remark",value=str(er.get("remark") or ""))
-                    save_prod=st.form_submit_button("Save / Update Production Entry",type="primary",use_container_width=True)
-
-                available=opening_wip+material_received
-                closing=max(available-material_processed,0.0)
-                conversion_pct=(material_processed/available*100.0) if available>0 else 0.0
-                yield_pct=(good_output/material_processed*100.0) if material_processed>0 else 0.0
-                waste_pct=(waste_ton/material_processed*100.0) if material_processed>0 else 0.0
-                variance=material_processed-good_output-waste_ton
-
-                k1,k2,k3,k4,k5=st.columns(5)
-                k1.metric("Available",f"{available:.2f} T")
-                k2.metric("Processed",f"{material_processed:.2f} T")
-                k3.metric("Closing WIP",f"{closing:.2f} T")
-                k4.metric("Conversion",f"{conversion_pct:.2f}%")
-                k5.metric("Yield",f"{yield_pct:.2f}%")
-                if abs(variance)>0.01:
-                    st.caption(f"Process balance variance: {variance:.2f} T (Processed − Good Output − Waste).")
-
-                if save_prod:
-                    if material_processed > available + 1e-9:
-                        st.error("Material Processed cannot be greater than Opening WIP + Material Received.")
-                    elif good_output + waste_ton > material_processed + 1e-9:
-                        st.error("Good Output + Waste cannot be greater than Material Processed.")
-                    else:
-                        upsert(
-                            """INSERT INTO production(
-                               work_date,shift,machine,production_ton,target_ton,waste_ton,breakdown_hours,
-                               paper_cost,ink_cost,glue_cost,other_material_cost,target_type,
-                               opening_wip_ton,material_received_ton,material_available_ton,
-                               material_processed_ton,good_output_ton,closing_wip_ton,
-                               conversion_pct,yield_pct,waste_pct,remark
-                               ) VALUES (?,?,?,?,?,?,?,0,0,0,0,?,?,?,?,?,?,?,?,?,?,?)
-                               ON CONFLICT(work_date,shift,machine) DO UPDATE SET
-                               production_ton=excluded.production_ton,target_ton=excluded.target_ton,
-                               waste_ton=excluded.waste_ton,breakdown_hours=excluded.breakdown_hours,
-                               target_type=excluded.target_type,opening_wip_ton=excluded.opening_wip_ton,
-                               material_received_ton=excluded.material_received_ton,
-                               material_available_ton=excluded.material_available_ton,
-                               material_processed_ton=excluded.material_processed_ton,
-                               good_output_ton=excluded.good_output_ton,
-                               closing_wip_ton=excluded.closing_wip_ton,
-                               conversion_pct=excluded.conversion_pct,yield_pct=excluded.yield_pct,
-                               waste_pct=excluded.waste_pct,remark=excluded.remark""",
-                            (
-                                pdate.isoformat(),production_shift,machine,good_output,0.0,waste_ton,breakdown_hours,
-                                "MATERIAL_CONVERSION",opening_wip,material_received,available,
-                                material_processed,good_output,closing,conversion_pct,yield_pct,waste_pct,remark
-                            )
-                        )
-                        record_audit_event(
-                            _current_user["username"], "PRODUCTION_SAVE", "Operations",
-                            "Production", f"{pdate.isoformat()}|DAY|{machine}",
-                            (
-                                f"Type=MATERIAL_CONVERSION; Available={available:.2f}; Processed={material_processed:.2f}; "
-                                f"Good={good_output:.2f}; Waste={waste_ton:.2f}; Closing={closing:.2f}; "
-                                f"Conversion={conversion_pct:.2f}%; Yield={yield_pct:.2f}%"
-                            )
-                        )
-                        st.success("Production entry saved successfully.")
-                        st.rerun()
-
-        # The daily summary follows the Production Date selected above, not the global Working Date.
-        prod_day=read_df(
-            """SELECT p.work_date,p.shift,p.machine,m.department,m.target_type,
-                      p.production_ton,p.target_ton,p.opening_wip_ton,p.material_received_ton,
-                      p.material_available_ton,p.material_processed_ton,p.good_output_ton,
-                      p.closing_wip_ton,p.waste_ton,p.conversion_pct,p.yield_pct,p.waste_pct,
-                      p.breakdown_hours,p.remark
-               FROM production p LEFT JOIN machines m ON m.machine=p.machine
-               WHERE p.work_date=? AND p.shift='DAY' ORDER BY p.machine""",
-            (pdate.isoformat(),)
-        )
-        if not prod_day.empty:
-            _pd_good = pd.to_numeric(
-                prod_day["good_output_ton"].where(
-                    pd.to_numeric(prod_day["good_output_ton"], errors="coerce").fillna(0) > 0,
-                    prod_day["production_ton"]
-                ),
-                errors="coerce"
-            ).fillna(0)
-            _pd_waste = pd.to_numeric(prod_day["waste_ton"], errors="coerce").fillna(0)
-            _pd_break = pd.to_numeric(prod_day["breakdown_hours"], errors="coerce").fillna(0)
-            _pd_fixed = prod_day[prod_day["target_type"].astype(str) == "FIXED_TON"].copy()
-            _pd_fixed_output = (
-                pd.to_numeric(_pd_fixed["good_output_ton"], errors="coerce").fillna(0)
-                if not _pd_fixed.empty else pd.Series(dtype=float)
-            )
-            if not _pd_fixed.empty:
-                _pd_fixed_output = _pd_fixed_output.where(
-                    _pd_fixed_output > 0,
-                    pd.to_numeric(_pd_fixed["production_ton"], errors="coerce").fillna(0)
-                )
-            _pd_fixed_target = (
-                pd.to_numeric(_pd_fixed["target_ton"], errors="coerce").fillna(0).sum()
-                if not _pd_fixed.empty else 0.0
-            )
-            _pd_fixed_achievement = (
-                float(_pd_fixed_output.sum()) / float(_pd_fixed_target) * 100.0
-                if float(_pd_fixed_target) > 0 else 0.0
-            )
-
-            st.markdown(f"#### Production Summary · {pdate.strftime('%d %b %Y')}")
-            ds1,ds2,ds3,ds4,ds5 = st.columns(5)
-            ds1.metric("Entries",f"{len(prod_day):,}")
-            ds2.metric("Good Output",f"{float(_pd_good.sum()):.2f} T")
-            ds3.metric("Waste / Rejection",f"{float(_pd_waste.sum()):.2f} T")
-            ds4.metric("Breakdown",f"{float(_pd_break.sum()):.2f} Hrs")
-            ds5.metric("Corrugation Achievement",f"{_pd_fixed_achievement:.2f}%")
-
-            display=prod_day.rename(columns={
-                "work_date":"Date","shift":"Period","machine":"Machine","department":"Department",
-                "target_type":"Target Type","production_ton":"Good Output Ton","target_ton":"Fixed Target Ton",
-                "opening_wip_ton":"Opening WIP","material_received_ton":"Material Received",
-                "material_available_ton":"Material Available","material_processed_ton":"Material Processed",
-                "closing_wip_ton":"Closing WIP","waste_ton":"Waste Ton","conversion_pct":"Conversion %",
-                "yield_pct":"Yield %","waste_pct":"Waste %","breakdown_hours":"Breakdown Hrs","remark":"Remark"
-            })
-            st.markdown("#### Saved Production Entries")
-            st.dataframe(display,hide_index=True,use_container_width=True)
-        else:
-            st.info(f"No production entry is saved for {pdate.strftime('%d/%m/%Y')} yet.")
+                st.info(f"No production entry is saved for {pdate.strftime('%d/%m/%Y')} yet.")
 
     if _v141_ops_section=="Monthly Reel Entry":
         st.markdown("### Monthly Reel Issue & Return")
