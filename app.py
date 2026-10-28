@@ -10000,32 +10000,37 @@ def v8_compact_table(headers, rows, widths):
     )
 
 
-def v57_business_data_counts():
-    """Return current row counts for business data that a fresh-live reset clears."""
-    tables = [
-        ("Employees / Salary Master", "employees"),
-        ("Attendance", "attendance"),
-        ("Payroll Adjustments", "payroll_adjustments"),
-        ("Finalized Payroll", "payroll_records"),
-        ("Manpower Allocation", "manpower_allocation"),
-        ("Production", "production"),
-        ("Contractor Work", "contractor_work_entries"),
-        ("Contractor Rates", "contractor_rates"),
-        ("Contractors", "contractors"),
-        ("Machine Shift Standards", "machine_shift_targets"),
-        ("Machines", "machines"),
-        ("Departments", "departments"),
-    ]
-    rows = []
-    for label, table in tables:
-        try:
-            df = read_df(f"SELECT COUNT(*) AS c FROM {table}")
-            count = int(df.iloc[0]["c"]) if not df.empty else 0
-        except Exception:
-            count = 0
-        rows.append({"Data Area": label, "Rows": count})
-    return pd.DataFrame(rows)
+# Explicit allowlist: master/configuration tables must never enter this list.
+V201_TRANSACTION_TABLES = (("Attendance","attendance"),("Payroll Adjustments","payroll_adjustments"),("Finalized Payroll","payroll_records"),("Imported Final Salary Sheets","payroll_final_salary_import"),("Manpower Allocation","manpower_allocation"),("Manpower Headcounts","manpower_headcount_entries"),("Daily Production","production"),("Production Import Detail","production_import_detail"),("Job-wise Production","production_job_entries"),("Reel Consumption","production_reel_consumption"),("Monthly Material Consumption","production_consumption_summary"),("Daily Reel Movements","production_reel_movement_daily"),("Contractor Work","contractor_work_entries"))
+V201_PRESERVED_TABLES = ("departments","employees","machines","contractors","contractor_rates","machine_shift_targets","department_mappings","production_machine_aliases","app_users","app_user_permissions","app_sessions")
 
+
+def _v201_existing_tables(cur, tables):
+    existing = []
+    for table in tables:
+        cur.execute("SELECT to_regclass(%s)", ("public." + table,))
+        if cur.fetchone()[0] is not None:
+            existing.append(table)
+    return existing
+
+
+def v57_business_data_counts():
+    """Count only the transaction tables cleared by the master-preserving reset."""
+    conn = get_pg_conn()
+    try:
+        cur = conn.cursor()
+        existing = set(_v201_existing_tables(cur, [table for _, table in V201_TRANSACTION_TABLES]))
+        rows = []
+        for label, table in V201_TRANSACTION_TABLES:
+            if table in existing:
+                cur.execute('SELECT COUNT(*) FROM public."' + table + '"')
+                rows.append({"Data Area": label, "Rows": int(cur.fetchone()[0])})
+            else:
+                rows.append({"Data Area": label, "Rows": 0})
+        cur.close()
+        return pd.DataFrame(rows, columns=["Data Area", "Rows"])
+    finally:
+        conn.close()
 
 def v96_reset_scope_table(counts):
     """Render the reset scope with narrow numeric columns and a flexible data-area column."""
@@ -10087,47 +10092,42 @@ def v96_reset_scope_table(counts):
     )
 
 def v57_reset_all_business_data(reset_by):
-    """
-    Full business-data reset for a clean live start.
-
-    Preserved deliberately:
-      - app_users
-      - app_user_permissions
-      - app_sessions
-      - app_settings (including security/business rules and fresh_start_reset_v1)
-
-    Departments/machines are cleared and are NOT recreated automatically.
-    Admin must build every business master from Master Centre.
-    """
+    """Clear all transaction months atomically while preserving every master."""
     conn = get_pg_conn()
     try:
         cur = conn.cursor()
-        cur.execute("""
-            TRUNCATE TABLE
-                contractor_work_entries,
-                contractor_rates,
-                contractors,
-                payroll_records,
-                payroll_adjustments,
-                attendance,
-                manpower_allocation,
-                production,
-                machine_shift_targets,
-                machines,
-                employees,
-                department_mappings,
-                departments
-            RESTART IDENTITY CASCADE
-        """)
+        cur.execute("SET LOCAL lock_timeout = '10s'")
+        transactions = _v201_existing_tables(cur, [table for _, table in V201_TRANSACTION_TABLES])
+        preserved = _v201_existing_tables(cur, V201_PRESERVED_TABLES)
+        # Block concurrent writes during verification; never expand scope with CASCADE.
+        locked = sorted(set(transactions + preserved + ["app_settings"]))
+        cur.execute('LOCK TABLE ' + ', '.join('public."' + table + '"' for table in locked) +
+                    ' IN ACCESS EXCLUSIVE MODE')
+        before = {}
+        for table in preserved:
+            cur.execute('SELECT COUNT(*) FROM public."' + table + '"')
+            before[table] = int(cur.fetchone()[0])
+        if transactions:
+            cur.execute('TRUNCATE TABLE ' +
+                        ', '.join('public."' + table + '"' for table in transactions) +
+                        ' RESTART IDENTITY RESTRICT')
+        for table in transactions:
+            cur.execute('SELECT COUNT(*) FROM public."' + table + '"')
+            if int(cur.fetchone()[0]) != 0:
+                raise RuntimeError("Transaction reset verification failed: " + table)
+        for table, count in before.items():
+            cur.execute('SELECT COUNT(*) FROM public."' + table + '"')
+            if int(cur.fetchone()[0]) != count:
+                raise RuntimeError("Master preservation verification failed: " + table)
         cur.execute("""
             INSERT INTO app_settings(setting_key, setting_value)
-            VALUES ('last_full_live_reset_by', %s)
+            VALUES ('last_transaction_only_reset_by', %s)
             ON CONFLICT(setting_key)
             DO UPDATE SET setting_value=excluded.setting_value
         """, (str(reset_by or "Admin"),))
         cur.execute("""
             INSERT INTO app_settings(setting_key, setting_value)
-            VALUES ('last_full_live_reset_at', CURRENT_TIMESTAMP::text)
+            VALUES ('last_transaction_only_reset_at', CURRENT_TIMESTAMP::text)
             ON CONFLICT(setting_key)
             DO UPDATE SET setting_value=excluded.setting_value
         """)
@@ -20638,93 +20638,62 @@ elif page == "Master Centre":
         # ----------------------------------------------------
         if master_area=="Fresh Live Start":
             v5_panel(
-                "Fresh Live Start",
-                "Clear every business master and transaction. Nothing is automatically recreated; Admin builds the system again from zero."
+                "Fresh Start — Keep All Masters",
+                "Clear transactions for ALL months and divisions. All existing masters remain unchanged."
             )
-
             st.warning(
-                "⚠️ This is a permanent reset of BUSINESS DATA. "
-                "Admin users, passwords, user permissions, login/security configuration and application rules are preserved."
+                "This permanently deletes attendance, production (including import/job detail and material/reel data), "
+                "manpower entries, contractor work and payroll transactions for every month. "
+                "Machines, employees/salary masters, departments, locations, contractors, rates, "
+                "shift standards, saved mappings, users and settings are preserved."
             )
-
             counts = v57_business_data_counts()
             total_rows = int(counts["Rows"].sum()) if not counts.empty else 0
-
             v5_kpis([
-                ("Business Rows", f"{total_rows:,}", "Current reset scope", "warn" if total_rows else "good"),
-                ("Employees", f"{int(counts.loc[counts['Data Area']=='Employees / Salary Master','Rows'].sum()):,}", "Will be cleared", ""),
-                ("Attendance", f"{int(counts.loc[counts['Data Area']=='Attendance','Rows'].sum()):,}", "Will be cleared", ""),
-                ("Payroll", f"{int(counts.loc[counts['Data Area']=='Finalized Payroll','Rows'].sum()):,}", "Will be cleared", ""),
-                ("Contractor Work", f"{int(counts.loc[counts['Data Area']=='Contractor Work','Rows'].sum()):,}", "Will be cleared", ""),
+                ("Transaction Rows", f"{total_rows:,}", "All months · all divisions", "warn" if total_rows else "good"),
+                ("Masters", "Preserved", "Machines · employees · departments · contractors", "good"),
                 ("Security", "Preserved", "Users · access · settings", "good"),
             ])
-
             with st.expander("See exactly what will be cleared", expanded=True):
                 v96_reset_scope_table(counts)
-
             st.markdown("### What will remain")
             st.markdown(
-                """
-                - Admin/User login accounts and passwords
-                - User roles and module permissions
-                - Application security/session structure
-                - Payroll/business-rule settings
-                - Database connection and Streamlit secrets
-                - Application code and design
-                """
+                "- All employee and salary master records\n"
+                "- Machines, departments, locations and shift/manpower standards\n"
+                "- Contractors and contractor rates\n"
+                "- Department mappings and production machine aliases\n"
+                "- User accounts, permissions, settings and audit history"
             )
-
-            st.markdown("### After reset")
-            st.caption(
-                "No Department, Machine, Contractor, Employee or Salary master is recreated automatically. "
-                "Every business master and transaction starts from zero and must be created/imported by Admin."
-            )
-
             confirm_text = st.text_input(
-                'Type exactly **RESET LIVE DATA**',
-                key="v57_reset_confirm_text",
-                placeholder="RESET LIVE DATA"
+                'Type exactly **CLEAR TRANSACTIONS KEEP MASTERS**',
+                key="v201_reset_confirm_text",
+                placeholder="CLEAR TRANSACTIONS KEEP MASTERS"
             )
             confirm_box = st.checkbox(
-                "I understand this permanently deletes the old business data and I am starting the live database again.",
-                key="v57_reset_confirm_box"
+                "Clear all months of transactions while keeping every master.",
+                key="v201_reset_confirm_box"
             )
-
-            can_reset = confirm_box and confirm_text.strip().upper() == "RESET LIVE DATA"
-
+            can_reset = confirm_box and confirm_text.strip() == "CLEAR TRANSACTIONS KEEP MASTERS"
             if st.button(
-                "Clear All Old Business Data & Start Fresh",
-                type="primary",
-                use_container_width=True,
-                disabled=not can_reset,
-                key="v57_full_reset_btn"
+                "Clear Transactions — Keep All Masters",
+                type="primary", use_container_width=True,
+                disabled=not can_reset, key="v201_transaction_reset_btn"
             ):
                 try:
-                    with st.spinner("Clearing old business data safely..."):
+                    with st.spinner("Clearing transactions and checking master preservation..."):
                         v57_reset_all_business_data(_current_user["username"])
-                    st.success(
-                        "✅ Clean live reset completed. Employees, salary, attendance, payroll, "
-                        "contractor and operational data are now cleared."
-                    )
-                    st.session_state["v57_reset_done"] = True
+                    # Remove upload previews, editor drafts and cached reports that could restore old data.
+                    st.cache_data.clear()
+                    for _reset_key in list(st.session_state):
+                        if _reset_key not in {"auth_user", "auth_token", "v54_master_workspace", "v5_navigation"}:
+                            del st.session_state[_reset_key]
+                    st.session_state["v201_reset_done"] = True
                     st.rerun()
                 except Exception as exc:
-                    st.error(f"Reset failed. No further action should be taken until this is checked: {exc}")
-
-            if st.session_state.get("v57_reset_done"):
-                st.success("Fresh live database is ready for new uploads.")
-                st.markdown("### Recommended live setup order")
-                setup = pd.DataFrame([
-                    {"Step":1, "Area":"Master Centre → Employee / Salary Master", "Action":"Upload/verify all 3 divisions"},
-                    {"Step":2, "Area":"Attendance → Upload", "Action":"Upload attendance date-wise"},
-                    {"Step":3, "Area":"Master Centre → Contractor Master", "Action":"Create Balaji/Rahul/Suraj/Wazir structure"},
-                    {"Step":4, "Area":"Master Centre → Contractor Rate Master", "Action":"Enter approved exact rates"},
-                    {"Step":5, "Area":"Master Centre → Machine & Shift Master", "Action":"Verify manpower and targets"},
-                    {"Step":6, "Area":"Employees → Employee 360", "Action":"Verify each employee profile"},
-                    {"Step":7, "Area":"Payroll", "Action":"Check live salary calculations before finalization"},
-                    {"Step":8, "Area":"Reports", "Action":"Validate MD overview and all controlled reports"},
-                ])
-                st.dataframe(setup, hide_index=True, use_container_width=True)
+                    st.error(f"Reset failed; the database transaction was rolled back: {exc}")
+            if st.session_state.get("v201_reset_done"):
+                st.success("All transactions cleared. All masters preserved. Ready for fresh uploads.")
+                st.info("Upload fresh attendance and production, then verify manpower, payroll and reports.")
 
         # ----------------------------------------------------
         # UNIVERSAL MASTER IMPORT
