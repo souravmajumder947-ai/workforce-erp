@@ -20664,33 +20664,41 @@ elif page == "Master Centre":
                 "- Department mappings and production machine aliases\n"
                 "- User accounts, permissions, settings and audit history"
             )
-            confirm_text = st.text_input(
-                'Type exactly **CLEAR TRANSACTIONS KEEP MASTERS**',
-                key="v201_reset_confirm_text",
-                placeholder="CLEAR TRANSACTIONS KEEP MASTERS"
-            )
-            confirm_box = st.checkbox(
-                "Clear all months of transactions while keeping every master.",
-                key="v201_reset_confirm_box"
-            )
-            can_reset = confirm_box and confirm_text.strip() == "CLEAR TRANSACTIONS KEEP MASTERS"
-            if st.button(
-                "Clear Transactions — Keep All Masters",
-                type="primary", use_container_width=True,
-                disabled=not can_reset, key="v201_transaction_reset_btn"
-            ):
-                try:
-                    with st.spinner("Clearing transactions and checking master preservation..."):
-                        v57_reset_all_business_data(_current_user["username"])
-                    # Remove upload previews, editor drafts and cached reports that could restore old data.
-                    st.cache_data.clear()
-                    for _reset_key in list(st.session_state):
-                        if _reset_key not in {"auth_user", "auth_token", "v54_master_workspace", "v5_navigation"}:
-                            del st.session_state[_reset_key]
-                    st.session_state["v201_reset_done"] = True
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Reset failed; the database transaction was rolled back: {exc}")
+            # Submit both confirmation controls together; do not depend on blur/rerun
+            # to enable a button while the user is still editing the text.
+            with st.form("v202_transaction_reset_form", clear_on_submit=False):
+                confirm_text = st.text_input(
+                    'Type **CLEAR TRANSACTIONS KEEP MASTERS**',
+                    key="v202_reset_confirm_text",
+                    placeholder="CLEAR TRANSACTIONS KEEP MASTERS"
+                )
+                confirm_box = st.checkbox(
+                    "Clear all months of transactions while keeping every master.",
+                    key="v202_reset_confirm_box"
+                )
+                reset_submitted = st.form_submit_button(
+                    "Clear Transactions — Keep All Masters",
+                    type="primary", use_container_width=True
+                )
+            if reset_submitted:
+                normalized_confirmation = " ".join(confirm_text.upper().split()).rstrip(". ")
+                if not confirm_box:
+                    st.error("Tick the confirmation checkbox, then click Clear Transactions again. Nothing was cleared.")
+                elif normalized_confirmation != "CLEAR TRANSACTIONS KEEP MASTERS":
+                    st.error("Enter CLEAR TRANSACTIONS KEEP MASTERS in the confirmation field, then click Clear Transactions again. Nothing was cleared.")
+                else:
+                    try:
+                        with st.spinner("Clearing transactions and checking master preservation..."):
+                            v57_reset_all_business_data(_current_user["username"])
+                        # Remove upload previews, editor drafts and cached reports that could restore old data.
+                        st.cache_data.clear()
+                        for _reset_key in list(st.session_state):
+                            if _reset_key not in {"auth_user", "auth_token", "v54_master_workspace", "v5_navigation"}:
+                                del st.session_state[_reset_key]
+                        st.session_state["v201_reset_done"] = True
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Reset failed; the database transaction was rolled back: {exc}")
             if st.session_state.get("v201_reset_done"):
                 st.success("All transactions cleared. All masters preserved. Ready for fresh uploads.")
                 st.info("Upload fresh attendance and production, then verify manpower, payroll and reports.")
