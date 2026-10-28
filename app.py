@@ -11027,8 +11027,8 @@ st.sidebar.markdown(
 
 available_modules = [
     m for m in [
-        "Home","Employees","Attendance","Payroll","Contractors",
-        "Operations","Reports","AI Tools","Activity Monitor","Master Centre","User Management"
+        "Home","Employees","Attendance","Operations","Contractors",
+        "Payroll","Reports","Master Centre","User Management"
     ] if v5_module_allowed(m)
 ]
 
@@ -11036,6 +11036,10 @@ available_modules = [
 # Redirect stale sessions/bookmarks safely instead of exposing a duplicate page.
 if st.session_state.get("v5_navigation") == "Management":
     st.session_state["v5_navigation"] = "Reports"
+
+# Retired optional pages must not leave existing sessions on an invalid choice.
+if st.session_state.get("v5_navigation") not in available_modules:
+    st.session_state["v5_navigation"] = available_modules[0]
 
 # V8.3 safe navigation:
 # buttons write to a separate request key; the request is applied
@@ -12543,36 +12547,6 @@ if page == "Home":
                         f'<em>{_v10_time_text}</em></div>'
                     )
                 st.markdown(_v10_activity_html, unsafe_allow_html=True)
-
-    # V10.5 DIRECT ACTION CARDS + CLEAN LOGIN
-    # One control = one action. No separate decorative card + Open button.
-    st.markdown('<div class="v105-direct-action-marker"></div>', unsafe_allow_html=True)
-    _v10_u1, _v10_u2, _v10_u3, _v10_u4 = st.columns(4, gap="small")
-    _v10_utils = [
-        (_v10_u1, "✦  AI Assistant", "Ask anything about HR data", "AI Tools", "v10_util_ai"),
-        (_v10_u2, "⚙  Automation Hub", "Readiness & repetitive-work routing", "AI Tools", "v10_util_auto"),
-        (_v10_u3, "▥  Unified Reports", "All controlled reports in one place", "Reports", "v10_util_reports"),
-        (_v10_u4, "⇩  Data Export", "Excel report exports", "Reports", "v10_util_export"),
-    ]
-    for _v10_col, _v10_label, _v10_sub, _v10_target, _v10_key in _v10_utils:
-        with _v10_col:
-            if _v10_target in available_modules:
-                if st.button(
-                    _v10_label,
-                    key=_v10_key,
-                    use_container_width=True,
-                    help=_v10_sub,
-                ):
-                    st.session_state["_v83_nav_request"] = _v10_target
-                    st.rerun()
-            else:
-                _v10_disabled_click = st.button(
-                    _v10_label,
-                    key=f"{_v10_key}_disabled",
-                    use_container_width=True,
-                    help="This module is not available for your current role.",
-                    disabled=True,
-                )
 
     st.markdown(
         '<div class="v10-home-footer"><span>🌿 Reliable Packaging Industries Limited · Smart Manufacturing · Workforce · Payroll · Operations</span>'
@@ -20614,18 +20588,18 @@ elif page == "Master Centre":
         ])
 
         master_options=[
-            "Fresh Live Start",
-            "Universal Master Import",
-            "Authoritative Employee Master Sync",
             "Employee Master",
             "Salary Master",
-            "Data Quality & Mapping",
             "Department Master",
             "Machine & Shift Master",
             "Contractor Master",
             "Contractor Rate Master",
             "Payroll & Business Rules",
+            "Fresh Live Start",
         ]
+        # Keep essential maintenance; default to employees instead of the reset screen.
+        if st.session_state.get("v54_master_workspace") not in master_options:
+            st.session_state["v54_master_workspace"] = "Employee Master"
         master_area=st.selectbox(
             "Master Workspace",
             master_options,
