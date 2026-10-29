@@ -96,6 +96,80 @@ class SimpleWorkforce:
         end = month.replace(day=monthrange(month.year, month.month)[1])
         return start, end
 
+    def home(self):
+        st.title("Home · MD Dashboard")
+        start, end = self.period()
+        st.caption(f"Reliable Packaging Industries Limited · {self.division} · {start:%B %Y}")
+        st.caption("Created by Sourav Majumder")
+        selected_day = st.date_input("Dashboard date", value=max(start, min(date.today(), end)),
+            min_value=start, max_value=end, key=f"md_dashboard_day_{start:%Y%m}")
+        allowed = self.c["v5_module_allowed"]
+        clause, params = self.scope()
+        if allowed("Attendance") or allowed("Reports"):
+            attendance = self.read("""SELECT work_date,employee_id,status,ot_hours,review_required
+                FROM attendance WHERE work_date BETWEEN ? AND ?""" + clause,
+                (start.isoformat(),end.isoformat()) + params)
+            st.subheader(f"Attendance · {selected_day:%d %b %Y}")
+            if attendance.empty:
+                st.info("No attendance uploaded for this month and division.")
+            else:
+                attendance['day'] = pd.to_datetime(attendance.work_date, errors='coerce').dt.date
+                daily = attendance[attendance.day==selected_day]
+                statuses = daily.status.value_counts()
+                present = int(statuses.get('Present',0)+statuses.get('OD',0))
+                leave = int(sum(statuses.get(s,0) for s in ['Leave','CL','SL','EL','LWP']))
+                a,b,c,d = st.columns(4)
+                a.metric('Present / OD rows', present)
+                b.metric('Absent rows', int(statuses.get('Absent',0)))
+                c.metric('Leave rows', leave)
+                d.metric('Weekly off / Holiday rows', int(statuses.get('WO',0)+statuses.get('Holiday',0)))
+                a,b,c,d = st.columns(4)
+                a.metric('Half-day rows', int(statuses.get('Half Day',0)))
+                b.metric('Employees recorded', daily.employee_id.nunique())
+                c.metric('OT hours', f"{pd.to_numeric(daily.ot_hours,errors='coerce').fillna(0).sum():.2f}")
+                pending = attendance.status.eq('HR Review') | attendance.review_required.fillna(False)
+                d.metric('Pending HR rows · month', int(pending.sum()))
+                st.caption('Daily counts are attendance rows per shift. Employees recorded counts each employee once. Missing source attendance is not automatically marked absent.')
+                if daily.empty:
+                    st.info('No attendance recorded on the selected dashboard date. Choose a date with uploaded attendance.')
+                with st.expander('Monthly attendance trend'):
+                    trend = attendance.groupby(['day','status']).size().unstack(fill_value=0)
+                    st.bar_chart(trend)
+        if allowed('Operations') or allowed('Reports'):
+            st.subheader(f"Production & manpower · {selected_day:%d %b %Y}")
+            output = self.read("""SELECT o.division,o.shift,o.machine,o.output_ton,o.employee_ids,o.contractor_headcount,
+                COALESCE(t.standard_manpower,m.standard_manpower) AS standard_manpower,
+                COALESCE(t.target_ton,m.target_ton) AS target_ton
+                FROM workforce_daily_output o JOIN machines m ON m.machine=o.machine
+                LEFT JOIN machine_shift_targets t ON t.machine=o.machine AND t.shift=o.shift
+                WHERE o.work_date=?""" + self.scope('o.division')[0] + ' ORDER BY o.division,o.machine,o.shift',
+                (selected_day,) + params)
+            if output.empty:
+                st.info('No simple production entries for this day. Existing detailed production remains under Settings → Detailed Reports.')
+            else:
+                output['Manpower'] = output.employee_ids.map(lambda x:len(json.loads(x))) + pd.to_numeric(output.contractor_headcount)
+                output['Standard'] = pd.to_numeric(output.standard_manpower,errors='coerce').fillna(0)
+                output['Gap'] = output['Manpower'] - output['Standard']
+                output['Tons'] = pd.to_numeric(output.output_ton)
+                output['Target (tons)'] = pd.to_numeric(output.target_ton,errors='coerce').fillna(0)
+                output['Output per person (tons)'] = output.Tons / output.Manpower.where(output.Manpower>0)
+                display = output.rename(columns={'division':'Division','machine':'Machine','shift':'Shift'})
+                st.dataframe(display[['Division','Machine','Shift','Manpower','Standard','Gap','Tons','Target (tons)','Output per person (tons)']],
+                    hide_index=True,use_container_width=True,
+                    column_config={'Tons':st.column_config.NumberColumn(format='%.2f'),
+                        'Output per person (tons)':st.column_config.NumberColumn(format='%.2f')})
+                st.caption('Gap = actual manpower minus machine/shift standard. Targets and standards are read from your masters. Machine stages are kept separate to avoid adding the same material twice.')
+        if allowed('Reports'):
+            self.reports(heading=False)
+        st.subheader('Company locations')
+        locations = pd.DataFrame([
+            {'Plant':'Greater Noida Plant','lat':28.451388100864982,'lon':77.57350512760937},
+            {'Plant':'Dhaulana Glass Plant','lat':28.630672782505492,'lon':77.67451944283206},
+            {'Plant':'D-63 Head Office','lat':28.612209897948606,'lon':77.38038405421369},
+        ])
+        st.map(locations)
+        st.caption('Greater Noida Plant · Dhaulana Glass Plant · D-63 Head Office')
+
     def attendance(self):
         st.title("Attendance upload")
         st.caption("Choose the plant, upload the sheet, then save. Issues go to HR Review automatically.")
@@ -329,8 +403,9 @@ class SimpleWorkforce:
         except Exception as exc:
             st.error(f"Production was not saved: {exc}")
 
-    def reports(self):
-        st.title("Cost & attrition")
+    def reports(self, heading=True):
+        if heading:
+            st.title("Cost & attrition")
         start, end = self.period()
         st.caption(f"{start:%B %Y} · {self.division}")
         st.subheader("Manpower cost per ton")
@@ -432,6 +507,6 @@ class SimpleWorkforce:
 
     def render(self, page):
         self.ensure_schema()
-        {'Simple Attendance': self.attendance, 'Simple HR Review': self.review,
+        {'Simple Home': self.home, 'Simple Attendance': self.attendance, 'Simple HR Review': self.review,
          'Simple Production': self.production, 'Simple Reports': self.reports,
          'Simple Lifecycle': self.lifecycle}[page]()
