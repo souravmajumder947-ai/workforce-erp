@@ -11027,6 +11027,8 @@ available_modules = [m for m in [
     "Reports","Master Centre","User Management"
 ] if v5_module_allowed(m)]
 _simple_routes = {"Home": "Home"}
+if v5_module_allowed("Employees"):
+    _simple_routes["Employee 360"] = "Employees"
 if v5_module_allowed("Attendance"):
     _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
 if v5_module_allowed("Operations"):
@@ -11035,12 +11037,12 @@ if v5_module_allowed("Reports"):
     _simple_routes["Cost & Attrition"] = "Simple Reports"
 _simple_routes["Settings"] = "Simple Settings"
 _legacy_request = st.session_state.pop("_v83_nav_request", None)
-_request_map = {"Home":"Home","Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
+_request_map = {"Home":"Home","Employees":"Employee 360","Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
 if _legacy_request in _request_map and _request_map[_legacy_request] in _simple_routes:
     st.session_state["simple_navigation"] = _request_map[_legacy_request]
 # Original Home action cards open the equivalent simplified destination.
 _legacy_settings = {
-    "Employees": "Employees", "Payroll": "Payroll", "Contractors": "Contractor Work",
+    "Payroll": "Payroll", "Contractors": "Contractor Work",
     "Master Centre": "Employee Master", "User Management": "Users & Access"
 }
 if _legacy_request in _legacy_settings and _legacy_request in available_modules:
@@ -11051,12 +11053,14 @@ if st.session_state.get("simple_navigation") not in _simple_routes:
 st.sidebar.markdown('<div class="v5-sidebar-label">Daily Work</div>', unsafe_allow_html=True)
 _simple_choice = st.sidebar.radio("Navigation", list(_simple_routes), key="simple_navigation", label_visibility="collapsed")
 page = _simple_routes[_simple_choice]
+# Open the full profile on entry while allowing Directory/Profile switches within Employees.
+if _simple_choice == "Employee 360" and st.session_state.get("_simple_previous_choice") != "Employee 360":
+    st.session_state["v55_emp_view"] = "Employee 360"
+st.session_state["_simple_previous_choice"] = _simple_choice
 if page == "Simple Settings":
     _simple_settings = {}
     if can_edit_hr(_current_role):
         _simple_settings["Joining & Leaving"] = "Simple Lifecycle"
-    if v5_module_allowed("Employees"):
-        _simple_settings["Employees"] = "Employees"
     if v5_module_allowed("Payroll"):
         _simple_settings["Payroll"] = "Payroll"
     if v5_module_allowed("Contractors"):
