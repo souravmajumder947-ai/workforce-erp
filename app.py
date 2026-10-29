@@ -4207,12 +4207,9 @@ def _validate_and_enrich_attendance_records(records):
         if not emp:
             issue = "Employee ID not found in Employee Master"
         elif inactive_master:
-            rec["skip_import"] = True
-            rec["source_issue"] = "Inactive Employee in Master"
-            rec["review_required"] = False
-            rec["status"] = "Inactive"
-            rec["ot_hours"] = 0.0
-            continue
+            # Historical attendance is retained for HR confirmation without reactivating a master.
+            rec["skip_import"] = False
+            issue = "Employee currently inactive: verify attendance date against last working date"
         elif pending_master:
             issue = "Employee ID awaiting HR Master confirmation"
         else:
@@ -4386,8 +4383,7 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
     if not records:
         return 0
     records = _validate_and_enrich_attendance_records(records)
-    # Employees already marked inactive/left/resigned/terminated in Employee Master
-    # must not be recreated, imported, or sent to HR Review from a biometric file.
+    # Retain historical inactive-employee rows as HR Review; do not reactivate masters.
     records = [rec for rec in records if not bool(rec.get("skip_import", False))]
     if not records:
         return 0
@@ -10001,7 +9997,7 @@ def v8_compact_table(headers, rows, widths):
 
 
 # Explicit allowlist: master/configuration tables must never enter this list.
-V201_TRANSACTION_TABLES = (("Attendance","attendance"),("Payroll Adjustments","payroll_adjustments"),("Finalized Payroll","payroll_records"),("Imported Final Salary Sheets","payroll_final_salary_import"),("Manpower Allocation","manpower_allocation"),("Manpower Headcounts","manpower_headcount_entries"),("Daily Production","production"),("Production Import Detail","production_import_detail"),("Job-wise Production","production_job_entries"),("Reel Consumption","production_reel_consumption"),("Monthly Material Consumption","production_consumption_summary"),("Daily Reel Movements","production_reel_movement_daily"),("Contractor Work","contractor_work_entries"))
+V201_TRANSACTION_TABLES = (("Attendance","attendance"),("Payroll Adjustments","payroll_adjustments"),("Finalized Payroll","payroll_records"),("Imported Final Salary Sheets","payroll_final_salary_import"),("Manpower Allocation","manpower_allocation"),("Manpower Headcounts","manpower_headcount_entries"),("Daily Production","production"),("Production Import Detail","production_import_detail"),("Job-wise Production","production_job_entries"),("Reel Consumption","production_reel_consumption"),("Monthly Material Consumption","production_consumption_summary"),("Daily Reel Movements","production_reel_movement_daily"),("Contractor Work","contractor_work_entries"),("Simple Production & Manpower","workforce_daily_output"))
 V201_PRESERVED_TABLES = ("departments","employees","machines","contractors","contractor_rates","machine_shift_targets","department_mappings","production_machine_aliases","app_users","app_user_permissions","app_sessions")
 
 
@@ -11025,37 +11021,55 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-available_modules = [
-    m for m in [
-        "Home","Employees","Attendance","Operations","Contractors",
-        "Payroll","Reports","Master Centre","User Management"
-    ] if v5_module_allowed(m)
-]
-
-# V17.1: Management reporting is now consolidated into Unified Report Centre.
-# Redirect stale sessions/bookmarks safely instead of exposing a duplicate page.
-if st.session_state.get("v5_navigation") == "Management":
-    st.session_state["v5_navigation"] = "Reports"
-
-# Retired optional pages must not leave existing sessions on an invalid choice.
-if st.session_state.get("v5_navigation") not in available_modules:
-    st.session_state["v5_navigation"] = available_modules[0]
-
-# V8.3 safe navigation:
-# buttons write to a separate request key; the request is applied
-# BEFORE the radio widget is instantiated on the next rerun.
-_v83_nav_request = st.session_state.pop("_v83_nav_request", None)
-if _v83_nav_request in available_modules:
-    st.session_state["v5_navigation"] = _v83_nav_request
-
-st.sidebar.markdown('<div class="v5-sidebar-label">Workspace</div>', unsafe_allow_html=True)
-page = st.sidebar.radio(
-    "Navigation",
-    available_modules,
-    key="v5_navigation",
-    format_func=lambda x: f"{V5_NAV_ICONS.get(x,'•')}  {x}",
-    label_visibility="collapsed",
-)
+# Five daily-work destinations. Existing role permissions remain authoritative.
+available_modules = [m for m in [
+    "Home","Employees","Attendance","Payroll","Contractors","Operations",
+    "Reports","Master Centre","User Management"
+] if v5_module_allowed(m)]
+_simple_routes = {}
+if v5_module_allowed("Attendance"):
+    _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
+if v5_module_allowed("Operations"):
+    _simple_routes["Production"] = "Simple Production"
+if v5_module_allowed("Reports"):
+    _simple_routes["Cost & Attrition"] = "Simple Reports"
+_simple_routes["Settings"] = "Simple Settings"
+_legacy_request = st.session_state.pop("_v83_nav_request", None)
+_request_map = {"Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
+if _legacy_request in _request_map and _request_map[_legacy_request] in _simple_routes:
+    st.session_state["simple_navigation"] = _request_map[_legacy_request]
+if st.session_state.get("simple_navigation") not in _simple_routes:
+    st.session_state["simple_navigation"] = next(iter(_simple_routes))
+st.sidebar.markdown('<div class="v5-sidebar-label">Daily Work</div>', unsafe_allow_html=True)
+_simple_choice = st.sidebar.radio("Navigation", list(_simple_routes), key="simple_navigation", label_visibility="collapsed")
+page = _simple_routes[_simple_choice]
+if page == "Simple Settings":
+    _simple_settings = {}
+    if can_edit_hr(_current_role):
+        _simple_settings["Joining & Leaving"] = "Simple Lifecycle"
+    if v5_module_allowed("Employees"):
+        _simple_settings["Employees"] = "Employees"
+    if v5_module_allowed("Payroll"):
+        _simple_settings["Payroll"] = "Payroll"
+    if v5_module_allowed("Contractors"):
+        _simple_settings["Contractor Work"] = "Contractors"
+    if v5_module_allowed("Reports"):
+        _simple_settings["Detailed Reports"] = "Reports"
+    if _current_role in FULL_CONTROL_ROLES:
+        for _master_name in ["Employee Master","Salary Master","Machine & Shift Master","Department Master",
+                             "Contractor Master","Contractor Rate Master","Payroll & Business Rules","Fresh Live Start"]:
+            _simple_settings[_master_name] = "Master Centre"
+        _simple_settings["Users & Access"] = "User Management"
+    if _simple_settings:
+        if st.session_state.get("simple_settings_choice") not in _simple_settings:
+            st.session_state["simple_settings_choice"] = next(iter(_simple_settings))
+        _setting = st.sidebar.selectbox("Settings", list(_simple_settings), key="simple_settings_choice")
+        page = _simple_settings[_setting]
+        if page == "Master Centre":
+            st.session_state["v54_master_workspace"] = _setting
+    else:
+        st.info("No settings are available for this role.")
+        st.stop()
 
 st.sidebar.markdown('<div class="v5-sidebar-label">Live Context</div>', unsafe_allow_html=True)
 global_division = st.sidebar.selectbox(
@@ -11074,7 +11088,7 @@ _v154_default_payroll_month = date(
     _v154_last_month_end.year, _v154_last_month_end.month, 1
 )
 global_payroll_month = st.sidebar.selectbox(
-    "Payroll Month", _month_opts,
+    "Month", _month_opts,
     index=next(
         (i for i,d in enumerate(_month_opts)
          if d == _v154_default_payroll_month),
@@ -11515,6 +11529,12 @@ def _v150_final_payroll_summary(payroll_month, division=ALL_DIVISIONS):
     sql+=" GROUP BY division ORDER BY division"
     return read_df(sql,tuple(params))
 
+
+# Simplified workflows use the existing connection, identity and master functions.
+if page in {"Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
+    from simple_workforce import SimpleWorkforce
+    SimpleWorkforce(globals()).render(page)
+    st.stop()
 
 # ============================================================
 # V15.4 GLOBAL LIVE READINESS SIGNALS
@@ -20600,11 +20620,7 @@ elif page == "Master Centre":
         # Keep essential maintenance; default to employees instead of the reset screen.
         if st.session_state.get("v54_master_workspace") not in master_options:
             st.session_state["v54_master_workspace"] = "Employee Master"
-        master_area=st.selectbox(
-            "Master Workspace",
-            master_options,
-            key="v54_master_workspace"
-        )
+        master_area = st.session_state.get("v54_master_workspace", "Employee Master")
         st.divider()
 
         # ----------------------------------------------------
@@ -20667,7 +20683,7 @@ elif page == "Master Centre":
                         # Remove upload previews, editor drafts and cached reports that could restore old data.
                         st.cache_data.clear()
                         for _reset_key in list(st.session_state):
-                            if _reset_key not in {"auth_user", "auth_token", "v54_master_workspace", "v5_navigation"}:
+                            if _reset_key not in {"auth_user", "auth_token", "v54_master_workspace", "v5_navigation", "simple_navigation", "simple_settings_choice"}:
                                 del st.session_state[_reset_key]
                         st.session_state["v201_reset_done"] = True
                         st.rerun()
