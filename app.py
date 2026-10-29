@@ -11026,7 +11026,7 @@ available_modules = [m for m in [
     "Home","Employees","Attendance","Payroll","Contractors","Operations",
     "Reports","Master Centre","User Management"
 ] if v5_module_allowed(m)]
-_simple_routes = {"Home": "Simple Home"}
+_simple_routes = {"Home": "Home"}
 if v5_module_allowed("Attendance"):
     _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
 if v5_module_allowed("Operations"):
@@ -11038,6 +11038,14 @@ _legacy_request = st.session_state.pop("_v83_nav_request", None)
 _request_map = {"Home":"Home","Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
 if _legacy_request in _request_map and _request_map[_legacy_request] in _simple_routes:
     st.session_state["simple_navigation"] = _request_map[_legacy_request]
+# Original Home action cards open the equivalent simplified destination.
+_legacy_settings = {
+    "Employees": "Employees", "Payroll": "Payroll", "Contractors": "Contractor Work",
+    "Master Centre": "Employee Master", "User Management": "Users & Access"
+}
+if _legacy_request in _legacy_settings and _legacy_request in available_modules:
+    st.session_state["simple_navigation"] = "Settings"
+    st.session_state["simple_settings_choice"] = _legacy_settings[_legacy_request]
 if st.session_state.get("simple_navigation") not in _simple_routes:
     st.session_state["simple_navigation"] = next(iter(_simple_routes))
 st.sidebar.markdown('<div class="v5-sidebar-label">Daily Work</div>', unsafe_allow_html=True)
