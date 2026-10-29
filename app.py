@@ -11026,7 +11026,7 @@ available_modules = [m for m in [
     "Home","Employees","Attendance","Payroll","Contractors","Operations",
     "Reports","Master Centre","User Management"
 ] if v5_module_allowed(m)]
-_simple_routes = {}
+_simple_routes = {"Home": "Simple Home"}
 if v5_module_allowed("Attendance"):
     _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
 if v5_module_allowed("Operations"):
@@ -11035,7 +11035,7 @@ if v5_module_allowed("Reports"):
     _simple_routes["Cost & Attrition"] = "Simple Reports"
 _simple_routes["Settings"] = "Simple Settings"
 _legacy_request = st.session_state.pop("_v83_nav_request", None)
-_request_map = {"Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
+_request_map = {"Home":"Home","Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
 if _legacy_request in _request_map and _request_map[_legacy_request] in _simple_routes:
     st.session_state["simple_navigation"] = _request_map[_legacy_request]
 if st.session_state.get("simple_navigation") not in _simple_routes:
@@ -11531,7 +11531,7 @@ def _v150_final_payroll_summary(payroll_month, division=ALL_DIVISIONS):
 
 
 # Simplified workflows use the existing connection, identity and master functions.
-if page in {"Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
+if page in {"Simple Home", "Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
     from simple_workforce import SimpleWorkforce
     SimpleWorkforce(globals()).render(page)
     st.stop()
