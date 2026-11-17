@@ -11729,7 +11729,12 @@ if page == "Home":
             and can_view_salary(_current_role)):
         from md_assistant import render_jarvis_launcher
 
-        render_jarvis_launcher(read_df, datetime.now(IST).date(), _current_user["username"])
+        render_jarvis_launcher(
+            read_df, datetime.now(IST).date(), _current_user["username"],
+            employee_access=v5_module_allowed("Employees"),
+            payroll_access=v5_module_allowed("Payroll") and can_view_salary(_current_role),
+            warning_access=can_edit_hr(_current_role),
+        )
 
     employees = v5_active_employees(global_division)
     attendance = v5_attendance_for_date(global_work_date, global_division)

@@ -385,7 +385,7 @@ def render_md_assistant(read, today, username):
         render_response(read, request)
 
 
-def render_jarvis_launcher(read, today, username):
+def render_jarvis_launcher(read, today, username, *, employee_access, payroll_access, warning_access):
     state_key = f"jarvis_open_{username}"
     is_open = st.session_state.get(state_key, False)
 
@@ -402,4 +402,13 @@ def render_jarvis_launcher(read, today, username):
             st.caption("Ask about your ERP data or generate the Daily MIS.")
     if is_open:
         with st.container(key="jarvis_workspace"):
-            render_md_assistant(read, today, username)
+            if employee_access:
+                from jarvis_employee import render_employee_questions
+
+                reports, employee_questions = st.tabs(["Daily MIS and reports", "Employee 360 questions"])
+                with reports:
+                    render_md_assistant(read, today, username)
+                with employee_questions:
+                    render_employee_questions(read, today, username, tuple(DIVISIONS), payroll_access, warning_access)
+            else:
+                render_md_assistant(read, today, username)
