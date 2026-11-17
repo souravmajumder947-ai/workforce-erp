@@ -1,6 +1,7 @@
 """Employee 360 questions backed by scoped ERP records."""
 from calendar import monthrange
 from datetime import datetime, timedelta
+from difflib import get_close_matches
 import re
 
 import pandas as pd
@@ -41,6 +42,14 @@ def reporting_period(question, selected, today):
 
 def employee_sections(question):
     question = question.strip().lower()
+    vocabulary = ("performance", "attendance", "overtime", "production", "profile", "salary", "warnings")
+
+    def correct_word(match):
+        word = match.group()
+        candidates = get_close_matches(word, vocabulary, n=1, cutoff=0.82)
+        return candidates[0] if candidates else word
+
+    question = re.sub(r"[a-z]{5,}", correct_word, question)
     sections = set()
     filters = {
         "profile": r"\b(?:profile|details|overview|designation|department|status|joining|joined)\b",
