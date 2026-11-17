@@ -23,6 +23,86 @@ QUESTION_EXAMPLES = (
     "Prepare tomorrow’s review briefing",
 )
 
+JARVIS_STYLE = """
+<style>
+body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button {
+    --jarvis-edge: #64e8f7;
+    position: relative;
+    isolation: isolate;
+    min-height: 70px !important;
+    height: auto !important;
+    padding: .85rem 3.1rem .85rem 4.4rem !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    border: 1px solid #4cd7f3 !important;
+    border-radius: 16px !important;
+    background:
+        radial-gradient(ellipse at 10% 55%, #10496b 0%, transparent 48%),
+        linear-gradient(110deg, #082940 0%, #153057 57%, #262957 100%) !important;
+    color: #f3fcff !important;
+    box-shadow: inset 0 0 22px #53daff22, 0 5px 22px #1dd9ff32 !important;
+}
+body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button p {
+    color: #f3fcff !important;
+    font-size: clamp(1.02rem, 2vw, 1.28rem) !important;
+    font-weight: 800 !important;
+    letter-spacing: .025em !important;
+    line-height: 1.25 !important;
+}
+body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button::before {
+    content: "";
+    position: absolute;
+    left: .95rem;
+    top: 50%;
+    width: 2.35rem;
+    height: 2.35rem;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    pointer-events: none;
+    background:
+        radial-gradient(circle, #eaffff 0% 9%, #4ce9ff 11% 21%, #164967 23% 37%,
+            transparent 39% 55%, #74f2ffbd 57% 62%, transparent 65%),
+        conic-gradient(from 45deg, #68edff, transparent 22%, #547cff 50%, transparent 73%, #68edff);
+    box-shadow: 0 0 18px #5be9ff66;
+}
+body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button::after {
+    content: "";
+    position: absolute;
+    right: 1.25rem;
+    top: 50%;
+    width: .55rem;
+    height: .55rem;
+    border-right: 2px solid var(--jarvis-edge);
+    border-bottom: 2px solid var(--jarvis-edge);
+    transform: translateY(-70%) rotate(45deg);
+    pointer-events: none;
+    opacity: 1;
+}
+body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button:not(:disabled):hover {
+    border-color: #b3f7ff !important;
+    background:
+        radial-gradient(ellipse at 10% 55%, #145e82 0%, transparent 55%),
+        linear-gradient(110deg, #10364a 0%, #1a3e68 57%, #333064 100%) !important;
+    box-shadow: inset 0 0 24px #53daff2e, 0 7px 25px #1dd9ff54 !important;
+}
+body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button:focus-visible {
+    outline: 3px solid #b4f8ff;
+    outline-offset: 3px;
+}
+.st-key-jarvis_workspace {
+    border: 1px solid #4cd7f355;
+    border-radius: 14px;
+    padding: .85rem 1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+    body .st-key-jarvis_launch .stButton[data-testid="stButton"] > button {
+        transition: none !important;
+        transform: none !important;
+    }
+}
+</style>
+"""
+
 
 @dataclass(frozen=True)
 class Request:
@@ -303,3 +383,23 @@ def render_md_assistant(read, today, username):
     request = st.session_state.get(state_key)
     if request:
         render_response(read, request)
+
+
+def render_jarvis_launcher(read, today, username):
+    state_key = f"jarvis_open_{username}"
+    is_open = st.session_state.get(state_key, False)
+
+    def toggle():
+        st.session_state[state_key] = not st.session_state.get(state_key, False)
+
+    st.html(JARVIS_STYLE)
+    with st.container(key="jarvis_launch"):
+        st.button(
+            "Close JARVIS" if is_open else "JARVIS · MD Assistant",
+            key=f"jarvis_launcher_{username}", width="stretch", on_click=toggle,
+        )
+        if not is_open:
+            st.caption("Ask about your ERP data or generate the Daily MIS.")
+    if is_open:
+        with st.container(key="jarvis_workspace"):
+            render_md_assistant(read, today, username)
