@@ -183,7 +183,7 @@ def render_hr_workspace(context):
     month = context["global_payroll_month"]
     start, end = month.replace(day=1), month.replace(day=monthrange(month.year, month.month)[1])
     clause, params = ("", ()) if division == context["ALL_DIVISIONS"] else (" AND division=?", (division,))
-    st.title("HR workspace")
+    st.title("HR entries")
     st.caption(f"{division} · {month:%B %Y}")
     success = st.session_state.pop("hr_workspace_success", None)
     if success:
@@ -207,7 +207,7 @@ def render_hr_workspace(context):
     c2.metric("Attendance to review", pending)
     c3.metric("Employees to confirm", int(unconfirmed.sum()))
     c4.metric("Missing salary", int(missing_salary.sum()))
-    st.subheader("Daily HR work")
+    st.subheader("Employee and attendance entries")
     tasks = [
         ("Employee records", "Create, edit or upload employee identity, joining and contact details."),
         ("Salary and statutory details", "Maintain individual salary, PF, ESIC and bank details."),
@@ -217,23 +217,23 @@ def render_hr_workspace(context):
         ("Payroll", "Review the salary calculation, deductions, adjustments and payroll records."),
         ("Joining and leaving", "Record joining and last working dates for attrition reporting."),
         ("Employee 360 and letters", "Open an employee profile, attendance history and warning-letter uploads."),
-        ("Reports", "Review manpower cost and attrition."),
     ]
-    columns = st.columns(3)
-    for index, (label, caption) in enumerate(tasks):
-        module = {
-            "Employee records": "Employees", "Salary and statutory details": "Payroll",
-            "Upload attendance": "Attendance", "Resolve attendance": "Attendance",
-            "Attendance and leave entry": "Attendance", "Payroll": "Payroll",
-            "Joining and leaving": "Employees", "Employee 360 and letters": "Employees",
-            "Reports": "Reports",
-        }[label]
-        if not context["v5_module_allowed"](module):
-            continue
-        with columns[index % 3]:
-            with st.container(border=True):
-                st.button(label, key=f"hr_task_{index}", width="stretch", on_click=open_task, args=(label,))
-                st.caption(caption)
+    with st.container(key="hr_entry_tasks"):
+        columns = st.columns(3)
+        for index, (label, caption) in enumerate(tasks):
+            module = {
+                "Employee records": "Employees", "Salary and statutory details": "Payroll",
+                "Upload attendance": "Attendance", "Resolve attendance": "Attendance",
+                "Attendance and leave entry": "Attendance", "Payroll": "Payroll",
+                "Joining and leaving": "Employees", "Employee 360 and letters": "Employees",
+                "Reports": "Reports",
+            }[label]
+            if not context["v5_module_allowed"](module):
+                continue
+            with columns[index % 3]:
+                with st.container(border=True):
+                    st.button(label, key=f"hr_task_{index}", width="stretch", on_click=open_task, args=(label,))
+                    st.caption(caption)
     st.subheader("Employee records to complete")
     if employees.empty:
         st.info("Start with Employee records to add your first employee or upload a filled template.")

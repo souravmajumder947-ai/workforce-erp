@@ -11073,6 +11073,8 @@ if _hr_workspace_allowed:
 
 if v5_module_allowed("Employees"):
     _simple_routes["Employee 360"] = "Employees"
+    if _hr_workspace_allowed:
+        _simple_routes["Employee 360 and letters"] = "Employees"
 if v5_module_allowed("Attendance"):
     _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
 if v5_module_allowed("Operations"):
@@ -11097,7 +11099,7 @@ if _hr_task and _hr_workspace_allowed:
     else:
         _hr_navigation = {
             "Upload attendance": "Attendance", "Resolve attendance": "HR Review",
-            "Employee 360 and letters": "Employee 360", "Reports": "Cost & Attrition",
+            "Employee 360 and letters": "Employee 360 and letters", "Reports": "Cost & Attrition",
         }
         _hr_target = _hr_navigation.get(_hr_task_name)
         if _hr_target in _simple_routes:
@@ -11128,7 +11130,9 @@ if _jarvis_role_allowed:
         st.session_state[f"jarvis_open_{_current_user['username']}"] = True
 
     st.sidebar.button("Open JARVIS", key="jarvis_sidebar", width="stretch", on_click=open_jarvis_home)
-_simple_choice = st.sidebar.radio("Navigation", list(_simple_routes), key="simple_navigation", label_visibility="collapsed")
+from workspace_navigation import render_workspace_navigation, WORKSPACE_BUTTON_STYLE
+
+_simple_choice = render_workspace_navigation(_simple_routes, _current_role)
 page = _simple_routes[_simple_choice]
 if page == "HR Task":
     _hr_active_task = st.session_state.get("hr_active_task")
@@ -11146,7 +11150,7 @@ if page == "HR Task":
     if page == "Master Centre":
         st.session_state["v54_master_workspace"] = "Employee Master"
 # Open the full profile on entry while allowing Directory/Profile switches within Employees.
-if _simple_choice == "Employee 360" and st.session_state.get("_simple_previous_choice") != "Employee 360":
+if _simple_choice in {"Employee 360", "Employee 360 and letters"} and st.session_state.get("_simple_previous_choice") != _simple_choice:
     st.session_state["v55_emp_view"] = "Employee 360"
 st.session_state["_simple_previous_choice"] = _simple_choice
 if page == "Simple Settings":
@@ -11647,6 +11651,9 @@ if page in {"HR Workspace", "HR Salary", "HR Attendance"}:
 
     st.markdown('<span class="erp-workspace-theme"></span>', unsafe_allow_html=True)
     st.html(WORKSPACE_STYLE)
+    st.html(WORKSPACE_BUTTON_STYLE)
+    _workspace_marker = "hr-entry-workspace" if st.session_state.get("workspace_menu") == "HR entries" else "md-review-workspace"
+    st.markdown(f'<span class="{_workspace_marker}"></span>', unsafe_allow_html=True)
     try:
         if page == "HR Workspace":
             render_hr_workspace(globals())
@@ -11668,6 +11675,9 @@ if page in {"Simple Attendance", "Simple HR Review", "Simple Production", "Simpl
 
     st.markdown('<span class="erp-workspace-theme"></span>', unsafe_allow_html=True)
     st.html(WORKSPACE_STYLE)
+    st.html(WORKSPACE_BUTTON_STYLE)
+    _workspace_marker = "hr-entry-workspace" if st.session_state.get("workspace_menu") == "HR entries" else "md-review-workspace"
+    st.markdown(f'<span class="{_workspace_marker}"></span>', unsafe_allow_html=True)
     try:
         SimpleWorkforce(globals()).render(page)
     finally:
@@ -24586,6 +24596,9 @@ from erp_design import WORKSPACE_STYLE
 
 st.markdown('<span class="erp-workspace-theme"></span>', unsafe_allow_html=True)
 st.html(WORKSPACE_STYLE)
+st.html(WORKSPACE_BUTTON_STYLE)
+_workspace_marker = "hr-entry-workspace" if st.session_state.get("workspace_menu") == "HR entries" else "md-review-workspace"
+st.markdown(f'<span class="{_workspace_marker}"></span>', unsafe_allow_html=True)
 
 # V18.8 FINAL RENDER BARRIER
 # This is deliberately last. It releases the login transition shield only after
