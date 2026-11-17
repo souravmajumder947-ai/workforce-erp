@@ -1373,6 +1373,16 @@ def migrate_postgres():
             )
         """)
 
+        cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_working_date DATE")
+        cur.execute("""CREATE TABLE IF NOT EXISTS workforce_daily_output (
+            id BIGSERIAL PRIMARY KEY, work_date DATE NOT NULL, division TEXT NOT NULL,
+            shift TEXT NOT NULL, machine TEXT NOT NULL REFERENCES machines(machine),
+            output_ton NUMERIC(16,4) NOT NULL CHECK(output_ton>=0),
+            employee_ids TEXT NOT NULL DEFAULT '[]', contractor_headcount INTEGER NOT NULL DEFAULT 0,
+            contractor_cost NUMERIC(16,2) NOT NULL DEFAULT 0, remark TEXT,
+            entered_by TEXT, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(work_date,division,shift,machine))""")
+
         # V6 CLEAN SLATE:
         # Contractor / Thekedar masters are intentionally NOT seeded.
         # Admin will create every contractor from Master Centre.
@@ -4379,7 +4389,7 @@ def _bulk_upsert_employees_from_attendance(records):
         conn.close()
 
 
-def _bulk_upsert_attendance(records, source_type, replace_scope=False):
+def _bulk_upsert_attendance(records, source_type, replace_scope=False, overwrite=None):
     if not records:
         return 0
     records = _validate_and_enrich_attendance_records(records)
@@ -4396,10 +4406,10 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
         rec for rec in records
         if _clean_text(rec.get("source_issue")) == "Employee ID not found in Employee Master"
     ]
-    if unknown_records:
-        conn_master = get_pg_conn()
-        try:
-            cur_master = conn_master.cursor()
+    conn = get_pg_conn()
+    try:
+        cur = conn.cursor()
+        if unknown_records:
             for rec in unknown_records:
                 emp_id = str(rec.get("employee_id", "")).strip()
                 if not emp_id:
@@ -4410,7 +4420,7 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
                 shift = _clean_text(rec.get("shift"))
                 if shift not in ("A", "B"):
                     shift = "General"
-                cur_master.execute(
+                cur.execute(
                     """INSERT INTO employees(
                            employee_id,employee_name,department,designation,
                            employee_type,shift,division,status
@@ -4418,17 +4428,6 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
                        ON CONFLICT(employee_id) DO NOTHING""",
                     (emp_id, emp_name, designation, shift, division)
                 )
-            conn_master.commit()
-            cur_master.close()
-        except Exception:
-            conn_master.rollback()
-            raise
-        finally:
-            conn_master.close()
-
-    conn = get_pg_conn()
-    try:
-        cur = conn.cursor()
 
         # BTS FULL-REFRESH MODE
         # When enabled, this validated upload becomes the attendance source of truth
@@ -4443,7 +4442,7 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
                     scope.setdefault(div, set()).add(work_date)
             for div, dates in scope.items():
                 cur.execute(
-                    "DELETE FROM attendance WHERE division=%s AND work_date = ANY(%s::date[])",
+                    "DELETE FROM attendance WHERE division=%s AND work_date::text = ANY(%s)",
                     (div, sorted(dates))
                 )
 
@@ -4456,7 +4455,7 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
                 bool(rec.get("review_required", False)), rec.get("source_employee_name", rec.get("employee_name", "")),
                 rec.get("source_issue", ""),
             ))
-        execute_values(cur, """
+        insert_sql = """
             INSERT INTO attendance(
                 work_date, shift, employee_id, status, ot_hours, division, designation,
                 day_name, time_in, time_out, working_hours, raw_status, remark,
@@ -4471,7 +4470,18 @@ def _bulk_upsert_attendance(records, source_type, replace_scope=False):
                 source_type=excluded.source_type, review_required=excluded.review_required,
                 source_employee_name=excluded.source_employee_name, source_issue=excluded.source_issue,
                 updated_at=CURRENT_TIMESTAMP
-        """, payload, page_size=1000)
+        """
+        if overwrite is None:
+            execute_values(cur, insert_sql, payload, page_size=1000)
+        else:
+            # The unique key spans divisions. Protect competing uploads and HR decisions.
+            if overwrite:
+                insert_sql += ", reviewed_by=NULL WHERE attendance.division=excluded.division"
+            else:
+                insert_sql = insert_sql.split("DO UPDATE SET", 1)[0] + "DO NOTHING"
+            saved = execute_values(cur, insert_sql + " RETURNING id", payload, page_size=1000, fetch=True)
+            if len(saved) != len(payload):
+                raise ValueError("Matching attendance already exists or belongs to another division. Recheck the preview before saving.")
         conn.commit(); cur.close(); return len(payload)
     except Exception:
         conn.rollback(); raise
@@ -4672,7 +4682,7 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
         # Locked policy: single OT only after 12 hours.
         ot_hours = (
             max(0.0, working_hours - get_setting_float("ot_threshold_hours", 12.0))
-            if status in ("Present", "Half Day")
+            if status in ("Present", "OD", "Half Day")
             else 0.0
         )
 
@@ -5917,7 +5927,7 @@ def apply_greater_noida_august_2026_present_resolution():
                       SELECT 1
                       FROM attendance a
                       WHERE a.employee_id = e.employee_id
-                        AND a.work_date = d::date
+                        AND a.work_date::text = d::date::text
                   )
             )
             INSERT INTO attendance(
@@ -11542,10 +11552,19 @@ def _v150_final_payroll_summary(payroll_month, division=ALL_DIVISIONS):
     return read_df(sql,tuple(params))
 
 
+def finish_login_transition():
+    if st.session_state.get("_v188_login_transition", False):
+        st.markdown('<div class="v188-login-transition-ready" aria-hidden="true"></div>', unsafe_allow_html=True)
+        st.session_state["_v188_login_transition"] = False
+
+
 # Simplified workflows use the existing connection, identity and master functions.
-if page in {"Simple Home", "Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
+if page in {"Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
     from simple_workforce import SimpleWorkforce
-    SimpleWorkforce(globals()).render(page)
+    try:
+        SimpleWorkforce(globals()).render(page)
+    finally:
+        finish_login_transition()
     st.stop()
 
 # ============================================================
@@ -12580,6 +12599,23 @@ if page == "Home":
                     )
                 st.markdown(_v10_activity_html, unsafe_allow_html=True)
 
+    if v5_module_allowed("Reports"):
+        from simple_workforce import SimpleWorkforce
+
+        workforce_panel = st.expander(
+            "Workforce production, cost & attrition", key="home_workforce_panel", on_change="rerun",
+        )
+        if workforce_panel.open:
+            with workforce_panel:
+                workforce = SimpleWorkforce(globals())
+                start, end = workforce.period()
+                report_day = st.date_input(
+                    "Production date", value=min(global_work_date, end), min_value=start,
+                    max_value=end, key=f"home_workforce_date_{start:%Y%m}",
+                )
+                workforce.home_production(report_day)
+                workforce.reports(heading=False)
+
     st.markdown(
         '<div class="v10-home-footer"><span>🌿 Reliable Packaging Industries Limited · Smart Manufacturing · Workforce · Payroll · Operations</span>'
         '<span>Built in India 🇮🇳 · Created by Sourav Majumder · Together We Build a Better Tomorrow</span></div>',
@@ -13123,16 +13159,23 @@ elif page == "Employees":
                     (emp_id,emp_div)
                 ) if can_view_salary(_current_role) else pd.DataFrame()
 
-                # Work / machine history.
+                # Keep detailed allocations and include entries from the daily workflow.
                 work_history=read_df(
-                    """SELECT ma.work_date,ma.shift,ma.machine,ma.role,
-                              p.production_ton,p.target_ton,p.waste_ton,p.breakdown_hours
-                       FROM manpower_allocation ma
-                       LEFT JOIN production p
-                         ON p.work_date=ma.work_date AND p.shift=ma.shift AND p.machine=ma.machine
-                       WHERE ma.employee_id=?
-                       ORDER BY ma.work_date DESC LIMIT 60""",
-                    (emp_id,)
+                    """SELECT * FROM (
+                           SELECT ma.work_date::text AS work_date,ma.shift,ma.machine,ma.role,
+                                  p.production_ton,p.target_ton,p.waste_ton,p.breakdown_hours
+                           FROM manpower_allocation ma
+                           LEFT JOIN production p
+                             ON p.work_date=ma.work_date AND p.shift=ma.shift AND p.machine=ma.machine
+                           WHERE ma.employee_id=?
+                           UNION ALL
+                           SELECT o.work_date::text,o.shift,o.machine,'Assigned',o.output_ton,
+                                  COALESCE(t.target_ton,m.target_ton),NULL,NULL
+                           FROM workforce_daily_output o JOIN machines m ON m.machine=o.machine
+                           LEFT JOIN machine_shift_targets t ON t.machine=o.machine AND t.shift=o.shift
+                           WHERE jsonb_exists(o.employee_ids::jsonb, ?)
+                       ) AS history ORDER BY work_date DESC LIMIT 60""",
+                    (emp_id,emp_id)
                 )
 
                 # Month snapshot metrics.
@@ -24399,7 +24442,4 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V18.8 FINAL RENDER BARRIER
 # This is deliberately last. It releases the login transition shield only after
 # the full authenticated page and every final style layer have been emitted.
-if st.session_state.get("_v188_login_transition", False):
-    st.markdown('<div class="v188-login-transition-ready" aria-hidden="true"></div>', unsafe_allow_html=True)
-    st.session_state["_v188_login_transition"] = False
-
+finish_login_transition()
