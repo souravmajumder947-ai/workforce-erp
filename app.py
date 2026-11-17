@@ -10926,6 +10926,10 @@ def render_master_template_tools(title, master_types, file_name, key_prefix):
                             disabled=not confirm,
                             key=f"{key_prefix}_import"
                         ):
+                            if (_current_role == "HR"
+                                    and prepared["Row_Action"].fillna("").astype(str).str.upper().eq("DELETE").any()):
+                                st.error("Use employee status and joining/leaving dates for HR changes. Permanent deletion requires Admin access.")
+                                st.stop()
                             counts = import_universal_master_csv(prepared)
                             processed = sum(v for k, v in counts.items() if k in allowed)
                             st.success(f"{processed:,} {title} row(s) processed successfully.")
@@ -11060,7 +11064,13 @@ available_modules = [m for m in [
     "Home","Employees","Attendance","Payroll","Contractors","Operations",
     "Reports","Master Centre","User Management"
 ] if v5_module_allowed(m)]
+_hr_workspace_allowed = can_edit_hr(_current_role)
 _simple_routes = {"Home": "Home"}
+if _hr_workspace_allowed:
+    _simple_routes["HR workspace"] = "HR Workspace"
+    if "simple_navigation" not in st.session_state and _current_role == "HR":
+        st.session_state["simple_navigation"] = "HR workspace"
+
 if v5_module_allowed("Employees"):
     _simple_routes["Employee 360"] = "Employees"
 if v5_module_allowed("Attendance"):
@@ -11070,6 +11080,32 @@ if v5_module_allowed("Operations"):
 if v5_module_allowed("Reports"):
     _simple_routes["Cost & Attrition"] = "Simple Reports"
 _simple_routes["Settings"] = "Simple Settings"
+_hr_task = st.session_state.pop("hr_task_request", None)
+if _hr_task and _hr_workspace_allowed:
+    _hr_task_name, _hr_employee_id = _hr_task
+    _hr_direct_routes = {
+        "Employee records": ("Employee records", "Employees"),
+        "Salary and statutory details": ("Salary and statutory details", "Payroll"),
+        "Attendance and leave entry": ("Attendance and leave entry", "Attendance"),
+        "Payroll": ("Payroll", "Payroll"),
+        "Joining and leaving": ("Joining and leaving", "Employees"),
+    }
+    if _hr_task_name in _hr_direct_routes:
+        _hr_label, _hr_module = _hr_direct_routes[_hr_task_name]
+        if v5_module_allowed(_hr_module):
+            st.session_state["hr_active_task"] = _hr_label
+    else:
+        _hr_navigation = {
+            "Upload attendance": "Attendance", "Resolve attendance": "HR Review",
+            "Employee 360 and letters": "Employee 360", "Reports": "Cost & Attrition",
+        }
+        _hr_target = _hr_navigation.get(_hr_task_name)
+        if _hr_target in _simple_routes:
+            st.session_state["simple_navigation"] = _hr_target
+if _hr_workspace_allowed and st.session_state.get("hr_active_task"):
+    _simple_routes[st.session_state["hr_active_task"]] = "HR Task"
+    if _hr_task and _hr_task[0] in _hr_direct_routes:
+        st.session_state["simple_navigation"] = st.session_state["hr_active_task"]
 _legacy_request = st.session_state.pop("_v83_nav_request", None)
 _request_map = {"Home":"Home","Employees":"Employee 360","Attendance":"Attendance","Operations":"Production","Reports":"Cost & Attrition"}
 if _legacy_request in _request_map and _request_map[_legacy_request] in _simple_routes:
@@ -11094,6 +11130,21 @@ if _jarvis_role_allowed:
     st.sidebar.button("Open JARVIS", key="jarvis_sidebar", width="stretch", on_click=open_jarvis_home)
 _simple_choice = st.sidebar.radio("Navigation", list(_simple_routes), key="simple_navigation", label_visibility="collapsed")
 page = _simple_routes[_simple_choice]
+if page == "HR Task":
+    _hr_active_task = st.session_state.get("hr_active_task")
+    _hr_required_module = {
+        "Employee records": "Employees", "Salary and statutory details": "Payroll",
+        "Attendance and leave entry": "Attendance", "Payroll": "Payroll", "Joining and leaving": "Employees",
+    }.get(_hr_active_task)
+    if not _hr_workspace_allowed or not _hr_required_module or not v5_module_allowed(_hr_required_module):
+        st.error("Your account does not have access to this HR task.")
+        st.stop()
+    page = {
+        "Employee records": "Master Centre", "Salary and statutory details": "HR Salary",
+        "Attendance and leave entry": "HR Attendance", "Payroll": "Payroll", "Joining and leaving": "Simple Lifecycle",
+    }[_hr_active_task]
+    if page == "Master Centre":
+        st.session_state["v54_master_workspace"] = "Employee Master"
 # Open the full profile on entry while allowing Directory/Profile switches within Employees.
 if _simple_choice == "Employee 360" and st.session_state.get("_simple_previous_choice") != "Employee 360":
     st.session_state["v55_emp_view"] = "Employee 360"
@@ -11589,6 +11640,26 @@ def finish_login_transition():
         st.markdown('<div class="v188-login-transition-ready" aria-hidden="true"></div>', unsafe_allow_html=True)
         st.session_state["_v188_login_transition"] = False
 
+
+if page in {"HR Workspace", "HR Salary", "HR Attendance"}:
+    from erp_design import WORKSPACE_STYLE
+    from hr_workspace import render_hr_workspace, render_salary_editor, render_attendance_entry
+
+    st.markdown('<span class="erp-workspace-theme"></span>', unsafe_allow_html=True)
+    st.html(WORKSPACE_STYLE)
+    try:
+        if page == "HR Workspace":
+            render_hr_workspace(globals())
+        elif page == "HR Attendance" and _hr_workspace_allowed and v5_module_allowed("Attendance"):
+            render_attendance_entry(globals())
+        elif page == "HR Salary" and _hr_workspace_allowed and v5_module_allowed("Payroll"):
+            st.title("Salary and statutory details")
+            render_salary_editor(read_df, get_pg_conn, global_division, ALL_DIVISIONS, _current_user["username"])
+        else:
+            st.error("HR and Payroll access are required.")
+    finally:
+        finish_login_transition()
+    st.stop()
 
 # Simplified workflows use the existing connection, identity and master functions.
 if page in {"Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
@@ -13946,7 +14017,7 @@ elif page == "Employees":
                 if _v5_is_admin:
                     st.caption(
                         "Master changes are intentionally kept out of this profile. "
-                        "Use **Master Centre → Employee Master** for edits."
+                        "Use **HR workspace → Employee records** to update employee details."
                     )
 
 # ============================================================
@@ -20705,7 +20776,12 @@ elif page == "Master Centre":
         "Master Centre",
         "Create, update, activate/deactivate and maintain every business master from one controlled location."
     )
-    if not _v5_is_admin:
+    _hr_employee_maintenance = (
+        _hr_workspace_allowed and v5_module_allowed("Employees")
+        and st.session_state.get("hr_active_task") == "Employee records"
+        and _simple_choice == "Employee records"
+    )
+    if not _v5_is_admin and not _hr_employee_maintenance:
         st.warning("Master Centre is restricted to Owner / Admin.")
     else:
         employee_count=int(read_df("SELECT COUNT(*) AS c FROM employees").iloc[0]["c"])
@@ -20732,6 +20808,8 @@ elif page == "Master Centre":
             "Payroll & Business Rules",
             "Fresh Live Start",
         ]
+        if not _v5_is_admin:
+            master_options = ["Employee Master"]
         # Keep essential maintenance; default to employees instead of the reset screen.
         if st.session_state.get("v54_master_workspace") not in master_options:
             st.session_state["v54_master_workspace"] = "Employee Master"
@@ -21131,12 +21209,16 @@ elif page == "Master Centre":
                     values["joining_date"]=joining_date.isoformat()
                     try:
                         v5_save_employee(values)
+                        record_audit_event(
+                            _current_user["username"], "SAVE", "HR Workspace", "Employee",
+                            employee_id.strip(), "Employee identity and employment details saved",
+                        )
                         st.success("Employee Master saved successfully.")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
 
-            if selected!="➕ New Employee":
+            if selected!="➕ New Employee" and _v5_is_admin:
                 st.markdown("#### Employee Master Control")
                 selected_id=str(existing.get("employee_id"))
                 c1,c2=st.columns(2)
