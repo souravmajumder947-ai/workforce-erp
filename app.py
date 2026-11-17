@@ -11727,12 +11727,9 @@ if page == "Home":
     if (_current_role in FULL_CONTROL_ROLES | {"Manager"}
             and all(v5_module_allowed(module) for module in ("Attendance", "Operations", "Reports"))
             and can_view_salary(_current_role)):
-        from md_assistant import render_md_assistant
+        from md_assistant import render_jarvis_launcher
 
-        md_panel = st.expander("MD Assistant and Daily MIS", key="md_assistant_panel", on_change="rerun")
-        if md_panel.open:
-            with md_panel:
-                render_md_assistant(read_df, datetime.now(IST).date(), _current_user["username"])
+        render_jarvis_launcher(read_df, datetime.now(IST).date(), _current_user["username"])
 
     employees = v5_active_employees(global_division)
     attendance = v5_attendance_for_date(global_work_date, global_division)
