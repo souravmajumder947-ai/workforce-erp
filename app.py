@@ -7649,62 +7649,874 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) butt
 """, unsafe_allow_html=True)
 
 if st.session_state.get("auth_user") is None:
-    from jarvis_login import render_login
+    _login_verified_time = datetime.now(IST).strftime("%H:%M:%S")
+    st.markdown('<div class="v82-login-root"></div>', unsafe_allow_html=True)
+    left_col, right_col = st.columns([1.20, .80], gap="medium")
 
-    login_username, login_password, login_submit = render_login(LOGO_ICON_DATA_URI)
-    if login_submit:
-        try:
-            user = authenticate_app_user(login_username, login_password)
-            if user is None:
-                _failed_actor=str(login_username or "").strip().lower() or "unknown"
-                record_audit_event(
-                    _failed_actor,
-                    "LOGIN_FAILED",
-                    "Authentication",
-                    "User",
-                    _failed_actor,
-                    "Invalid credentials or inactive account",
-                    status="FAILED",
+    with left_col:
+        st.markdown(
+            f"""
+            <div class="v82-ref-hero">
+              <div class="v82-hero-canvas" style="background-image:url('{V82_LOGIN_HERO_DATA_URI}');">
+                <div class="v83-cover-top-brand"></div>
+                <div class="v83-hero-live"><span class="v83-live-pill"><span class="v83-live-dot"></span>LIVE HR SYSTEM</span></div>
+                <div class="v90-hero-telemetry"><b>SMART FACTORY NETWORK</b><span class="v90-signal-bars"><i></i><i></i><i></i></span><span class="v92-live-sync" data-v92-live-sync>SYNC {_login_verified_time}</span></div>
+                <div class="v94-map-location v95-map-cluster" aria-label="Three live company locations">
+                  <span class="v95-location-dot one" title="Greater Noida Plant · 28.451388, 77.573505"></span>
+                  <span class="v95-location-dot two" title="Dhaulana Glass Plant · 28.630673, 77.674519"></span>
+                  <span class="v95-location-dot three" title="D-63 Head Office · 28.612210, 77.380384"></span>
+                </div>
+                <div class="v83-hero-ai-core"></div>
+                <div class="v90-glass-sheen"></div>
+                <div class="v90-data-rail one"></div>
+                <div class="v90-data-rail two"></div>
+                <div class="v82-ref-badge"><span class="flag">🇮🇳</span><span><b>Built in India</b>for modern manufacturing teams</span></div>
+                <div class="v82-ref-credit">© 2026 Reliable Packaging HRMS · Created by Sourav Majumder</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        components.html(
+            """
+            <script>
+            (() => {
+              const clock = new Intl.DateTimeFormat("en-GB", {
+                timeZone: "Asia/Kolkata",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false
+              });
+
+              const updateSyncClock = () => {
+                try {
+                  const now = new Date();
+                  const timeText = clock.format(now);
+                  const syncNodes = window.parent.document.querySelectorAll("[data-v92-live-sync]");
+                  syncNodes.forEach((node) => {
+                    node.textContent = `SYNC ${timeText}`;
+                    node.classList.toggle("v92-tick", now.getSeconds() % 2 === 0);
+                  });
+                  const loginClockNodes = window.parent.document.querySelectorAll("[data-v116-login-clock]");
+                  loginClockNodes.forEach((node) => {
+                    node.textContent = timeText;
+                    node.classList.toggle("v116-clock-tick", now.getSeconds() % 2 === 0);
+                  });
+                } catch (_) {
+                  // Keep the server-rendered fallback time if the parent DOM is unavailable.
+                }
+              };
+
+              updateSyncClock();
+              const timer = window.setInterval(updateSyncClock, 1000);
+              window.addEventListener("beforeunload", () => window.clearInterval(timer), { once: true });
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+
+
+    st.markdown("""
+    <style>
+    /* FINAL LOGIN READABILITY + BRANDING — visual only */
+    .v90-hero-telemetry{
+      font-size:clamp(10px,.48vw,17px)!important;
+      gap:clamp(9px,.55vw,18px)!important;
+      color:#9bb2ca!important;
+    }
+    .v90-hero-telemetry b{
+      font-size:clamp(11px,.54vw,19px)!important;
+      color:#d3e3f2!important;
+      letter-spacing:clamp(.9px,.075vw,1.8px)!important;
+    }
+    .v92-live-sync{
+      min-width:12ch!important;
+      color:#b7cce0!important;
+      font-size:clamp(10px,.48vw,17px)!important;
+      font-weight:800!important;
+      letter-spacing:.45px!important;
+      text-shadow:0 0 10px rgba(88,186,247,.18)!important;
+    }
+    .v92-live-sync.v92-tick{
+      color:#8de7ff!important;
+      text-shadow:0 0 12px rgba(52,211,255,.32)!important;
+    }
+
+    .v90-card-kicker{
+      font-size:clamp(12px,.54vw,19px)!important;
+      color:#78d1ff!important;
+      letter-spacing:clamp(1.4px,.13vw,3.2px)!important;
+    }
+    .v90-card-title{
+      font-size:clamp(34px,1.92vw,68px)!important;
+      color:#ffffff!important;
+    }
+    .v90-card-sub{
+      font-size:clamp(14px,.66vw,23px)!important;
+      color:#b2c3d6!important;
+      line-height:1.55!important;
+    }
+
+    .v92-company-brand{
+      position:relative;
+      overflow:hidden;
+      margin:clamp(-4px,-.1vw,0px) 0 clamp(18px,1vw,34px);
+      padding:clamp(13px,.75vw,23px) clamp(15px,.9vw,28px);
+      border:1px solid rgba(88,186,247,.20);
+      border-radius:clamp(12px,.7vw,20px);
+      background:
+        radial-gradient(circle at 12% 30%,rgba(47,111,235,.14),transparent 36%),
+        linear-gradient(110deg,rgba(12,31,54,.78),rgba(8,21,39,.64));
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 12px 30px rgba(0,0,0,.12);
+    }
+    .v92-company-brand:after{
+      content:"";
+      position:absolute;
+      top:-80%;
+      left:-18%;
+      width:14%;
+      height:250%;
+      background:linear-gradient(90deg,transparent,rgba(164,224,255,.15),transparent);
+      transform:skewX(-18deg);
+      animation:v92BrandSweep 5.8s ease-in-out infinite;
+      pointer-events:none;
+    }
+    .v92-company-name{
+      color:#f8fbff;
+      font-size:clamp(15px,.78vw,27px);
+      line-height:1.2;
+      font-weight:950;
+      letter-spacing:clamp(.7px,.07vw,1.7px);
+      text-transform:uppercase;
+      text-shadow:0 0 18px rgba(88,186,247,.16);
+    }
+    .v92-company-slogan{
+      margin-top:clamp(7px,.38vw,12px);
+      color:#7dd9ff;
+      font-size:clamp(11px,.52vw,18px);
+      font-weight:800;
+      letter-spacing:clamp(.7px,.065vw,1.5px);
+      text-transform:uppercase;
+      animation:v92SloganGlow 2.8s ease-in-out infinite;
+    }
+    .v92-company-meta{
+      margin-top:clamp(8px,.42vw,14px);
+      color:#9bb0c6;
+      font-size:clamp(10px,.43vw,15px);
+      font-weight:650;
+      letter-spacing:.3px;
+    }
+    @keyframes v92BrandSweep{
+      0%,58%{left:-22%;opacity:0}
+      66%{opacity:1}
+      86%{left:112%;opacity:.55}
+      100%{left:112%;opacity:0}
+    }
+    @keyframes v92SloganGlow{
+      0%,100%{color:#79cfee;text-shadow:0 0 0 rgba(88,186,247,0)}
+      50%{color:#a7eaff;text-shadow:0 0 14px rgba(88,186,247,.20)}
+    }
+
+    .v90-status b{
+      font-size:clamp(10px,.46vw,17px)!important;
+    }
+    .v90-status span{
+      font-size:clamp(9px,.40vw,15px)!important;
+      color:#9eb2c8!important;
+    }
+    .v90-status small{
+      font-size:clamp(8px,.34vw,13px)!important;
+      color:#7890aa!important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) [data-testid="stWidgetLabel"] p{
+      font-size:clamp(13px,.60vw,21px)!important;
+      color:#f0f5fb!important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input{
+      font-size:clamp(15px,.76vw,25px)!important;
+      color:#ffffff!important;
+    }
+    .v82-card-footer{
+      color:#a9b9ca!important;
+      font-size:clamp(10px,.42vw,16px)!important;
+      font-weight:600!important;
+    }
+
+    /* Reliable Packaging brand finish — login only. */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+      border-color:rgba(231,67,54,.38)!important;
+      box-shadow:0 24px 70px rgba(0,0,0,.32),0 0 0 1px rgba(231,67,54,.06)!important;
+    }
+    .v103-right-top{
+      display:grid!important;
+      grid-template-columns:minmax(0,1fr) auto!important;
+      align-items:center!important;
+      column-gap:18px!important;
+    }
+    .v103-secure-state{
+      display:grid!important;
+      grid-template-columns:8px auto minmax(0,1fr)!important;
+      align-items:center!important;
+      gap:8px!important;
+    }
+    .v103-secure-state b,.v103-secure-state small{
+      display:block!important;
+      margin:0!important;
+      white-space:nowrap!important;
+    }
+    .v103-secure-state small{
+      padding-left:8px!important;
+      border-left:1px solid rgba(138,158,180,.22)!important;
+    }
+    .v103-right-time{
+      display:grid!important;
+      grid-template-columns:auto auto!important;
+      align-items:center!important;
+      gap:7px!important;
+      white-space:nowrap!important;
+    }
+    .v103-right-time small,.v103-right-time b{display:block!important;margin:0!important}
+    .v103-auth-logo{
+      width:72px!important;
+      height:58px!important;
+      padding:5px!important;
+      border-radius:12px!important;
+      display:grid!important;
+      place-items:center!important;
+      background:#ffffff!important;
+      border:1px solid rgba(96,170,238,.34)!important;
+      box-shadow:0 10px 28px rgba(47,111,235,.12)!important;
+      overflow:hidden!important;
+    }
+    .v103-auth-logo img{
+      width:100%!important;
+      height:100%!important;
+      object-fit:contain!important;
+      display:block!important;
+    }
+    .v103-auth-head .v90-card-kicker{color:#78cfff!important}
+    .v103-company-block{border-left:3px solid #4f9cff!important}
+    .v103-status-grid .v90-status.active{border-color:rgba(46,211,154,.35)!important}
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
+      background:linear-gradient(135deg,#e74336,#b92520)!important;
+      border-color:#f06b60!important;
+      box-shadow:0 10px 24px rgba(183,37,32,.25)!important;
+    }
+    .v103-footer{
+      display:flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+      flex-wrap:wrap!important;
+      gap:0!important;
+      line-height:1.5!important;
+    }
+    .v103-footer span{display:inline-flex!important;align-items:center!important;margin:0!important}
+    .v103-footer span+span:before{content:"•";padding:0 8px;color:#e74336}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Active login design: this must execute before the login st.stop().
+    st.markdown("""
+<style>
+/* FINAL RESPONSIVE RELIABLE LOGIN — keep the visual design on every screen. */
+body:has(.v82-login-root) .v103-auth-head{
+  position:relative!important;overflow:hidden!important;padding:22px 24px!important;
+  margin:8px 0 16px!important;border:1px solid rgba(255,105,91,.38)!important;border-radius:18px!important;
+  background:linear-gradient(115deg,rgba(231,67,54,.24),rgba(231,67,54,.04) 44%,transparent 64%),
+             radial-gradient(circle at 92% 12%,rgba(255,92,77,.22),transparent 29%),
+             linear-gradient(145deg,#14293f,#091625)!important;
+  box-shadow:0 20px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06)!important
+}
+body:has(.v82-login-root) .v103-auth-head:before{display:none!important;content:none!important}
+body:has(.v82-login-root) .v103-auth-head:after{
+  content:""!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:5px!important;
+  background:linear-gradient(180deg,#ff7568,#e74336,#8e1d19)!important;box-shadow:0 0 22px rgba(231,67,54,.72)!important
+}
+body:has(.v82-login-root) .v103-auth-logo{
+  position:relative!important;z-index:2!important;width:112px!important;height:82px!important;padding:8px!important
+}
+body:has(.v82-login-root) .v103-auth-head>div:last-child{position:relative!important;z-index:2!important}
+body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:42px!important;line-height:1!important}
+body:has(.v82-login-root) .v103-company-block{
+  padding:13px 15px!important;border-radius:13px!important;border-left:5px solid #e74336!important;
+  background:linear-gradient(90deg,rgba(231,67,54,.18),rgba(11,29,46,.82))!important
+}
+body:has(.v82-login-root) .v103-status-grid .v90-status{
+  min-height:72px!important;padding:12px!important;box-shadow:0 12px 28px rgba(0,0,0,.20)!important
+}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(1){border-top:3px solid #39d99f!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(2){border-top:3px solid #5ba8ff!important}
+body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){border-top:3px solid #ff665c!important}
+body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) button[kind="primaryFormSubmit"]{
+  background:linear-gradient(100deg,#8f1c19,#e74336 52%,#ff7165)!important;
+  border:1px solid #ff887d!important;box-shadow:0 12px 28px rgba(231,67,54,.32)!important
+}
+@media(max-width:760px){
+  body:has(.v82-login-root) .block-container{width:100%!important;max-width:780px!important;padding:20px 16px!important}
+  body:has(.v82-login-root) div[data-testid="stHorizontalBlock"]{display:block!important;min-height:auto!important}
+  body:has(.v82-login-root) .v82-ref-hero{display:none!important}
+  body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+    width:100%!important;max-width:none!important;margin:0!important
+  }
+  body:has(.v82-login-root) div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker)>div{
+    padding:23px 20px 19px!important
+  }
+  body:has(.v82-login-root) .v103-auth-head{padding:20px!important;gap:17px!important}
+  body:has(.v82-login-root) .v103-auth-logo{width:105px!important;height:78px!important}
+  body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:38px!important}
+  body:has(.v82-login-root) .v103-status-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+}
+@media(max-width:540px){
+  body:has(.v82-login-root) .v103-right-top{grid-template-columns:1fr!important;row-gap:8px!important}
+  body:has(.v82-login-root) .v103-right-time{justify-content:start!important;text-align:left!important}
+  body:has(.v82-login-root) .v103-auth-logo{width:88px!important;height:68px!important}
+  body:has(.v82-login-root) .v103-auth-head .v90-card-title{font-size:31px!important}
+  body:has(.v82-login-root) .v103-status-grid{grid-template-columns:1fr!important}
+}
+
+@keyframes v116BrandFlash{
+  0%,100%{
+    color:#f8fbff;
+    text-shadow:0 0 7px rgba(255,255,255,.14),0 0 14px rgba(89,170,255,.18);
+    filter:brightness(1);
+  }
+  50%{
+    color:#ffffff;
+    text-shadow:0 0 10px rgba(255,255,255,.30),0 0 24px rgba(81,166,255,.36),0 0 38px rgba(69,135,230,.20);
+    filter:brightness(1.08);
+  }
+}
+body:has(.v82-login-root) .v116-brand-flash{
+  font-size:clamp(28px,2.05vw,46px)!important;
+  letter-spacing:-.7px!important;
+  white-space:nowrap!important;
+  animation:v116BrandFlash 2.2s ease-in-out infinite!important;
+}
+body:has(.v82-login-root) .v116-brand-sub{
+  margin-top:5px!important;
+  color:#8ecbff!important;
+  font-size:clamp(10px,.62vw,15px)!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:2.2px!important;
+  text-transform:uppercase!important;
+  text-shadow:0 0 14px rgba(80,166,255,.22)!important;
+}
+@media(max-width:540px){
+  body:has(.v82-login-root) .v116-brand-flash{
+    font-size:clamp(22px,7vw,31px)!important;
+    white-space:normal!important;
+  }
+}
+
+/* Show a compact branded visual above the form on tablet/narrow layouts. */
+@media(min-width:541px) and (max-width:760px){
+  body:has(.v82-login-root) .v82-ref-hero{
+    display:flex!important;height:280px!important;min-height:280px!important;margin-bottom:16px!important
+  }
+  body:has(.v82-login-root) .v82-hero-canvas{
+    width:100%!important;height:100%!important;background-size:cover!important;background-position:center 34%!important
+  }
+  body:has(.v82-login-root) .v83-factory-logo{display:block!important}
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
+    with right_col:
+        with st.container(border=True):
+            st.markdown('<div class="v82-login-card-marker"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div class="v103-right-top">
+                  <div class="v103-secure-state"><i></i><b>SYSTEM ONLINE</b><small>Secure HRMS access</small></div>
+                  <div class="v103-right-time"><small>IST · 24H</small><b data-v116-login-clock>{_login_verified_time}</b></div>
+                </div>
+
+                <div class="v90-auth-head v103-auth-head v187-premium-brand">
+                  <div class="v187-emblem-box"><img src="{LOGO_ICON_DATA_URI}" alt="Reliable Packaging emblem"></div>
+                  <div class="v187-brand-rule"></div>
+                  <div class="v187-brand-copy">
+                    <div class="v187-brand-kicker">SMART WORKFORCE ERP</div>
+                    <div class="v187-brand-name"><span class="v188-brand-reliable">RELIABLE</span><span class="v188-brand-packaging">PACKAGING</span></div>
+                    <div class="v187-brand-company">INDUSTRIES LIMITED</div>
+                  </div>
+                </div>
+                <div class="v90-card-sub">Sign in to your secure HRMS workspace for workforce intelligence, attendance, payroll and operations.</div>
+
+                <div class="v103-company-block v117-capability-strip">
+                  <div class="v103-company-line"><b>Enterprise HRMS</b> · People · Attendance · Payroll · Operations</div>
+                </div>
+
+                <div class="v90-status-grid v103-status-grid">
+                  <div class="v90-status active"><b><i class="v90-status-dot"></i>LIVE DATABASE</b><span>PostgreSQL connected</span><small>Real-time source</small></div>
+                  <div class="v90-status"><b>✦ AI READY</b><span>HR intelligence online</span><small>Decision support</small></div>
+                  <div class="v90-status"><b>◈ SECURE</b><span>Role-based access</span><small>Protected session</small></div>
+                </div>
+
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.form("login_form_v82", clear_on_submit=False, border=False):
+                login_username = st.text_input(
+                    "User ID / Username",
+                    placeholder="Enter your user ID or username",
+                    autocomplete="username",
                 )
-                st.error("Invalid username/password or inactive user.")
-            else:
+                login_password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="Enter your password",
+                    autocomplete="current-password",
+                )
+                login_submit = st.form_submit_button("Sign In  →", type="primary", use_container_width=True)
+
+            if login_submit:
                 try:
-                    _new_token = create_login_session(user["user_id"])
+                    user = authenticate_app_user(login_username, login_password)
+                    if user is None:
+                        _failed_actor=str(login_username or "").strip().lower() or "unknown"
+                        record_audit_event(
+                            _failed_actor,
+                            "LOGIN_FAILED",
+                            "Authentication",
+                            "User",
+                            _failed_actor,
+                            "Invalid credentials or inactive account",
+                            status="FAILED",
+                        )
+                        st.error("Invalid username/password or inactive user.")
+                    else:
+                        try:
+                            _new_token = create_login_session(user["user_id"])
+                        except _PG_TRANSIENT_ERRORS:
+                            # The user is authenticated. Allow this browser
+                            # session to continue even if persistent-session
+                            # storage briefly reconnects.
+                            _new_token = None
+
+                        st.session_state["auth_user"] = user
+                        st.session_state["auth_token"] = _new_token
+                        # Start a fresh audit-navigation context for this signed-in user.
+                        st.session_state.pop("_v194_last_nav_signature", None)
+                        st.session_state.pop("_v194_last_report_signature", None)
+                        # Cover the one authenticated rerun so users never see
+                        # Streamlit assembling an unstyled/partial dashboard.
+                        st.session_state["_v188_login_transition"] = True
+                        if _new_token:
+                            st.query_params["session"] = _new_token
+                        else:
+                            try:
+                                st.query_params.pop("session", None)
+                            except Exception:
+                                pass
+                        st.rerun()
+
                 except _PG_TRANSIENT_ERRORS:
-                    # The user is authenticated. Allow this browser
-                    # session to continue even if persistent-session
-                    # storage briefly reconnects.
-                    _new_token = None
+                    st.warning(
+                        "Database connection was temporarily interrupted and is reconnecting. "
+                        "Please click Sign In once more if access does not continue automatically."
+                    )
+                except Exception:
+                    # Do not expose database/internal traceback details on the
+                    # public login screen. The full exception remains in server logs.
+                    st.error(
+                        "Unable to complete sign in right now. Please try again in a few seconds."
+                    )
 
-                st.session_state["auth_user"] = user
-                st.session_state["auth_token"] = _new_token
-                # Start a fresh audit-navigation context for this signed-in user.
-                st.session_state.pop("_v194_last_nav_signature", None)
-                st.session_state.pop("_v194_last_report_signature", None)
-                # Cover the one authenticated rerun so users never see
-                # Streamlit assembling an unstyled/partial dashboard.
-                st.session_state["_v188_login_transition"] = True
-                if _new_token:
-                    st.query_params["session"] = _new_token
-                else:
-                    try:
-                        st.query_params.pop("session", None)
-                    except Exception:
-                        pass
-                st.rerun()
-
-        except _PG_TRANSIENT_ERRORS:
-            st.warning(
-                "Database connection was temporarily interrupted and is reconnecting. "
-                "Please click Sign In once more if access does not continue automatically."
-            )
-        except Exception:
-            # Do not expose database/internal traceback details on the
-            # public login screen. The full exception remains in server logs.
-            st.error(
-                "Unable to complete sign in right now. Please try again in a few seconds."
+            st.markdown(
+                """
+                <div class="v82-card-footer v103-footer">
+                  <span>Role-based secure access</span>
+                  <span>Reliable Packaging Industries Limited</span>
+                  <span>Built in India 🇮🇳 · Created by Sourav Majumder</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
+    # V18.5 ABSOLUTE FINAL LOGIN THEME
+    # Intentionally rendered after every previous login CSS layer so the
+    # authenticated ERP's navy/blue glass language is the final winner.
+    st.markdown(
+        """
+        <style>
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker){
+          position:relative!important;
+          overflow:hidden!important;
+          border:1px solid rgba(83,151,220,.30)!important;
+          background:
+            radial-gradient(circle at 92% 0%,rgba(66,135,225,.10),transparent 30%),
+            radial-gradient(circle at 6% 100%,rgba(53,213,255,.045),transparent 28%),
+            linear-gradient(155deg,#081827 0%,#071522 55%,#06111e 100%)!important;
+          box-shadow:
+            0 26px 70px rgba(0,0,0,.34),
+            0 0 28px rgba(49,118,205,.045),
+            inset 0 1px 0 rgba(255,255,255,.035)!important;
+        }
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker):before{
+          content:""!important;
+          position:absolute!important;
+          inset:0 auto 0 0!important;
+          width:4px!important;
+          background:linear-gradient(180deg,#73d7ff,#4f9cff 48%,#2f6feb)!important;
+          box-shadow:0 0 22px rgba(79,156,255,.42)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-right-top{
+          border:1px solid rgba(94,149,204,.22)!important;
+          background:linear-gradient(90deg,rgba(7,22,37,.78),rgba(7,19,33,.62))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.03)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-auth-head{
+          position:relative!important;
+          overflow:hidden!important;
+          border:1px solid rgba(91,159,229,.31)!important;
+          background:
+            radial-gradient(circle at 86% 18%,rgba(79,156,255,.17),transparent 31%),
+            radial-gradient(circle at 15% 115%,rgba(53,213,255,.07),transparent 34%),
+            linear-gradient(145deg,#112a44 0%,#0b2035 48%,#081725 100%)!important;
+          box-shadow:
+            0 17px 38px rgba(0,0,0,.25),
+            inset 0 1px 0 rgba(255,255,255,.055)!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-head:before{
+          display:none!important;
+          content:none!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-head:after{
+          content:""!important;
+          position:absolute!important;
+          left:0!important;top:0!important;bottom:0!important;width:4px!important;
+          background:linear-gradient(180deg,#6fd6ff,#4f9cff,#315fd2)!important;
+          box-shadow:0 0 20px rgba(79,156,255,.34)!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-logo{
+          border:1px solid rgba(105,174,238,.32)!important;
+          box-shadow:0 10px 24px rgba(47,111,235,.10)!important;
+        }
+        html body:has(.v82-login-root) .v103-auth-head .v90-card-kicker{
+          color:#7fd2ff!important;
+        }
+        html body:has(.v82-login-root) .v116-brand-flash{
+          color:#f8fbff!important;
+          text-shadow:
+            0 0 8px rgba(255,255,255,.16),
+            0 0 20px rgba(82,166,255,.24)!important;
+        }
+        html body:has(.v82-login-root) .v116-brand-sub{
+          color:#8fcaff!important;
+          text-shadow:0 0 12px rgba(80,166,255,.16)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-company-block{
+          border:1px solid rgba(82,149,216,.22)!important;
+          border-left:4px solid #4f9cff!important;
+          background:
+            linear-gradient(90deg,rgba(31,75,119,.31),rgba(9,25,42,.84))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.028)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-status-grid .v90-status{
+          background:linear-gradient(145deg,#0a1d30,#081624)!important;
+          border:1px solid rgba(80,140,199,.20)!important;
+          box-shadow:0 10px 24px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.025)!important;
+        }
+        html body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(1){
+          border-top:3px solid #39d99f!important;
+        }
+        html body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(2){
+          border-top:3px solid #5ba8ff!important;
+        }
+        html body:has(.v82-login-root) .v103-status-grid .v90-status:nth-child(3){
+          border-top:3px solid #8f6bff!important;
+        }
+
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input{
+          background:#0b1a2b!important;
+          border:1px solid rgba(79,137,194,.36)!important;
+          color:#f6fbff!important;
+        }
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker) input:focus{
+          border-color:#5ba8ff!important;
+          box-shadow:0 0 0 3px rgba(79,156,255,.11)!important;
+        }
+
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker)
+        button[kind="primaryFormSubmit"]{
+          background:linear-gradient(100deg,#245aaa 0%,#3f84e6 50%,#58a7ff 100%)!important;
+          border:1px solid rgba(137,199,255,.66)!important;
+          box-shadow:
+            0 12px 28px rgba(42,107,190,.24),
+            inset 0 1px 0 rgba(255,255,255,.16)!important;
+        }
+        html body:has(.v82-login-root)
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.v82-login-card-marker)
+        button[kind="primaryFormSubmit"]:hover{
+          filter:brightness(1.06)!important;
+          box-shadow:0 16px 34px rgba(42,107,190,.30)!important;
+        }
+
+        html body:has(.v82-login-root) .v103-footer span+span:before{
+          color:#5ba8ff!important;
+        }
+
+        /* V18.6 — one brand only: no duplicated company logo/text. */
+        html body:has(.v82-login-root) .v103-auth-logo{
+          display:none!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand{
+          display:flex!important;
+          align-items:center!important;
+          justify-content:flex-start!important;
+          min-height:118px!important;
+          padding:23px 28px!important;
+          gap:0!important;
+        }
+        html body:has(.v82-login-root) .v186-brand-copy{
+          width:100%!important;
+          display:flex!important;
+          flex-direction:column!important;
+          justify-content:center!important;
+          align-items:flex-start!important;
+          gap:5px!important;
+          margin:0!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand .v90-card-kicker{
+          margin:0 0 2px 0!important;
+          letter-spacing:2.1px!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand .v90-card-title{
+          margin:0!important;
+          line-height:.98!important;
+          font-size:clamp(31px,2.35vw,52px)!important;
+          white-space:nowrap!important;
+        }
+        html body:has(.v82-login-root) .v186-single-brand .v116-brand-sub{
+          margin:2px 0 0 0!important;
+          letter-spacing:2.4px!important;
+        }
+        @media(max-width:540px){
+          html body:has(.v82-login-root) .v186-single-brand{
+            min-height:106px!important;
+            padding:20px 22px!important;
+          }
+          html body:has(.v82-login-root) .v186-single-brand .v90-card-title{
+            font-size:clamp(27px,8vw,38px)!important;
+            white-space:normal!important;
+          }
+        }
+        /* V18.8 — premium single-company wordmark. One emblem + one company identity. */
+        html body:has(.v82-login-root) .v103-auth-logo,
+        html body:has(.v82-login-root) .v186-single-brand{
+          display:none!important;
+        }
+        html body:has(.v82-login-root) .v187-premium-brand{
+          position:relative!important;
+          isolation:isolate!important;
+          overflow:hidden!important;
+          display:grid!important;
+          grid-template-columns:68px 1px minmax(0,1fr)!important;
+          align-items:center!important;
+          gap:20px!important;
+          min-height:136px!important;
+          margin:8px 0 16px!important;
+          padding:23px 28px!important;
+          border:1px solid rgba(117,183,244,.34)!important;
+          border-radius:20px!important;
+          background:
+            radial-gradient(circle at 88% 6%,rgba(92,166,255,.17),transparent 34%),
+            radial-gradient(circle at 8% 110%,rgba(62,211,255,.08),transparent 35%),
+            linear-gradient(145deg,#112b45 0%,#0a2035 52%,#071522 100%)!important;
+          box-shadow:
+            0 24px 58px rgba(0,0,0,.32),
+            0 0 0 1px rgba(104,175,240,.035),
+            inset 0 1px 0 rgba(255,255,255,.075)!important;
+        }
+        html body:has(.v82-login-root) .v187-premium-brand:before{
+          display:block!important;
+          content:""!important;
+          position:absolute!important;
+          z-index:-1!important;
+          left:14%!important;
+          right:-8%!important;
+          top:-62%!important;
+          height:105%!important;
+          transform:rotate(-7deg)!important;
+          background:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,0))!important;
+          pointer-events:none!important;
+        }
+        html body:has(.v82-login-root) .v187-premium-brand:after{
+          content:""!important;
+          position:absolute!important;
+          z-index:3!important;
+          left:0!important;
+          top:15px!important;
+          bottom:15px!important;
+          width:4px!important;
+          border-radius:0 8px 8px 0!important;
+          background:linear-gradient(180deg,#86e4ff 0%,#4f9cff 48%,#335ed0 100%)!important;
+          box-shadow:0 0 22px rgba(79,156,255,.40)!important;
+        }
+        html body:has(.v82-login-root) .v187-emblem-box{
+          position:relative!important;
+          z-index:2!important;
+          width:68px!important;
+          height:76px!important;
+          display:grid!important;
+          place-items:center!important;
+          border-radius:18px!important;
+          background:linear-gradient(145deg,rgba(255,255,255,.09),rgba(255,255,255,.025))!important;
+          border:1px solid rgba(162,211,255,.25)!important;
+          box-shadow:
+            0 14px 30px rgba(0,0,0,.24),
+            inset 0 1px 0 rgba(255,255,255,.10),
+            0 0 28px rgba(73,149,234,.07)!important;
+          backdrop-filter:blur(12px)!important;
+        }
+        html body:has(.v82-login-root) .v187-emblem-box img{
+          display:block!important;
+          width:38px!important;
+          height:62px!important;
+          object-fit:contain!important;
+          filter:drop-shadow(0 6px 12px rgba(0,0,0,.24))!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-rule{
+          position:relative!important;
+          z-index:2!important;
+          width:1px!important;
+          height:70px!important;
+          background:linear-gradient(180deg,transparent,rgba(150,208,255,.42),transparent)!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-copy{
+          position:relative!important;
+          z-index:2!important;
+          min-width:0!important;
+          display:flex!important;
+          flex-direction:column!important;
+          align-items:flex-start!important;
+          justify-content:center!important;
+          gap:5px!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-kicker{
+          display:inline-flex!important;
+          align-items:center!important;
+          min-height:23px!important;
+          margin:0 0 2px 0!important;
+          padding:0 9px!important;
+          border:1px solid rgba(118,208,255,.22)!important;
+          border-radius:999px!important;
+          background:rgba(74,153,231,.085)!important;
+          color:#8bdcff!important;
+          font-size:10px!important;
+          font-weight:900!important;
+          letter-spacing:2.15px!important;
+          line-height:1!important;
+          white-space:nowrap!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-name{
+          display:flex!important;
+          align-items:baseline!important;
+          flex-wrap:wrap!important;
+          column-gap:10px!important;
+          row-gap:2px!important;
+          margin:0!important;
+          color:#f8fbff!important;
+          font-size:clamp(31px,2.32vw,49px)!important;
+          font-weight:950!important;
+          letter-spacing:.45px!important;
+          line-height:.94!important;
+          text-transform:uppercase!important;
+          text-shadow:0 8px 30px rgba(0,0,0,.20)!important;
+        }
+        html body:has(.v82-login-root) .v188-brand-reliable{
+          color:#ffffff!important;
+        }
+        html body:has(.v82-login-root) .v188-brand-packaging{
+          background:linear-gradient(180deg,#f7fbff 0%,#cfe8ff 100%)!important;
+          -webkit-background-clip:text!important;
+          background-clip:text!important;
+          -webkit-text-fill-color:transparent!important;
+          color:#d7ecff!important;
+        }
+        html body:has(.v82-login-root) .v187-brand-company{
+          margin:2px 0 0 1px!important;
+          color:#9ed4ff!important;
+          font-size:clamp(10px,.76vw,14px)!important;
+          font-weight:850!important;
+          letter-spacing:4.1px!important;
+          line-height:1!important;
+          white-space:nowrap!important;
+          text-transform:uppercase!important;
+        }
+        @media(max-width:760px){
+          html body:has(.v82-login-root) .v187-premium-brand{
+            grid-template-columns:54px 1px minmax(0,1fr)!important;
+            gap:14px!important;
+            min-height:118px!important;
+            padding:19px 20px!important;
+            border-radius:17px!important;
+          }
+          html body:has(.v82-login-root) .v187-emblem-box{
+            width:54px!important;height:62px!important;border-radius:15px!important;
+          }
+          html body:has(.v82-login-root) .v187-emblem-box img{
+            width:30px!important;height:50px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-rule{height:56px!important}
+          html body:has(.v82-login-root) .v187-brand-name{
+            font-size:clamp(25px,5.6vw,36px)!important;
+            column-gap:8px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-company{
+            font-size:10px!important;letter-spacing:2.8px!important;
+          }
+        }
+        @media(max-width:540px){
+          html body:has(.v82-login-root) .v187-premium-brand{
+            grid-template-columns:48px minmax(0,1fr)!important;
+            gap:12px!important;
+            padding:17px 16px!important;
+            min-height:106px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-rule{display:none!important}
+          html body:has(.v82-login-root) .v187-emblem-box{
+            width:48px!important;height:56px!important;border-radius:14px!important;
+          }
+          html body:has(.v82-login-root) .v187-emblem-box img{
+            width:27px!important;height:44px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-kicker{
+            min-height:20px!important;
+            padding:0 7px!important;
+            font-size:7.5px!important;
+            letter-spacing:1.35px!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-name{
+            font-size:clamp(21px,6.7vw,31px)!important;
+            column-gap:6px!important;
+            line-height:.98!important;
+          }
+          html body:has(.v82-login-root) .v187-brand-company{
+            font-size:8.5px!important;
+            letter-spacing:1.8px!important;
+            white-space:normal!important;
+          }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 
