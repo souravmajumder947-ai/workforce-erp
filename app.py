@@ -11085,6 +11085,13 @@ if _legacy_request in _legacy_settings and _legacy_request in available_modules:
 if st.session_state.get("simple_navigation") not in _simple_routes:
     st.session_state["simple_navigation"] = next(iter(_simple_routes))
 st.sidebar.markdown('<div class="v5-sidebar-label">Daily Work</div>', unsafe_allow_html=True)
+_jarvis_role_allowed = _current_role in FULL_CONTROL_ROLES | {"Manager"}
+if _jarvis_role_allowed:
+    def open_jarvis_home():
+        st.session_state["simple_navigation"] = "Home"
+        st.session_state[f"jarvis_open_{_current_user['username']}"] = True
+
+    st.sidebar.button("Open JARVIS", key="jarvis_sidebar", width="stretch", on_click=open_jarvis_home)
 _simple_choice = st.sidebar.radio("Navigation", list(_simple_routes), key="simple_navigation", label_visibility="collapsed")
 page = _simple_routes[_simple_choice]
 # Open the full profile on entry while allowing Directory/Profile switches within Employees.
@@ -11724,13 +11731,13 @@ if page == "Home":
     # ============================================================
     st.markdown('<div class="v10-live-home-marker"></div>', unsafe_allow_html=True)
 
-    if (_current_role in FULL_CONTROL_ROLES | {"Manager"}
-            and all(v5_module_allowed(module) for module in ("Attendance", "Operations", "Reports"))
-            and can_view_salary(_current_role)):
+    if _jarvis_role_allowed:
         from md_assistant import render_jarvis_launcher
 
         render_jarvis_launcher(
             read_df, datetime.now(IST).date(), _current_user["username"],
+            reports_access=all(v5_module_allowed(module) for module in ("Attendance", "Operations", "Reports"))
+            and can_view_salary(_current_role),
             employee_access=v5_module_allowed("Employees"),
             payroll_access=v5_module_allowed("Payroll") and can_view_salary(_current_role),
             warning_access=can_edit_hr(_current_role),

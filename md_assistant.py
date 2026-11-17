@@ -385,7 +385,7 @@ def render_md_assistant(read, today, username):
         render_response(read, request)
 
 
-def render_jarvis_launcher(read, today, username, *, employee_access, payroll_access, warning_access):
+def render_jarvis_launcher(read, today, username, *, reports_access, employee_access, payroll_access, warning_access):
     state_key = f"jarvis_open_{username}"
     is_open = st.session_state.get(state_key, False)
 
@@ -399,16 +399,24 @@ def render_jarvis_launcher(read, today, username, *, employee_access, payroll_ac
             key=f"jarvis_launcher_{username}", width="stretch", on_click=toggle,
         )
         if not is_open:
-            st.caption("Ask about your ERP data or generate the Daily MIS.")
+            st.caption("Ask a general question or open your ERP reports.")
     if is_open:
+        from jarvis_web import render_public_questions
+
         with st.container(key="jarvis_workspace"):
+            tabs = ["General and web"]
+            if reports_access:
+                tabs.append("Daily MIS and reports")
+            if employee_access:
+                tabs.append("Employee 360 questions")
+            panels = dict(zip(tabs, st.tabs(tabs)))
+            with panels["General and web"]:
+                render_public_questions(username)
+            if reports_access:
+                with panels["Daily MIS and reports"]:
+                    render_md_assistant(read, today, username)
             if employee_access:
                 from jarvis_employee import render_employee_questions
 
-                reports, employee_questions = st.tabs(["Daily MIS and reports", "Employee 360 questions"])
-                with reports:
-                    render_md_assistant(read, today, username)
-                with employee_questions:
+                with panels["Employee 360 questions"]:
                     render_employee_questions(read, today, username, tuple(DIVISIONS), payroll_access, warning_access)
-            else:
-                render_md_assistant(read, today, username)
