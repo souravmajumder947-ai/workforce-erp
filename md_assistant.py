@@ -399,19 +399,18 @@ def render_jarvis_launcher(read, today, username, *, reports_access, employee_ac
             key=f"jarvis_launcher_{username}", width="stretch", on_click=toggle,
         )
         if not is_open:
-            st.caption("Ask a general question or open your ERP reports.")
+            st.caption("Ask about attendance, production, labour cost or employee records.")
     if is_open:
-        from jarvis_web import render_public_questions
-
         with st.container(key="jarvis_workspace"):
-            tabs = ["General and web"]
+            tabs = []
             if reports_access:
                 tabs.append("Daily MIS and reports")
             if employee_access:
                 tabs.append("Employee 360 questions")
+            if not tabs:
+                st.info("Ask your ERP admin for Reports or Employee Master access to use JARVIS.")
+                return
             panels = dict(zip(tabs, st.tabs(tabs)))
-            with panels["General and web"]:
-                render_public_questions(username)
             if reports_access:
                 with panels["Daily MIS and reports"]:
                     render_md_assistant(read, today, username)
