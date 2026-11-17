@@ -11593,6 +11593,10 @@ def finish_login_transition():
 # Simplified workflows use the existing connection, identity and master functions.
 if page in {"Simple Attendance", "Simple HR Review", "Simple Production", "Simple Reports", "Simple Lifecycle"}:
     from simple_workforce import SimpleWorkforce
+    from erp_design import WORKSPACE_STYLE
+
+    st.markdown('<span class="erp-workspace-theme"></span>', unsafe_allow_html=True)
+    st.html(WORKSPACE_STYLE)
     try:
         SimpleWorkforce(globals()).render(page)
     finally:
@@ -11821,7 +11825,7 @@ if page == "Home":
     _v10_top1, _v10_top2, _v10_top3 = st.columns([1.45, 1.0, .72], gap="small")
     with _v10_top1:
         st.markdown(
-            '<div class="v10-product-line"><b>Smart HRMS</b><span>People · Process · Performance · A Stronger Tomorrow</span></div>',
+            '<div class="v10-product-line"><b>Management overview</b><span>Attendance today · Payroll by selected month</span></div>',
             unsafe_allow_html=True,
         )
     with _v10_top2:
@@ -11915,9 +11919,9 @@ if page == "Home":
           linear-gradient(90deg,rgba(4,13,24,.90) 0%,rgba(4,13,24,.46) 48%,rgba(4,13,24,.88) 100%),
           url('{V82_LOGIN_HERO_DATA_URI}');">
           <div class="v10-hero-left">
-            <div class="v10-hero-kicker">SUSTAINABLE · STRONGER · TOGETHER</div>
-            <h2>People. Packaging.<br><span>Possibilities.</span></h2>
-            <p>Reliable Packaging Industries Limited · live workforce intelligence</p>
+            <div class="v10-hero-kicker">RELIABLE PACKAGING INDUSTRIES LIMITED</div>
+            <h2>Workforce &amp; operations</h2>
+            <p>Attendance, payroll and production across your selected location.</p>
             <div class="v10-hero-pills">
               <span>🏭 {html.escape(str(global_division))}</span>
               <span>📅 Working Date · {global_work_date.strftime('%d %b %Y')}</span>
@@ -11925,7 +11929,6 @@ if page == "Home":
               <span class="live"><i></i> LIVE DATABASE</span>
             </div>
           </div>
-          <div class="v10-hero-quote">“ SMART PEOPLE<br>BUILD<br>GREAT COMPANIES ”</div>
           <div class="v10-clock-card">
             <small data-v10-date>{_v10_live_now.strftime('%A, %d %b %Y')}</small>
             <b data-v10-clock>{_v10_live_now.strftime('%H:%M:%S')}</b>
@@ -11973,7 +11976,7 @@ if page == "Home":
         ("●", "Present", f"{present:,}", f"{(present / active_count * 100):.1f}% of active" if active_count else "No active employees", "green"),
         ("●", "Absent / LWP", f"{absent:,}", "Selected working date", "red"),
         ("◒", "On Leave", f"{on_leave:,}", "CL · SL · EL · Leave", "amber"),
-        ("◷", "On Duty (WO)", f"{weekly_off:,}", f"Half day {half_day:,}", "purple"),
+        ("◷", "Weekly Off", f"{weekly_off:,}", f"Half day {half_day:,}", "purple"),
         ("◴", "OT Hours", f"{ot_hours:,.2f}", "Selected working date", "cyan"),
     ]
     _v10_kpi_cols = st.columns(6, gap="small")
@@ -12260,7 +12263,7 @@ if page == "Home":
     with _v115_left:
         with st.container(border=True):
             st.markdown(
-                '<div class="v10-panel-title"><span>DIVISION MONTHLY SUMMARY</span><small>MD view · no drill-down required</small></div>',
+                '<div class="v10-panel-title"><span>DIVISION MONTHLY SUMMARY</span><small>Selected location and month</small></div>',
                 unsafe_allow_html=True,
             )
             st.dataframe(
@@ -12393,7 +12396,7 @@ if page == "Home":
         with st.container(border=True):
             st.markdown(
                 f"""
-                <div class="v10-panel-title"><span>✦ AI WORKFORCE HEALTH SCORE</span><small>Live controls</small></div>
+                <div class="v10-panel-title"><span>WORKFORCE READINESS</span><small>Live controls</small></div>
                 <div class="v10-health-wrap">
                   <div class="v10-health-ring" style="--v10score:{_v10_health:.1f};">
                     <div><b>{_v10_health:.0f}</b><small>/100</small></div>
@@ -12565,7 +12568,7 @@ if page == "Home":
     with _v10_lower1:
         with st.container(border=True):
             st.markdown(
-                f'<div class="v10-panel-title"><span>✦ AI PRIORITY ALERTS</span><small>View all · {len(_v10_alerts)}</small></div>',
+                f'<div class="v10-panel-title"><span>PRIORITY ACTIONS</span><small>View all · {len(_v10_alerts)}</small></div>',
                 unsafe_allow_html=True,
             )
             _v10_alert_html = ""
@@ -24495,6 +24498,12 @@ body:has(.v105-direct-action-marker) .v10-util-label{display:none!important}
 # V15.2 MANAGEMENT FINAL PAYROLL SOURCE
 
 # V15.3 MANAGEMENT MONTHLY EXECUTIVE CONTEXT
+
+# Workspace presentation is applied after the existing layout styles.
+from erp_design import WORKSPACE_STYLE
+
+st.markdown('<span class="erp-workspace-theme"></span>', unsafe_allow_html=True)
+st.html(WORKSPACE_STYLE)
 
 # V18.8 FINAL RENDER BARRIER
 # This is deliberately last. It releases the login transition shield only after
