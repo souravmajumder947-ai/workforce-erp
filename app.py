@@ -1383,6 +1383,30 @@ def migrate_postgres():
             entered_by TEXT, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(work_date,division,shift,machine))""")
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS employee_warning_letters (
+                warning_id BIGSERIAL PRIMARY KEY,
+                employee_id TEXT NOT NULL REFERENCES employees(employee_id),
+                issue_date DATE NOT NULL,
+                incident_date DATE,
+                subject TEXT NOT NULL,
+                warning_type TEXT NOT NULL,
+                reference_no TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                required_action TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                attachment BYTEA NOT NULL,
+                content_hash TEXT NOT NULL UNIQUE,
+                recorded_by TEXT NOT NULL,
+                recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_warning_letters_employee_date
+            ON employee_warning_letters(employee_id, issue_date DESC, warning_id DESC)
+        """)
+
         # V6 CLEAN SLATE:
         # Contractor / Thekedar masters are intentionally NOT seeded.
         # Admin will create every contractor from Master Centre.
@@ -11174,6 +11198,7 @@ if st.sidebar.button("Sign out", use_container_width=True, key="v5_logout"):
     st.session_state["auth_token"] = None
     st.session_state.pop("_v194_last_nav_signature", None)
     st.session_state.pop("_v194_last_report_signature", None)
+    st.session_state.pop("warning_letter_extraction", None)
     try:
         del st.query_params["session"]
     except Exception:
@@ -13279,9 +13304,12 @@ elif page == "Employees":
                     unsafe_allow_html=True
                 )
 
+                profile_sections = ["Overview","Attendance","Performance","Payroll","Work History","Statutory & Bank","Timeline"]
+                if can_edit_hr(_current_role):
+                    profile_sections.insert(-1, "Warning Letters")
                 _v141_profile_section=st.radio(
                     "Employee View",
-                    ["Overview","Attendance","Performance","Payroll","Work History","Statutory & Bank","Timeline"],
+                    profile_sections,
                     horizontal=True,
                     key=f"v141_employee_profile_{emp_id}"
                 )
@@ -13813,6 +13841,16 @@ elif page == "Employees":
                             column_config={"Amount":st.column_config.NumberColumn("Amount",format="₹%.2f")}
                         )
                     st.markdown("</div>",unsafe_allow_html=True)
+
+                # ------------------------------------------------
+                # WARNING LETTERS
+                # ------------------------------------------------
+                if _v141_profile_section == "Warning Letters":
+                    from employee_warning_letters import render_warning_letters
+
+                    render_warning_letters(
+                        existing, _current_user["username"], _current_role, can_edit_hr, read_df, get_pg_conn,
+                    )
 
                 # ------------------------------------------------
                 # TIMELINE
