@@ -24,6 +24,28 @@ def labour_amount(salary, day, status, ot_hours):
     return daily * factor + (daily / 12 * max(0.0, float(ot_hours)) if status in {"Present", "OD", "Half Day"} else 0.0)
 
 
+def production_cost_rows(output, att):
+    """Use the same shift labour cost rules in both reports."""
+    lookup = {(str(r.employee_id), str(r.work_date)[:10], str(r.shift), str(r.division)): r for r in att.itertuples()}
+    summary = []
+    for r in output.itertuples():
+        total = float(r.contractor_cost)
+        problems = []
+        ids = json.loads(r.employee_ids)
+        for eid in ids:
+            a = lookup.get((eid, str(r.work_date)[:10], r.shift, r.division))
+            if a is None or a.status not in {'Present','OD','Half Day'} or a.review_required or pd.isna(a.monthly_salary) or float(a.monthly_salary) <= 0 or str(a.department).upper() == 'HR REVIEW':
+                problems.append(eid)
+            else:
+                total += labour_amount(a.monthly_salary, pd.Timestamp(r.work_date).date(), a.status, a.ot_hours)
+        summary.append({'Date': r.work_date, 'Division': r.division, 'Shift': r.shift, 'Machine': r.machine,
+            'Manpower': len(ids)+int(r.contractor_headcount), 'Tons': float(r.output_ton),
+            'Labour cost (₹)': None if problems else total,
+            'Cost/ton (₹)': total/float(r.output_ton) if not problems and float(r.output_ton)>0 else None,
+            'Action': 'Check attendance/salary: '+', '.join(problems) if problems else ('Enter output' if float(r.output_ton)<=0 else 'Complete')})
+    return pd.DataFrame(summary)
+
+
 def attrition_summary(employees, start, end):
     """Opening = immediately before period; closing = after last-day departures."""
     opening = closing = leavers = 0
@@ -431,24 +453,7 @@ class SimpleWorkforce:
                 att = self.read("""SELECT a.employee_id,a.work_date,a.shift,a.division,a.status,a.review_required,a.ot_hours,
                     e.monthly_salary,e.department FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
                     WHERE a.work_date BETWEEN ? AND ?""" + self.scope('a.division')[0], (start.isoformat(), end.isoformat()) + params)
-                lookup = {(str(r.employee_id), str(r.work_date)[:10], str(r.shift), str(r.division)): r for r in att.itertuples()}
-                summary = []
-                for r in output.itertuples():
-                    total = float(r.contractor_cost)
-                    problems = []
-                    ids = json.loads(r.employee_ids)
-                    for eid in ids:
-                        a = lookup.get((eid, str(r.work_date)[:10], r.shift, r.division))
-                        if a is None or a.status not in {'Present','OD','Half Day'} or a.review_required or pd.isna(a.monthly_salary) or float(a.monthly_salary) <= 0 or str(a.department).upper() == 'HR REVIEW':
-                            problems.append(eid)
-                        else:
-                            total += labour_amount(a.monthly_salary, pd.Timestamp(r.work_date).date(), a.status, a.ot_hours)
-                    summary.append({'Date': r.work_date, 'Division': r.division, 'Shift': r.shift, 'Machine': r.machine,
-                        'Manpower': len(ids)+int(r.contractor_headcount), 'Tons': float(r.output_ton),
-                        'Labour cost (₹)': None if problems else total,
-                        'Cost/ton (₹)': total/float(r.output_ton) if not problems and float(r.output_ton)>0 else None,
-                        'Action': 'Check attendance/salary: '+', '.join(problems) if problems else ('Enter output' if float(r.output_ton)<=0 else 'Complete')})
-                report = pd.DataFrame(summary)
+                report = production_cost_rows(output, att)
                 totals = []
                 for (division,machine), group in report.groupby(['Division','Machine']):
                     valid = group['Labour cost (₹)'].notna().all()

@@ -1,0 +1,305 @@
+"""Read-only MD reports from the ERP's existing attendance and production data."""
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from io import BytesIO
+import re
+
+import pandas as pd
+import streamlit as st
+
+from simple_workforce import attrition_summary, production_cost_rows
+
+
+DIVISIONS = {
+    "Greater Noida Plant": "Greater Noida Plant",
+    "D-63 Head Office": "Sector 63 Head Office",
+}
+LEAVE_STATUSES = {"Leave", "CL", "SL", "EL", "LWP"}
+QUESTION_EXAMPLES = (
+    "Give me today’s MIS",
+    "Show pending HR reviews at Greater Noida",
+    "Why did cost per ton change yesterday?",
+    "Show attrition this month",
+    "Prepare tomorrow’s review briefing",
+)
+
+
+@dataclass(frozen=True)
+class Request:
+    intent: str
+    day: date
+    divisions: tuple[str, ...]
+
+
+def interpret_question(question, selected_day, today):
+    prompt = question.casefold().strip()
+    if not prompt:
+        raise ValueError("Enter an ERP question.")
+    if re.search(r"\b(?:dhaulana|glass plant)\b", prompt):
+        raise ValueError("MD Assistant currently covers Greater Noida Plant and Sector 63 Head Office.")
+
+    noida = bool(re.search(r"\b(?:greater noida|noida plant)\b", prompt))
+    office = bool(re.search(r"\b(?:head office|(?:sector|sec|d)\s*-?\s*63)\b", prompt))
+    divisions = tuple(DIVISIONS)
+    if noida != office:
+        divisions = (divisions[0 if noida else 1],)
+
+    if re.search(r"\b(?:payroll|employee salary|warning letters?|bank details|delete|approve|send|update)\b", prompt):
+        raise ValueError("This assistant answers reporting questions about attendance, HR review, production, labour cost and attrition.")
+    if re.search(r"\b(?:yesterday|today)\b", prompt) and re.search(r"\b(?:last month|this month)\b", prompt):
+        raise ValueError("Choose a daily or monthly period for the question.")
+    if re.search(r"\b(?:meeting|briefing|brief|review meeting)\b", prompt):
+        intent = "briefing"
+    elif re.search(r"\battrition\b", prompt):
+        intent = "attrition_hr" if re.search(r"\b(?:pending|hr review|hr cases?)\b", prompt) else "attrition"
+    elif re.search(r"\b(?:cost(?:\s*(?:/|per)\s*ton(?:ne)?)?|labour|labor)\b", prompt) and (
+        re.search(r"\b(?:why|change[ds]?|compar\w+|ris[eo]|rose|fell|increas\w+|decreas\w+|vs)\b", prompt)
+    ):
+        intent = "compare_cost"
+    elif re.search(r"\b(?:hr reviews?|hr cases?|pending hr|exceptions?)\b", prompt):
+        intent = "hr"
+    elif re.search(r"\b(?:mis|report|attendance|manpower|production|tonnage|cost|overview|summary)\b", prompt):
+        intent = "mis"
+    else:
+        raise ValueError("Ask for a daily MIS, pending HR reviews, cost-per-ton comparison, monthly attrition or a review briefing.")
+
+    day = selected_day
+    if re.search(r"\byesterday\b", prompt):
+        day = today - timedelta(days=1)
+    elif re.search(r"\btoday\b", prompt):
+        day = today
+    if intent in {"attrition", "attrition_hr"} and "this month" in prompt:
+        day = today
+    if "last month" in prompt:
+        if intent not in {"attrition", "attrition_hr"}:
+            raise ValueError("Last month is supported for attrition. Choose a date for daily reports or cost comparisons.")
+        day = today.replace(day=1) - timedelta(days=1)
+    dates = re.findall(r"\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})\b", prompt)
+    if len(dates) > 1:
+        raise ValueError("Use one report date. Cost comparisons use the previous day.")
+    if dates:
+        date_format = "%Y-%m-%d" if re.match(r"^\d{4}-", dates[0]) else "%d/%m/%Y"
+        value = dates[0] if date_format == "%Y-%m-%d" else dates[0].replace("-", "/")
+        try:
+            day = datetime.strptime(value, date_format).date()
+        except ValueError as exc:
+            raise ValueError("Enter a valid date using DD/MM/YYYY or YYYY-MM-DD.") from exc
+    if day > today or (intent != "briefing" and re.search(r"\btomorrow\b", prompt)):
+        raise ValueError("Select today or a past date for ERP figures.")
+    return Request(intent, day, divisions)
+
+
+def attendance_rows(read, day, divisions):
+    placeholders = ",".join("?" for _ in divisions)
+    return read(
+        """SELECT a.employee_id,a.work_date,a.shift,a.division,a.status,a.review_required,a.ot_hours,
+                  e.monthly_salary,e.department
+           FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+           WHERE a.work_date=? AND a.division IN (""" + placeholders + ")",
+        (day.isoformat(), *divisions),
+    )
+
+
+def attendance_summary(attendance, divisions):
+    summary = []
+    for division in divisions:
+        rows = attendance[attendance.division == division]
+        pending = rows.status.eq("HR Review") | rows.review_required.eq(True)
+        verified = rows.loc[~pending]
+        summary.append({
+            "Location": DIVISIONS[division],
+            "Attendance rows": len(rows),
+            "Present / OD": int(verified.status.isin({"Present", "OD"}).sum()),
+            "Half day": int(verified.status.eq("Half Day").sum()),
+            "Absent": int(verified.status.eq("Absent").sum()),
+            "Leave": int(verified.status.isin(LEAVE_STATUSES).sum()),
+            "Weekly off / Holiday": int(verified.status.isin({"WO", "Holiday"}).sum()),
+            "OT hours": round(float(pd.to_numeric(verified.ot_hours, errors="coerce").sum()), 2),
+            "Pending HR review": int(pending.sum()),
+            "Attendance coverage": "Recorded" if len(rows) else "No attendance recorded",
+        })
+    return pd.DataFrame(summary)
+
+
+def daily_mis(read, day, divisions):
+    attendance = attendance_rows(read, day, divisions)
+    placeholders = ",".join("?" for _ in divisions)
+    output = read(
+        """SELECT work_date,division,shift,machine,output_ton,employee_ids,contractor_headcount,contractor_cost
+           FROM workforce_daily_output WHERE work_date=? AND division IN (""" + placeholders + ")"
+        + " ORDER BY division,machine,shift",
+        (day, *divisions),
+    )
+    production = pd.DataFrame()
+    if not output.empty:
+        production = production_cost_rows(output, attendance)
+        production["Contractor cost (₹)"] = output.contractor_cost.astype(float).to_numpy()
+        production["Division"] = production["Division"].map(DIVISIONS)
+        production = production.drop(columns=["Date"]).rename(columns={"Division": "Location"})
+        # Employee codes in the operational report's diagnostic messages are not needed in an MD export.
+        production["Action"] = production["Action"].replace(
+            r"^Check attendance/salary:.*$", "Check attendance and salary in Cost & Attrition", regex=True,
+        )
+    return attendance_summary(attendance, divisions), production
+
+
+def compare_cost(read, day, divisions):
+    previous = day - timedelta(days=1)
+    _, current = daily_mis(read, day, divisions)
+    _, earlier = daily_mis(read, previous, divisions)
+    if current.empty or earlier.empty:
+        return pd.DataFrame()
+    keys = ["Location", "Machine", "Shift"]
+    joined = current.merge(earlier, how="inner", on=keys, suffixes=(" current", " previous"))
+    joined = joined.dropna(subset=["Cost/ton (₹) current", "Cost/ton (₹) previous"])
+    result = joined[keys].copy()
+    for name in ("Cost/ton (₹)", "Tons", "Labour cost (₹)", "Contractor cost (₹)"):
+        result[f"Current {name}"] = joined[f"{name} current"]
+        result[f"Previous {name}"] = joined[f"{name} previous"]
+        result[f"Change in {name}"] = joined[f"{name} current"] - joined[f"{name} previous"]
+    return result.round(2)
+
+
+def attrition_rows(read, day, divisions):
+    start = day.replace(day=1)
+    result = []
+    for division in divisions:
+        employees = read(
+            """SELECT employee_id,department,joining_date,last_working_date,status
+               FROM employees WHERE division=?""", (division,),
+        )
+        metrics = attrition_summary(employees.to_dict("records"), start, day)
+        issues = len(metrics["issues"])
+        result.append({
+            "Location": DIVISIONS[division],
+            "Opening headcount": None if issues else metrics["opening"],
+            "Closing headcount": None if issues else metrics["closing"],
+            "Employees who left": None if issues else metrics["leavers"],
+            "Attrition (%)": None if metrics["rate"] is None else round(metrics["rate"], 2),
+            "Employees with missing or invalid employment dates": issues,
+        })
+    return pd.DataFrame(result)
+
+
+def monthly_hr_rows(read, day, divisions):
+    placeholders = ",".join("?" for _ in divisions)
+    counts = read(
+        """SELECT division,COUNT(*) AS pending FROM attendance
+           WHERE work_date BETWEEN ? AND ? AND (status='HR Review' OR review_required=TRUE)
+           AND division IN (""" + placeholders + ") GROUP BY division",
+        (day.replace(day=1).isoformat(), day.isoformat(), *divisions),
+    )
+    by_division = dict(zip(counts.division, counts.pending))
+    return pd.DataFrame([{"Location": DIVISIONS[d], "Pending HR review": int(by_division.get(d, 0))} for d in divisions])
+
+
+def mis_excel(day, attendance, production):
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        notes = pd.DataFrame([
+            ("Daily MIS", day.strftime("%d %b %Y")),
+            ("Attendance", "Attendance rows are counted by shift. Blank uploads are shown as no attendance recorded."),
+            ("Production", "Source: Daily Production & Manpower entries. Tonnage is kept separate by machine and shift."),
+            ("Labour cost", "Source: Cost & Attrition. Blank costs indicate incomplete data or zero output."),
+        ], columns=["Item", "Details"])
+        notes.to_excel(writer, sheet_name="Report information", index=False)
+        attendance.to_excel(writer, sheet_name="Attendance", index=False)
+        if production.empty:
+            production = pd.DataFrame({"Production": ["No daily production entries recorded for this scope."]})
+        production.round(2).to_excel(writer, sheet_name="Production and cost", index=False)
+        for sheet in writer.sheets.values():
+            sheet.freeze_panes = "B2"
+            for col in sheet.columns:
+                for cell in col:
+                    if cell.data_type == "f":
+                        cell.data_type = "s"
+                max_width = 100 if sheet.title == "Report information" else 52
+                sheet.column_dimensions[col[0].column_letter].width = min(
+                    max_width, max(13, max(len(str(cell.value or "")) for cell in col) + 2),
+                )
+    return buffer.getvalue()
+
+
+def render_response(read, request):
+    st.caption(f"ERP figures through {request.day:%d %b %Y} · " + ", ".join(DIVISIONS[d] for d in request.divisions))
+    if request.intent in {"attrition", "attrition_hr"}:
+        st.markdown("**Monthly attrition**")
+        st.caption(f"{request.day.replace(day=1):%d %b} to {request.day:%d %b %Y} · Source: Cost & Attrition and employee joining/leaving dates")
+        st.dataframe(attrition_rows(read, request.day, request.divisions), hide_index=True, width="stretch")
+        if request.intent == "attrition_hr":
+            st.markdown("**Pending HR review this month**")
+            st.dataframe(monthly_hr_rows(read, request.day, request.divisions), hide_index=True, width="stretch")
+        return
+    if request.intent == "compare_cost":
+        st.markdown("**Labour cost per ton comparison**")
+        previous = request.day - timedelta(days=1)
+        st.caption(f"{request.day:%d %b %Y} versus {previous:%d %b %Y} · Source: Cost & Attrition")
+        comparison = compare_cost(read, request.day, request.divisions)
+        if comparison.empty:
+            st.info("No matching machine and shift has a complete cost per ton on both dates.")
+        else:
+            st.caption("Compare output tons, total labour cost and contractor cost for each matching machine and shift.")
+            biggest = comparison["Change in Cost/ton (₹)"].abs().idxmax()
+            row = comparison.loc[biggest]
+            st.text(
+                f"{row['Location']} · {row['Machine']} · Shift {row['Shift']}: "
+                f"cost per ton ₹{row['Previous Cost/ton (₹)']:,.2f} → ₹{row['Current Cost/ton (₹)']:,.2f}. "
+                f"Output {row['Previous Tons']:,.2f} → {row['Current Tons']:,.2f} t. "
+                f"Labour cost ₹{row['Previous Labour cost (₹)']:,.2f} → ₹{row['Current Labour cost (₹)']:,.2f}."
+            )
+            st.dataframe(comparison, hide_index=True, width="stretch")
+        return
+    if request.intent == "hr":
+        attendance = attendance_summary(attendance_rows(read, request.day, request.divisions), request.divisions)
+        st.markdown("**Pending HR review**")
+        st.caption("Source: Attendance and HR Review")
+        st.dataframe(attendance[["Location", "Pending HR review", "Attendance coverage"]],
+                     hide_index=True, width="stretch")
+        return
+    attendance, production = daily_mis(read, request.day, request.divisions)
+    if request.intent == "briefing":
+        st.markdown("**MD review briefing**")
+        for row in attendance.to_dict("records"):
+            location = row["Location"]
+            st.text(f"{location}: {row['Pending HR review']} pending HR review rows. Attendance: {row['Attendance coverage'].lower()}.")
+        if not production.empty:
+            count = int(production.Action.ne("Complete").sum())
+            st.text(f"{count} machine-shift entries need an output, attendance or salary check.")
+    else:
+        st.markdown("**Daily MIS**")
+    st.caption("Attendance counts are shift rows. Sources: Attendance, Daily Production & Manpower, Cost & Attrition.")
+    st.dataframe(attendance, hide_index=True, width="stretch", key="md_assistant_attendance")
+    if production.empty:
+        st.info("No daily production entries for this date and scope.")
+    else:
+        locations_without_output = [DIVISIONS[d] for d in request.divisions if DIVISIONS[d] not in production["Location"].values]
+        if locations_without_output:
+            st.info("No daily production entries for " + ", ".join(locations_without_output) + ".")
+        st.caption("Tonnage is shown by machine and shift. The same material can pass through multiple stages.")
+        config = {name: st.column_config.NumberColumn(format="%.2f")
+                  for name in ("Tons", "Labour cost (₹)", "Contractor cost (₹)", "Cost/ton (₹)")}
+        st.dataframe(production, hide_index=True, width="stretch", column_config=config, key="md_assistant_production")
+    st.download_button("Download MIS Excel", mis_excel(request.day, attendance, production),
+                       file_name=f"Workforce_MIS_{request.day.isoformat()}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", on_click="ignore")
+
+
+def render_md_assistant(read, today, username):
+    st.caption("Greater Noida Plant and Sector 63 Head Office")
+    selected_day = st.date_input("MIS report date", value=today, max_value=today, key="md_assistant_date")
+    state_key = f"md_assistant_request_{username}"
+    if st.button("Generate Daily MIS", type="primary"):
+        st.session_state[state_key] = Request("mis", selected_day, tuple(DIVISIONS))
+    with st.form("md_assistant_question_form"):
+        question = st.text_input("Ask MD Assistant", max_chars=250, placeholder="Why did cost per ton change yesterday?")
+        submitted = st.form_submit_button("Ask")
+    st.caption("Try " + " · ".join(QUESTION_EXAMPLES))
+    if submitted:
+        try:
+            st.session_state[state_key] = interpret_question(question, selected_day, today)
+        except ValueError as exc:
+            st.session_state.pop(state_key, None)
+            st.info(str(exc))
+    request = st.session_state.get(state_key)
+    if request:
+        render_response(read, request)
