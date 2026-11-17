@@ -33,7 +33,7 @@ def render_workspace_navigation(routes, role):
         group = modes[st.session_state["workspace_menu"]]
         st.session_state["simple_navigation"] = next(iter(group))
 
-    st.sidebar.radio(
+    st.sidebar.selectbox(
         "Workspace", list(modes), key="workspace_menu", on_change=change_mode,
         help="MD view contains management reports. HR entries contains employee and attendance work.",
     )

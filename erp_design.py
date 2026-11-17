@@ -5,19 +5,102 @@ WORKSPACE_STYLE = """
 body:has(.erp-workspace-theme) [data-testid="stAppViewContainer"] {
   background: radial-gradient(ellipse at 85% 0%, #18304755, transparent 42%), #09121e !important;
 }
-body:has(.erp-workspace-theme) .block-container {
+body:has(.erp-workspace-theme) [data-testid="stMain"] .block-container {
+  box-sizing: border-box !important;
+  width: 100% !important;
   max-width: 1600px !important;
-  padding: 1.4rem 2rem 2.8rem !important;
+  min-width: 0 !important;
+  margin-inline: auto !important;
+  padding: 4.75rem clamp(1rem, 2vw, 2rem) 3.5rem !important;
+}
+body:has(.erp-workspace-theme) header[data-testid="stHeader"] {
+  height: 3.5rem !important;
+  min-height: 3.5rem !important;
+  background: #09121ef5 !important;
+  border-bottom: 1px solid #22364c !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stMain"] {
+  min-width: 0 !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stColumn"],
+body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stVerticalBlock"],
+body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stElementContainer"],
+body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stHorizontalBlock"] {
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stElementContainer"] {
+  max-width: 100% !important;
+}
+body:has(.erp-workspace-theme) .v83-live-strip,
+body:has(.erp-workspace-theme) .v10-panel-title {
+  flex-wrap: wrap !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stTabs"] [role="tablist"] {
+  overflow-x: auto !important;
+  max-width: 100% !important;
+}
+body:has(.erp-workspace-theme) .v8-compact-table {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+}
+body:has(.erp-workspace-theme) .stButton button p {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }
 body:has(.erp-workspace-theme) [data-testid="stSidebar"] {
+  width: 252px !important;
+  min-width: 252px !important;
+  max-width: min(252px, 85vw) !important;
   background: linear-gradient(180deg,#0d1c2d,#0b1624) !important;
   border-right: 1px solid #22364c !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stSidebar"] > div {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stSidebarContent"] {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+body:has(.erp-workspace-theme) [data-testid="stSidebarUserContent"] {
+  padding: 1rem .85rem 2rem !important;
+}
+body:has(.erp-workspace-theme) .v10-sidebrand {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0,1fr) !important;
+  gap: 9px !important;
+  align-items: center !important;
+  padding: 11px 9px !important;
+  margin: 0 0 10px !important;
+}
+body:has(.erp-workspace-theme) .v10-sidebrand img {
+  width: 36px !important;
+  height: 46px !important;
+}
+body:has(.erp-workspace-theme) .v10-sidebrand-copy {
+  min-width: 0 !important;
+}
+body:has(.erp-workspace-theme) .v10-sidebrand-copy b,
+body:has(.erp-workspace-theme) .v10-sidebrand-copy strong {
+  font-size: 10px !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+body:has(.erp-workspace-theme) .v10-sidebrand-copy small {
+  font-size: 8px !important;
+  margin-top: 5px !important;
 }
 body:has(.erp-workspace-theme) [data-testid="stSidebar"] [role="radiogroup"] {
   gap: .32rem !important;
 }
 body:has(.erp-workspace-theme) [data-testid="stSidebar"] [role="radiogroup"] label {
-  padding: .62rem .75rem !important;
+  padding: .4rem .55rem !important;
+  min-height: 34px !important;
   border-radius: 9px !important;
   transition: background .15s ease;
 }
@@ -40,6 +123,9 @@ body:has(.erp-workspace-theme) [data-testid="stDataFrame"] {
   overflow: hidden;
 }
 body:has(.erp-workspace-theme) [data-testid="stMetric"] {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   background: linear-gradient(145deg,#16273b,#111f30);
   border: 1px solid #2b3f55;
   border-radius: 12px;
@@ -81,6 +167,8 @@ body:has(.erp-workspace-theme) .v10-clock-card {
   backdrop-filter: blur(16px);
 }
 body:has(.erp-workspace-theme) .v10-kpi {
+  box-sizing: border-box !important;
+  width: 100% !important;
   background: linear-gradient(150deg,#192b40,#102033) !important;
   border: 1px solid #304760 !important;
   border-radius: 12px !important;
@@ -117,9 +205,28 @@ body:has(.erp-workspace-theme) .v10-activity-row {
   padding: .8rem .25rem !important; border-bottom: 1px solid #24394f !important;
 }
 @media(max-width: 900px) {
-  body:has(.erp-workspace-theme) .block-container { padding: 1rem !important; }
+  body:has(.erp-workspace-theme) [data-testid="stMain"] .block-container {
+    padding: 4.5rem 1rem 3rem !important;
+  }
+  body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap !important;
+    gap: .8rem !important;
+  }
+  body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stColumn"] {
+    flex: 1 1 min(100%, 300px) !important;
+    width: auto !important;
+  }
   body:has(.erp-workspace-theme) .v10-hero { min-height: 225px !important; }
   body:has(.erp-workspace-theme) .v10-clock-card { display: none !important; }
+}
+@media(max-width: 600px) {
+  body:has(.erp-workspace-theme) [data-testid="stMain"] [data-testid="stColumn"] {
+    flex-basis: 100% !important;
+    width: 100% !important;
+  }
+  body:has(.erp-workspace-theme) .v10-hero { padding: 18px !important; }
+  body:has(.erp-workspace-theme) .v10-hero-left { max-width: 100% !important; }
+  body:has(.erp-workspace-theme) .v10-hero-pills > span { white-space: normal !important; }
 }
 @media(prefers-reduced-motion: reduce) {
   body:has(.erp-workspace-theme) [data-testid="stSidebar"] label { transition: none !important; }
