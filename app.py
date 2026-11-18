@@ -21092,6 +21092,43 @@ elif page == "Master Centre":
                 "Reliable_Packaging_Employee_Master_Template.csv", "v64_emp_template"
             )
             all_emp=read_df("SELECT * FROM employees ORDER BY division,employee_name")
+            export_columns = {
+                "employee_id": "Employee ID",
+                "employee_name": "Employee Name",
+                "division": "Division",
+                "department": "Department",
+                "designation": "Designation",
+                "shift": "Shift",
+                "status": "Employment Status",
+                "joining_date": "Joining Date",
+                "last_working_date": "Last Working Date",
+            }
+            export_employees = all_emp
+            if global_division != ALL_DIVISIONS and not all_emp.empty:
+                export_employees = all_emp.loc[all_emp["division"].eq(global_division)]
+            if not export_employees.empty:
+                master_list = export_employees.reindex(columns=export_columns).rename(columns=export_columns)
+                st.markdown("#### Saved Employee Master")
+                st.caption(f"{len(master_list):,} employees · {global_division} · Includes active and inactive records")
+                st.dataframe(master_list, hide_index=True, use_container_width=True, height=380)
+                master_csv = master_list.copy()
+                # Prevent spreadsheet apps from treating master text as formulas.
+                def safe_master_cell(value):
+                    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+                        return "'" + value
+                    return value
+
+                for column in master_csv.columns:
+                    master_csv[column] = master_csv[column].map(safe_master_cell)
+                st.download_button(
+                    "Download Saved Employee Master",
+                    data=master_csv.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="Reliable_Packaging_Saved_Employee_Master.csv",
+                    mime="text/csv",
+                    key="saved_employee_master_export",
+                )
+            else:
+                st.info(f"No saved employee records for {global_division}.")
             choices=["➕ New Employee"]
             label_map={}
             if not all_emp.empty:
