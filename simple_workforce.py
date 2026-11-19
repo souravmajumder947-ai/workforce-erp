@@ -210,7 +210,7 @@ class SimpleWorkforce:
         master_clause, master_params = self.scope()
         pending = self.read("SELECT employee_id,employee_name,division,designation FROM employees WHERE UPPER(TRIM(department))='HR REVIEW'" + master_clause, master_params)
         if not pending.empty and self.c["can_edit_hr"](self.role):
-            with st.expander(f"Confirm new employees ({len(pending)})", expanded=True):
+            with st.expander(f"Confirm new employees ({len(pending)})", expanded=False):
                 st.caption("Confirm identity and employment details once. Then resolve their attendance below.")
                 labels = dict(zip(pending.employee_id, pending.employee_name))
                 eid = st.selectbox("New employee", list(labels), format_func=lambda x: f"{labels[x]} ({x})")
@@ -265,8 +265,12 @@ class SimpleWorkforce:
         if not self.c["can_edit_hr"](self.role):
             st.dataframe(rows, hide_index=True)
             return
+        issue_filter, employee_filter = st.columns(2)
+        issue = issue_filter.selectbox("Review reason", ["All reasons"] + sorted(rows.issue.unique()))
+        if issue != "All reasons":
+            rows = rows[rows.issue == issue]
         choices = rows.employee_id.drop_duplicates().tolist()
-        employee = st.selectbox("Employee", ["All employees"] + choices)
+        employee = employee_filter.selectbox("Employee", ["All employees"] + choices)
         if employee != "All employees":
             rows = rows[rows.employee_id == employee].copy()
         rows = rows.copy()
@@ -276,7 +280,14 @@ class SimpleWorkforce:
         rows["Final hours"] = pd.to_numeric(rows.working_hours, errors="coerce").fillna(0.0)
         editable = {"Resolve", "Final status", "HR reason", "Final hours"}
         with st.form("simple_hr_resolution"):
+            bulk_status = st.selectbox("Status for selected rows",
+                                       ["Use each row’s status"] + sorted(PAID | {"Absent", "LWP"}))
+            bulk_reason = st.text_input("Reason for selected rows", placeholder="Leave blank to use individual reasons")
+            select_all = st.checkbox(f"Apply to all {len(rows):,} filtered rows")
+            confirmed = st.checkbox("HR has verified the rows being saved")
             edited = st.data_editor(rows, hide_index=True, use_container_width=True,
+                column_order=["Resolve", "work_date", "employee_id", "employee_name", "issue",
+                              "raw_status", "time_in", "time_out", "Final status", "Final hours", "HR reason"],
                 disabled=[c for c in rows.columns if c not in editable],
                 column_config={"id": None, "department": None, "joining_date": None, "last_working_date": None,
                     "updated_at": None, "employment_status": None, "working_hours": None, "status": None, "remark": None,
@@ -288,11 +299,18 @@ class SimpleWorkforce:
                     "raw_status": st.column_config.TextColumn("Sheet status"),
                     "issue": st.column_config.TextColumn("What HR needs to check"),
                     "Final status": st.column_config.SelectboxColumn(options=sorted(PAID | {"Absent", "LWP"})),
-                    "Final hours": st.column_config.NumberColumn(min_value=0.0, max_value=24.0, step=0.25)}, key=f"simple_hr_editor_{self.division}_{start}_{employee}")
+                    "Final hours": st.column_config.NumberColumn(min_value=0.0, max_value=24.0, step=0.25)}, key=f"simple_hr_editor_{self.division}_{start}_{issue}_{employee}")
             submitted = st.form_submit_button("Save selected HR decisions", type="primary")
         if not submitted:
             return
-        selected = edited[edited.Resolve.fillna(False)].copy()
+        if not confirmed:
+            st.error("Confirm that HR has verified the rows being saved.")
+            return
+        selected = edited.copy() if select_all else edited[edited.Resolve.fillna(False)].copy()
+        if bulk_status != "Use each row’s status":
+            selected["Final status"] = bulk_status
+        if bulk_reason.strip():
+            selected["HR reason"] = bulk_reason.strip()
         if selected.empty:
             st.error("Tick Resolve for the rows you have checked.")
             return
