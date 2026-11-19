@@ -11227,6 +11227,12 @@ if st.session_state.get("_v194_last_nav_signature") != _v194_nav_signature:
     st.session_state["_v194_last_nav_signature"]=_v194_nav_signature
 
 # Sidebar intentionally kept compact: navigation and live context only.
+_sidebar_role_label = (
+    "Creator & Owner"
+    if _current_role == "Owner" and _current_user["username"].strip().casefold() == "sourav"
+    else _current_role
+)
+
 
 st.sidebar.markdown(
     f"""
@@ -11235,7 +11241,7 @@ st.sidebar.markdown(
         <div class="v8-user-avatar">👤</div>
         <div>
           <div class="v8-user-name">{html.escape(_current_user['full_name'])}</div>
-          <div class="v8-user-role">{html.escape(_current_role)} · @{html.escape(_current_user['username'])}</div>
+          <div class="v8-user-role">{html.escape(_sidebar_role_label)} · @{html.escape(_current_user['username'])}</div>
         </div>
       </div>
     </div>
