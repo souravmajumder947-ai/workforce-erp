@@ -276,23 +276,24 @@ class SimpleWorkforce:
             rows = rows[rows.employee_id == employee].copy()
         rows = rows.copy()
         rows.insert(0, "Resolve", False)
+        rows["Display date"] = pd.to_datetime(rows.work_date, errors="coerce").dt.strftime("%d %b %Y")
         rows["Final status"] = ""
         rows["HR reason"] = ""
         rows["Final hours"] = pd.to_numeric(rows.working_hours, errors="coerce").fillna(0.0)
         editable = {"Resolve", "Final status", "HR reason", "Final hours"}
         with st.form("simple_hr_resolution"):
             bulk_status = st.selectbox("Status for selected rows",
-                                       ["Use each row’s status"] + sorted(PAID | {"Absent", "LWP"}))
+                                       ["Use status from sheet", "Use manually entered final status"] + sorted(PAID | {"Absent", "LWP"}))
             bulk_reason = st.text_input("Reason for selected rows", placeholder="Leave blank to use individual reasons")
             select_all = st.checkbox(f"Apply to all {len(rows):,} filtered rows")
             confirmed = st.checkbox("HR has verified the rows being saved")
             edited = st.data_editor(rows, hide_index=True, use_container_width=True,
-                column_order=["Resolve", "work_date", "employee_id", "employee_name", "issue",
+                column_order=["Resolve", "Display date", "employee_id", "employee_name", "issue",
                               "raw_status", "time_in", "time_out", "Final status", "Final hours", "HR reason"],
                 disabled=[c for c in rows.columns if c not in editable],
                 column_config={"id": None, "department": None, "joining_date": None, "last_working_date": None,
                     "updated_at": None, "employment_status": None, "working_hours": None, "status": None, "remark": None,
-                    "work_date": st.column_config.TextColumn("Date"),
+                    "Display date": st.column_config.TextColumn("Date"),
                     "employee_id": st.column_config.TextColumn("Employee ID"),
                     "employee_name": st.column_config.TextColumn("Employee"),
                     "time_in": st.column_config.TextColumn("In"),
@@ -308,7 +309,17 @@ class SimpleWorkforce:
             st.error("Confirm that HR has verified the rows being saved.")
             return
         selected = edited.copy() if select_all else edited[edited.Resolve.fillna(False)].copy()
-        if bulk_status != "Use each row’s status":
+        if bulk_status == "Use status from sheet":
+            valid_codes = {"PP", "P", "PRESENT", "OD", "ONDUTY", "ON-DUTY", "AA", "A", "ABSENT",
+                           "WO", "W/O", "OFF", "H", "PH", "HOLIDAY", "PUBLICHOLIDAY", "HD", "HALFDAY",
+                           "CL", "SL", "EL", "LWP", "LEAVE"}
+            mapper = self.c["_map_attendance_status"]
+            selected["Final status"] = [
+                mapper(row.raw_status, row["Final hours"], row.time_in, row.time_out)
+                if str(row.raw_status).strip().upper().replace(" ", "") in valid_codes else "HR Review"
+                for _, row in selected.iterrows()
+            ]
+        elif bulk_status != "Use manually entered final status":
             selected["Final status"] = bulk_status
         if bulk_reason.strip():
             selected["HR reason"] = bulk_reason.strip()
@@ -316,7 +327,10 @@ class SimpleWorkforce:
             st.error("Tick Resolve for the rows you have checked.")
             return
         if not selected["Final status"].isin(PAID | {"Absent", "LWP"}).all():
-            st.error("Choose a final status for every selected row.")
+            if bulk_status == "Use status from sheet":
+                st.error("Some selected rows have missing punches or unsupported sheet statuses. Exclude them from this batch and review them manually.")
+            else:
+                st.error("Choose a final status for every selected row.")
             return
         if selected['HR reason'].fillna('').str.strip().eq('').any():
             st.error("Add an HR reason for each selected row.")
