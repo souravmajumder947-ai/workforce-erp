@@ -374,6 +374,16 @@ class SimpleWorkforce:
             min_value=start, max_value=end, key=f"simple_production_date_{start:%Y%m}",
         )
         shift = st.selectbox("Shift", ["A", "B", "General"])
+        shift_entries = self.read("""SELECT machine,output_ton FROM workforce_daily_output
+            WHERE division=? AND work_date=? AND shift=?""", (self.division, day.isoformat(), shift))
+        checklist = machines.merge(shift_entries, on="machine", how="left", indicator=True)
+        checklist["Entry status"] = checklist["_merge"].map({"both": "Saved", "left_only": "Not entered"})
+        count = int(checklist["_merge"].eq("both").sum())
+        with st.expander(f"Shift entries: {count} of {len(checklist)} active machines saved", expanded=True):
+            st.caption("Check machines scheduled for this shift. Idle machines can be left blank.")
+            st.dataframe(checklist[["machine", "Entry status", "output_ton"]].rename(
+                columns={"machine": "Machine", "output_ton": "Saved tons"}),
+                hide_index=True, width="stretch")
         machine = st.selectbox("Machine", machines.machine.tolist())
         employees = self.read("""SELECT a.employee_id,e.employee_name,a.status,a.working_hours,a.ot_hours
             FROM attendance a JOIN employees e ON e.employee_id=a.employee_id
