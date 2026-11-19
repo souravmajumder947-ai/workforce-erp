@@ -9913,15 +9913,19 @@ V5_NAV_ICONS = {
     "Activity Monitor":"◉",
 }
 
-def v5_module_allowed(module):
+def v5_module_allowed_for(module, role, backend_allowed):
     if module in {"Home", "AI Tools"}:
         return True
     if module in {"Master Centre", "User Management", "Activity Monitor"}:
-        return _current_role in FULL_CONTROL_ROLES
+        return role in FULL_CONTROL_ROLES
     required = V5_MODULE_BACKEND.get(module, set())
-    if _current_role in FULL_CONTROL_ROLES:
+    if role in FULL_CONTROL_ROLES:
         return True
-    return bool(required & _backend_allowed)
+    return bool(required & backend_allowed)
+
+def v5_module_allowed(module):
+    return v5_module_allowed_for(module, _current_role, _backend_allowed)
+
 
 def v5_money(value):
     try:
@@ -11065,23 +11069,29 @@ available_modules = [m for m in [
     "Reports","Master Centre","User Management"
 ] if v5_module_allowed(m)]
 _hr_workspace_allowed = can_edit_hr(_current_role)
-_simple_routes = {"Home": "Home"}
-if _hr_workspace_allowed:
-    _simple_routes["HR workspace"] = "HR Workspace"
-    if "simple_navigation" not in st.session_state and _current_role == "HR":
-        st.session_state["simple_navigation"] = "HR workspace"
+def sidebar_routes_for(role, allowed):
+    _simple_routes = {"Home": "Home"}
+    if can_edit_hr(role):
+        _simple_routes["HR workspace"] = "HR Workspace"
 
-if v5_module_allowed("Employees"):
-    _simple_routes["Employee 360"] = "Employees"
-    if _hr_workspace_allowed:
-        _simple_routes["Employee 360 and letters"] = "Employees"
-if v5_module_allowed("Attendance"):
-    _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
-if v5_module_allowed("Operations"):
-    _simple_routes["Production"] = "Simple Production"
-if v5_module_allowed("Reports"):
-    _simple_routes["Cost & Attrition"] = "Simple Reports"
-_simple_routes["Settings"] = "Simple Settings"
+
+    if allowed("Employees"):
+        _simple_routes["Employee 360"] = "Employees"
+        if can_edit_hr(role):
+            _simple_routes["Employee 360 and letters"] = "Employees"
+    if allowed("Attendance"):
+        _simple_routes.update({"Attendance": "Simple Attendance", "HR Review": "Simple HR Review"})
+    if allowed("Operations"):
+        _simple_routes["Production"] = "Simple Production"
+    if allowed("Reports"):
+        _simple_routes["Cost & Attrition"] = "Simple Reports"
+    _simple_routes["Settings"] = "Simple Settings"
+    return _simple_routes
+
+
+_simple_routes = sidebar_routes_for(_current_role, v5_module_allowed)
+if _hr_workspace_allowed and "simple_navigation" not in st.session_state and _current_role == "HR":
+    st.session_state["simple_navigation"] = "HR workspace"
 _hr_task = st.session_state.pop("hr_task_request", None)
 if _hr_task and _hr_workspace_allowed:
     _hr_task_name, _hr_employee_id = _hr_task
@@ -11153,21 +11163,26 @@ if page == "HR Task":
 if _simple_choice in {"Employee 360", "Employee 360 and letters"} and st.session_state.get("_simple_previous_choice") != _simple_choice:
     st.session_state["v55_emp_view"] = "Employee 360"
 st.session_state["_simple_previous_choice"] = _simple_choice
-if page == "Simple Settings":
+def sidebar_settings_for(role, allowed):
     _simple_settings = {}
-    if can_edit_hr(_current_role):
+    if can_edit_hr(role):
         _simple_settings["Joining & Leaving"] = "Simple Lifecycle"
-    if v5_module_allowed("Payroll"):
+    if allowed("Payroll"):
         _simple_settings["Payroll"] = "Payroll"
-    if v5_module_allowed("Contractors"):
+    if allowed("Contractors"):
         _simple_settings["Contractor Work"] = "Contractors"
-    if v5_module_allowed("Reports"):
+    if allowed("Reports"):
         _simple_settings["Detailed Reports"] = "Reports"
-    if _current_role in FULL_CONTROL_ROLES:
+    if role in FULL_CONTROL_ROLES:
         for _master_name in ["Employee Master","Salary Master","Machine & Shift Master","Department Master",
                              "Contractor Master","Contractor Rate Master","Payroll & Business Rules","Fresh Live Start"]:
             _simple_settings[_master_name] = "Master Centre"
         _simple_settings["Users & Access"] = "User Management"
+    return _simple_settings
+
+
+if page == "Simple Settings":
+    _simple_settings = sidebar_settings_for(_current_role, v5_module_allowed)
     if _simple_settings:
         if st.session_state.get("simple_settings_choice") not in _simple_settings:
             st.session_state["simple_settings_choice"] = next(iter(_simple_settings))
@@ -22369,6 +22384,29 @@ elif page == "User Management":
             current_backend = set(
                 get_effective_permissions(uid, str(u["role"]))
             )
+            with st.expander("Preview as user"):
+                from workspace_navigation import mode_routes, PAGE_NAMES, WORKSPACE_NAMES
+
+                preview_role = str(u["role"])
+                st.text(f"@{selected_user} · {preview_role}")
+                if not bool(u["is_active"]):
+                    st.info("This account is inactive and cannot sign in.")
+                else:
+                    def preview_allowed(module):
+                        return v5_module_allowed_for(module, preview_role, current_backend)
+
+                    st.caption("Uses saved access. Task shortcuts can appear after opening a task from the HR dashboard.")
+                    if preview_role in FULL_CONTROL_ROLES | {"Manager"}:
+                        st.text("Open JARVIS")
+                    for mode, routes in mode_routes(sidebar_routes_for(preview_role, preview_allowed)).items():
+                        labels = [PAGE_NAMES[label] for label in routes]
+                        st.write(f"**{WORKSPACE_NAMES[mode]}**")
+                        st.text(" · ".join(labels))
+                        if mode == "Settings":
+                            settings = sidebar_settings_for(preview_role, preview_allowed)
+                            st.text("Settings options: " + " · ".join(settings) if settings else "No settings options")
+                    st.text("Division · Month · Sign out")
+
             module_defaults = [
                 m for m in V5_ASSIGNABLE_MODULES
                 if V5_MODULE_BACKEND[m] & current_backend
