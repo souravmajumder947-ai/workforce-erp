@@ -205,15 +205,23 @@ def daily_mis(read, day, divisions):
     attendance = attendance_rows(read, day, divisions)
     placeholders = ",".join("?" for _ in divisions)
     output = read(
-        """SELECT work_date,division,shift,machine,output_ton,employee_ids,contractor_headcount,contractor_cost
-           FROM workforce_daily_output WHERE work_date=? AND division IN (""" + placeholders + ")"
-        + " ORDER BY division,machine,shift",
+        """SELECT o.work_date,o.division,o.shift,o.machine,o.output_ton,o.employee_ids,
+                  o.contractor_headcount,o.contractor_cost,COALESCE(t.target_ton,m.target_ton) AS target_ton
+           FROM workforce_daily_output o
+           LEFT JOIN machines m ON m.machine=o.machine
+           LEFT JOIN machine_shift_targets t ON t.machine=o.machine AND t.shift=o.shift
+           WHERE o.work_date=? AND o.division IN (""" + placeholders + ")"
+        + " ORDER BY o.division,o.machine,o.shift",
         (day, *divisions),
     )
     production = pd.DataFrame()
     if not output.empty:
         production = production_cost_rows(output, attendance)
         production["Contractor cost (₹)"] = output.contractor_cost.astype(float).to_numpy()
+        targets = pd.to_numeric(output.target_ton, errors="coerce")
+        production["Target (tons)"] = targets.where(targets.gt(0)).to_numpy()
+        production["Variance (tons)"] = (production["Tons"] - production["Target (tons)"]).round(2)
+        production["Target achieved (%)"] = (100 * production["Tons"] / production["Target (tons)"]).round(1)
         production["Division"] = production["Division"].map(DIVISIONS)
         production = production.drop(columns=["Date"]).rename(columns={"Division": "Location"})
         # Employee codes in the operational report's diagnostic messages are not needed in an MD export.
