@@ -4257,6 +4257,7 @@ def _validate_and_enrich_attendance_records(records):
                 if not _clean_text(rec.get("shift")):
                     rec["shift"] = _clean_text(emp.get("shift")) or "General"
 
+        issue = " | ".join(part for part in (issue, _clean_text(rec.get("source_issue"))) if part)
         rec["source_issue"] = issue
         if issue:
             rec["status"] = "HR Review"
@@ -4625,6 +4626,50 @@ def detect_attendance_workbook_division(uploaded_file):
 
     return None
 
+def classify_standard_punches(work_date, raw_status, time_in_value, time_out_value, day_name):
+    """Treat time-only midnight as a missing-punch placeholder in Standard/BTS exports."""
+    def punch(value):
+        if isinstance(value, datetime) and value.year >= 2000:
+            return value.replace(tzinfo=None), False
+        raw = _clean_text(value)
+        if len(raw) > 10 and raw[4:5] == "-" and raw[7:8] == "-":
+            try:
+                return datetime.fromisoformat(raw).replace(tzinfo=None), False
+            except ValueError:
+                return None, True
+        label = _time_text(value)
+        if label in (None, "00:00"):
+            return None, False
+        try:
+            return datetime.combine(date.fromisoformat(work_date), datetime.strptime(label, "%H:%M").time()), False
+        except ValueError:
+            return None, True
+
+    start, invalid_start = punch(time_in_value)
+    end, invalid_end = punch(time_out_value)
+    raw = _clean_text(raw_status).upper().replace(" ", "")
+    sheet_status = _map_attendance_status(raw, day_name=day_name)
+    if invalid_start or invalid_end or (start is None) != (end is None):
+        return "HR Review", 0.0, "Punch check: missing or invalid IN/OUT time"
+    if start is None:
+        if raw in {"PP", "P", "PRESENT", "PA", "AP", "HD", "HALFDAY", "OD", "ONDUTY", "ON-DUTY"}:
+            return "HR Review", 0.0, "Punch check: work status has no punches"
+        if raw and sheet_status == "HR Review":
+            return "HR Review", 0.0, "Punch check: verify sheet status"
+        return sheet_status, 0.0, ""
+    has_full_end = isinstance(time_out_value, datetime) and time_out_value.year >= 2000 or _clean_text(time_out_value)[4:5] == "-"
+    if end < start and not has_full_end:
+        end += timedelta(days=1)
+    hours = (end - start).total_seconds() / 3600
+    if not 0 < hours <= 24:
+        return "HR Review", 0.0, "Punch check: invalid work duration"
+    if raw in {"", "PP", "P", "PRESENT"}:
+        return "Present", hours, ""
+    if sheet_status in {"OD", "Half Day"}:
+        return sheet_status, hours, ""
+    return "HR Review", hours, "Punch check: sheet status conflicts with recorded punches"
+
+
 def import_standard_attendance_excel(uploaded_file, division, target_date=None, dry_run=False, start_date=None, end_date=None, replace_scope=False):
     """
     Accepts Reliable Packaging standard CSV/XLSX as well as the older Employee Code/PayCode exports.
@@ -4690,9 +4735,14 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
         status = _map_attendance_status(
             raw_status, working_hours, time_in_value, time_out_value, day_name
         )
+        punch_issue = ""
+        if row_div in {"Greater Noida Plant", "D-63 Head Office"}:
+            status, working_hours, punch_issue = classify_standard_punches(
+                work_date, raw_status, time_in_value, time_out_value, day_name
+            )
         # Company-confirmed holiday: 15 Aug 2026 (Independence Day).
         # Preserve a genuine Present record when both punches show the employee worked.
-        if work_date == "2026-08-15" and status != "Present":
+        if work_date == "2026-08-15" and status != "Present" and not punch_issue:
             status = "Holiday"
 
         shift_value = _clean_text(row.get(cmap["shift"])) if "shift" in cmap else ""
@@ -4738,6 +4788,7 @@ def import_standard_attendance_excel(uploaded_file, division, target_date=None, 
             "remark": remark,
             "shift": shift,
             "ot_hours": round(ot_hours, 2),
+            "source_issue": punch_issue,
             "review_required": status == "HR Review",
         })
 
