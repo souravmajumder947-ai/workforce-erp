@@ -335,7 +335,7 @@ class SimpleWorkforce:
                     return False
                 if str(row.department).strip().upper() == "HR REVIEW" or pd.isna(row.employment_status):
                     return False
-                if str(row.issue).startswith("Division mismatch"):
+                if str(row.issue).startswith("Division mismatch") or "Punch check:" in str(row.issue):
                     return False
                 if status == "Absent" and (str(row.time_in or "").strip() not in {"", "00:00", "00:00:00"}
                                             or str(row.time_out or "").strip() not in {"", "00:00", "00:00:00"}):
