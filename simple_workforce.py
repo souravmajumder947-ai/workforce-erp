@@ -1,4 +1,5 @@
 """Daily workforce workflow. Existing authentication and master data stay authoritative."""
+import hashlib
 import json
 from calendar import monthrange
 from datetime import date
@@ -504,20 +505,149 @@ class SimpleWorkforce:
             d.metric('Attrition', 'N/A' if result['rate'] is None else f"{result['rate']:.2f}%")
         st.caption('Attrition = employees with last working date in the month ÷ average opening and closing headcount × 100. Temporary HR Review masters are excluded. This measures all recorded departures, not only voluntary resignations.')
 
+    def bulk_employment_dates(self, employees):
+        fields = {"employee_id": "Employee ID", "employee_name": "Employee Name",
+                  "division": "Division", "joining_date": "Joining Date",
+                  "last_working_date": "Last Working Date", "status": "Employment Status"}
+        joined = employees.joining_date.map(employment_date)
+        left = employees.last_working_date.map(employment_date)
+        inactive = employees.status.astype(str).str.strip().str.upper().isin(INACTIVE)
+        problems = pd.DataFrame({
+            "Missing joining date": joined.isna(),
+            "Inactive employee missing exit date": inactive & left.isna(),
+            "Exit date before joining": left.lt(joined),
+        })
+        needed = employees.loc[problems.any(axis=1), list(fields)].rename(columns=fields)
+        with st.expander(f"Dates to fix ({len(needed):,})", expanded=not needed.empty):
+            if needed.empty:
+                st.success("No missing or conflicting employment dates found.")
+            else:
+                needed["Needs correction"] = problems.loc[needed.index].apply(
+                    lambda flags: ", ".join(flags.index[flags]), axis=1
+                )
+                st.dataframe(needed, hide_index=True, width="stretch")
+                export = needed[["Employee ID", "Joining Date", "Last Working Date"]].copy()
+                export["Employee ID"] = export["Employee ID"].map(
+                    lambda value: "'" + str(value) if str(value).lstrip().startswith(("=", "+", "-", "@")) else str(value)
+                )
+                st.download_button("Download dates to fix", export.to_csv(index=False).encode("utf-8-sig"),
+                                   "employment_dates_to_fix.csv", "text/csv")
+
+        st.subheader("Bulk update employment dates")
+        st.caption("Use Employee ID, Joining Date and Last Working Date. Use YYYY-MM-DD for typed dates. Blank cells keep saved dates.")
+        upload = st.file_uploader("Corrected employee dates", type=["csv", "xlsx"], key="bulk_employment_dates")
+        if upload is None:
+            return
+        try:
+            upload.seek(0)
+            incoming = (pd.read_csv(upload, dtype=str, keep_default_na=False)
+                        if upload.name.lower().endswith(".csv")
+                        else pd.read_excel(upload, dtype=str, keep_default_na=False))
+        except (ValueError, OSError, ImportError):
+            st.error("Could not read the file. Save it as a CSV or XLSX workbook and try again.")
+            return
+        incoming.columns = [" ".join(str(c).strip().lower().replace("_", " ").split()) for c in incoming.columns]
+        if incoming.columns.duplicated().any() or not {"employee id", "joining date", "last working date"}.issubset(incoming.columns):
+            st.error("Use unique headers: Employee ID, Joining Date and Last Working Date.")
+            return
+        incoming["employee id"] = incoming["employee id"].str.strip()
+        if incoming["employee id"].eq("").any() or incoming["employee id"].duplicated().any():
+            st.error("Every row must have a unique Employee ID.")
+            return
+        master = {str(row.employee_id): row for row in employees.itertuples(index=False)}
+        changes, errors = [], []
+        for _, entry in incoming.iterrows():
+            eid = entry["employee id"]
+            row = master.get(eid)
+            raw_join, raw_left = entry["joining date"].strip(), entry["last working date"].strip()
+            if row is None:
+                errors.append(f"{eid}: Employee ID is outside the selected division or missing from Employee Master.")
+                continue
+            if not (raw_join or raw_left):
+                continue
+            old_join, old_left = map(employment_date, (row.joining_date, row.last_working_date))
+            new_join = employment_date(raw_join) if raw_join else old_join
+            new_left = employment_date(raw_left) if raw_left else old_left
+            if (pd.isna(new_join) or ((raw_left or pd.notna(row.last_working_date) and str(row.last_working_date).strip()) and pd.isna(new_left))
+                    or new_join.date() > date.today()
+                    or (pd.notna(new_left) and (new_left < new_join or new_left.date() > date.today()))):
+                errors.append(f"{eid}: Check joining and last working dates.")
+                continue
+            join = new_join.date().isoformat()
+            leave = None if pd.isna(new_left) else new_left.date().isoformat()
+            old_join_display = None if pd.isna(old_join) else old_join.date().isoformat()
+            old_left_display = None if pd.isna(old_left) else old_left.date().isoformat()
+            if (join, leave) != (old_join_display, old_left_display):
+                status = "Left" if raw_left and leave and str(row.status).strip().upper() not in INACTIVE else row.status
+                changes.append((row, join, leave, status, old_join_display, old_left_display))
+        if errors:
+            st.error(f"Correct {len(errors):,} rows before saving.")
+            st.dataframe(pd.DataFrame({"Upload issue": errors}), hide_index=True, width="stretch")
+            return
+        if not changes:
+            st.info("No employment dates would change.")
+            return
+        st.dataframe(pd.DataFrame([
+            (row.employee_id, row.employee_name, old_join, join, old_leave, leave, row.status, status)
+            for row, join, leave, status, old_join, old_leave in changes
+        ], columns=["Employee ID", "Employee", "Saved joining", "New joining",
+                    "Saved exit", "New exit", "Saved status", "New status"]), hide_index=True, width="stretch")
+        fingerprint = hashlib.sha256(repr(changes).encode()).hexdigest()
+        confirmed = st.checkbox("HR has verified the dates and status changes above",
+                                key=f"confirm_employment_{fingerprint}")
+        if st.button(f"Save {len(changes):,} employee updates", disabled=not confirmed, type="primary"):
+            def save(cur):
+                for row, join, leave, status, _, _ in sorted(changes, key=lambda item: str(item[0].employee_id)):
+                    cur.execute("""UPDATE employees SET joining_date=%s,last_working_date=%s,status=%s
+                                   WHERE employee_id=%s AND division IS NOT DISTINCT FROM %s
+                                     AND joining_date::text IS NOT DISTINCT FROM %s
+                                     AND last_working_date::text IS NOT DISTINCT FROM %s
+                                     AND status IS NOT DISTINCT FROM %s""",
+                                (join, leave, status, row.employee_id, row.division,
+                                 None if pd.isna(row.joining_date) else str(row.joining_date),
+                                 None if pd.isna(row.last_working_date) else str(row.last_working_date), row.status))
+                    if cur.rowcount != 1:
+                        raise ValueError("Employee records changed. Refresh and review the file again.")
+            try:
+                self.write(save)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            st.session_state.pop("simple_hr_queue", None)
+            st.session_state["employment_dates_saved"] = len(changes)
+            st.rerun()
+
     def lifecycle(self):
-        st.title("Joining & leaving dates")
+        st.title("Employee Joining & Exit")
         st.caption("HR records the actual joining date and last working date. Attendance uploads do not change employment status.")
         if not self.c["can_edit_hr"](self.role):
             st.error('HR or Admin access is required.')
             return
         clause, params = self.scope()
-        employees = self.read('SELECT employee_id,employee_name,joining_date,last_working_date,status FROM employees WHERE 1=1'+clause+' ORDER BY employee_name', params)
+        employees = self.read('SELECT employee_id,employee_name,division,department,joining_date::text AS joining_date,last_working_date::text AS last_working_date,status FROM employees WHERE 1=1'+clause+' ORDER BY employee_name', params)
         if employees.empty:
             st.info('No employees in this division.')
             return
+        saved = st.session_state.pop("employment_dates_saved", None)
+        if saved:
+            st.success(f"Saved employment dates for {saved:,} employees.")
+        start, end = self.period()
+        result = attrition_summary(employees.to_dict("records"), start, end)
+        confirmed_master = employees[~employees.department.astype(str).str.strip().str.upper().eq("HR REVIEW")]
+        joining = confirmed_master.joining_date.map(employment_date)
+        joiners = joining.between(pd.Timestamp(start), pd.Timestamp(end)).sum()
+        st.caption(f"{start:%B %Y} · {self.division}")
+        a, b, c = st.columns(3)
+        a.metric("Recorded joiners", int(joiners))
+        b.metric("Recorded leavers", result["leavers"])
+        c.metric("Attrition", "Pending dates" if result["issues"] else
+                 ("N/A" if result["rate"] is None else f"{result['rate']:.2f}%"))
+        self.bulk_employment_dates(employees)
+        st.subheader("Edit one employee")
         mapping = {r.employee_id: f'{r.employee_name} ({r.employee_id})' for r in employees.itertuples()}
         eid = st.selectbox('Employee', list(mapping), format_func=lambda x: mapping[x])
         row = employees[employees.employee_id==eid].iloc[0]
+        st.caption(f"{row.division} · {row.status}")
         joined = employment_date(row.joining_date)
         left = pd.to_datetime(row.last_working_date, errors='coerce')
         with st.form('simple_dates'):
