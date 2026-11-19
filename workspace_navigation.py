@@ -12,6 +12,31 @@ MODE_LABELS = {
 }
 
 
+WORKSPACE_NAMES = {
+    "MD view": "MD Dashboard & Reports",
+    "HR entries": "HR Data Entry",
+    "Operations": "Production & Manpower",
+    "Settings": "ERP Settings",
+}
+
+PAGE_NAMES = {
+    "Home": "MD Dashboard",
+    "Employee 360": "Employee Profiles",
+    "Cost & Attrition": "Labour Cost & Attrition",
+    "HR workspace": "HR Dashboard & Tasks",
+    "Attendance": "Upload Attendance",
+    "HR Review": "Resolve Attendance Issues",
+    "Employee records": "Employee Master List",
+    "Salary and statutory details": "Salary, PF & ESIC",
+    "Attendance and leave entry": "Enter Attendance or Leave",
+    "Payroll": "Run & Review Payroll",
+    "Joining and leaving": "Joining & Exit Dates",
+    "Employee 360 and letters": "Employee Profiles & Letters",
+    "Production": "Enter Production & Manpower",
+    "Settings": "Masters & ERP Settings",
+}
+
+
 def mode_routes(routes):
     return {
         mode: {label: target for label, target in routes.items() if label in labels}
@@ -34,8 +59,9 @@ def render_workspace_navigation(routes, role):
         st.session_state["simple_navigation"] = next(iter(group))
 
     st.sidebar.selectbox(
-        "Workspace", list(modes), key="workspace_menu", on_change=change_mode,
-        help="MD view contains management reports. HR entries contains employee and attendance work.",
+        "Switch workspace", list(modes), key="workspace_menu", on_change=change_mode,
+        format_func=WORKSPACE_NAMES.__getitem__,
+        help="Choose the kind of work you want to do. The pages below change with the workspace.",
     )
     mode = st.session_state["workspace_menu"]
     st.sidebar.markdown(
@@ -53,12 +79,25 @@ def render_workspace_navigation(routes, role):
     group = modes[mode]
     if st.session_state.get("simple_navigation") not in group:
         st.session_state["simple_navigation"] = next(iter(group))
-    selected = st.sidebar.radio("Navigation", list(group), key="simple_navigation", label_visibility="collapsed")
+    selected = st.sidebar.radio(
+        "Pages in this workspace", list(group), key="simple_navigation",
+        format_func=PAGE_NAMES.__getitem__, label_visibility="collapsed",
+    )
     return selected
 
 
 WORKSPACE_BUTTON_STYLE = """
 <style>
+[data-testid="stSidebar"] .st-key-simple_navigation [role="radiogroup"] > label {
+    width: 100%;
+    min-height: 40px;
+}
+body [data-testid="stSidebar"] .st-key-simple_navigation label p {
+    font-size: 0.875rem !important;
+    line-height: 1.35 !important;
+    white-space: normal !important;
+}
+
 body .st-key-hr_entry_tasks .stButton[data-testid="stButton"] > button {
     background: linear-gradient(115deg,#143d39,#16302f) !important;
     border: 1px solid #448d7e !important;
