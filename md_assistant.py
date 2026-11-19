@@ -402,20 +402,63 @@ def render_jarvis_launcher(read, today, username, *, reports_access, employee_ac
             st.caption("Ask about attendance, production, labour cost or employee records.")
     if is_open:
         with st.container(key="jarvis_workspace"):
-            tabs = []
-            if reports_access:
-                tabs.append("Daily MIS and reports")
-            if employee_access:
-                tabs.append("Employee 360 questions")
-            if not tabs:
+            if not (reports_access or employee_access):
                 st.info("Ask your ERP admin for Reports or Employee Master access to use JARVIS.")
                 return
-            panels = dict(zip(tabs, st.tabs(tabs)))
-            if reports_access:
-                with panels["Daily MIS and reports"]:
-                    render_md_assistant(read, today, username)
-            if employee_access:
-                from jarvis_employee import render_employee_questions
 
-                with panels["Employee 360 questions"]:
-                    render_employee_questions(read, today, username, tuple(DIVISIONS), payroll_access, warning_access)
+            from jarvis_employee import employee_sections, find_employee, render_employee_answer, reporting_period
+
+            selected = st.date_input("Reporting date", value=today, max_value=today, key=f"jarvis_date_{username}")
+            answer_key = f"jarvis_answer_{username}"
+            if reports_access:
+                briefing, mis = st.columns(2)
+                if briefing.button("What needs attention?", key=f"jarvis_briefing_{username}"):
+                    st.session_state[answer_key] = ("report", Request("briefing", selected, tuple(DIVISIONS)))
+                if mis.button("Generate Daily MIS", key=f"jarvis_mis_{username}"):
+                    st.session_state[answer_key] = ("report", Request("mis", selected, tuple(DIVISIONS)))
+            with st.form(f"jarvis_ask_{username}"):
+                question = st.text_input("Ask JARVIS", max_chars=250,
+                                         placeholder="Employee: Sourav Majumder | performance 2026-10")
+                submitted = st.form_submit_button("Ask JARVIS", type="primary")
+            if reports_access:
+                st.caption("Try “Show pending HR reviews at Greater Noida” or “Show attrition this month”.")
+            if employee_access:
+                st.caption("For an employee, use Employee: full name or ID | question. The reporting date selects the month unless you specify one.")
+            if submitted:
+                st.session_state.pop(answer_key, None)
+                try:
+                    if not question.strip():
+                        raise ValueError("Enter a question for JARVIS.")
+                    if question.strip().lower().startswith("employee:") or not reports_access:
+                        if not employee_access:
+                            raise ValueError("This account does not have Employee Master access.")
+                        identity, separator, prompt = question.strip().removeprefix("Employee:").partition("|")
+                        identity = re.sub(r"^employee:\s*", "", identity, flags=re.I).strip()
+                        if not identity or not separator:
+                            raise ValueError("Use Employee: full name or ID | question.")
+                        start, end = reporting_period(prompt, selected, today)
+                        st.session_state[answer_key] = ("employee", (identity, employee_sections(prompt), start, end))
+                    else:
+                        st.session_state[answer_key] = ("report", interpret_question(question, selected, today))
+                except ValueError as exc:
+                    st.info(str(exc))
+            answer = st.session_state.get(answer_key)
+            if not answer:
+                return
+            kind, request = answer
+            if kind == "report" and reports_access:
+                render_response(read, request)
+            elif kind == "employee" and employee_access:
+                identity, sections, start, end = request
+                matches = find_employee(read, identity, tuple(DIVISIONS))
+                if matches.empty:
+                    st.info("No matching employee in Greater Noida Plant or Sector 63 Head Office.")
+                    return
+                exact = matches.employee_id.astype(str).str.strip().str.casefold().eq(identity.casefold())
+                if exact.any():
+                    matches = matches.loc[exact]
+                if len(matches) != 1:
+                    st.info("Multiple employees match. Use the employee ID.")
+                    return
+                render_employee_answer(read, next(matches.itertuples(index=False)), sections, start, end,
+                                       payroll_access, warning_access)
