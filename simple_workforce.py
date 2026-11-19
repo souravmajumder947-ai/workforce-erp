@@ -284,6 +284,7 @@ class SimpleWorkforce:
         with st.form("simple_hr_resolution"):
             bulk_status = st.selectbox("Status for selected rows",
                                        ["Use status from sheet", "Use manually entered final status"] + sorted(PAID | {"Absent", "LWP"}))
+            st.caption("Use status from sheet saves eligible rows and leaves exceptions in HR Review.")
             bulk_reason = st.text_input("Reason for selected rows", placeholder="Leave blank to use individual reasons")
             select_all = st.checkbox(f"Apply to all {len(rows):,} filtered rows")
             confirmed = st.checkbox("HR has verified the rows being saved")
@@ -326,11 +327,37 @@ class SimpleWorkforce:
         if selected.empty:
             st.error("Tick Resolve for the rows you have checked.")
             return
+        held = 0
+        if bulk_status == "Use status from sheet":
+            def eligible(row):
+                status = row["Final status"]
+                if status not in PAID | {"Absent", "LWP"}:
+                    return False
+                if str(row.department).strip().upper() == "HR REVIEW" or pd.isna(row.employment_status):
+                    return False
+                if str(row.issue).startswith("Division mismatch"):
+                    return False
+                if status == "Absent" and (str(row.time_in or "").strip() not in {"", "00:00", "00:00:00"}
+                                            or str(row.time_out or "").strip() not in {"", "00:00", "00:00:00"}):
+                    return False
+                if not 0 <= float(row["Final hours"]) <= 24:
+                    return False
+                joined = employment_date(row.joining_date)
+                left = employment_date(row.last_working_date)
+                work_day = pd.to_datetime(row.work_date, errors="coerce")
+                inactive = str(row.employment_status).strip().upper() in INACTIVE
+                return (pd.notna(work_day) and pd.notna(joined) and work_day.date() >= joined.date()
+                        and (not inactive or pd.notna(left))
+                        and (pd.isna(left) or work_day.date() <= left.date()))
+
+            eligible_rows = selected.apply(eligible, axis=1)
+            held = int((~eligible_rows).sum())
+            selected = selected.loc[eligible_rows].copy()
+            if selected.empty:
+                st.warning(f"All {held:,} selected rows still need manual HR review.")
+                return
         if not selected["Final status"].isin(PAID | {"Absent", "LWP"}).all():
-            if bulk_status == "Use status from sheet":
-                st.error("Some selected rows have missing punches or unsupported sheet statuses. Exclude them from this batch and review them manually.")
-            else:
-                st.error("Choose a final status for every selected row.")
+            st.error("Choose a final status for every selected row.")
             return
         if selected['HR reason'].fillna('').str.strip().eq('').any():
             st.error("Add an HR reason for each selected row.")
@@ -365,7 +392,10 @@ class SimpleWorkforce:
         try:
             self.write(save)
             st.session_state.pop("simple_hr_queue", None)
-            st.session_state["simple_hr_success"] = f"Resolved {len(selected)} attendance rows."
+            message = f"Resolved {len(selected):,} attendance rows."
+            if held:
+                message += f" {held:,} selected rows remain in HR Review."
+            st.session_state["simple_hr_success"] = message
             st.rerun()
         except Exception as exc:
             st.error(f"No selected changes saved: {exc}")
