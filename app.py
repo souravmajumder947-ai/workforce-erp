@@ -10860,6 +10860,106 @@ def _prepare_specific_master_df(df, allowed):
     return df[UNIVERSAL_MASTER_COLUMNS]
 
 
+def render_saved_master_import(actor):
+    columns = ("Employee ID", "Employee Name", "Division", "Department", "Designation",
+               "Shift", "Employment Status", "Joining Date", "Last Working Date")
+    with st.expander("Import corrected Employee Master CSV"):
+        st.caption("Update employees by ID. Date exceptions are held for manual HR review. Only employees listed in the file are updated.")
+        file = st.file_uploader("Corrected Employee Master CSV", type=["csv"], key="saved_master_upload")
+        if file is None:
+            return
+        contents = file.getvalue()
+        try:
+            incoming = pd.read_csv(BytesIO(contents), dtype=str, keep_default_na=False)
+        except (ValueError, UnicodeError):
+            st.error("Could not read the CSV.")
+            return
+        if not set(columns).issubset(incoming.columns) or incoming.empty:
+            st.error("Use the column headers from Download Saved Employee Master.")
+            return
+        incoming = incoming.loc[:, list(columns)].apply(lambda col: col.str.strip())
+        ids = incoming["Employee ID"]
+        if ids.eq("").any() or ids.duplicated().any():
+            st.error("Every employee needs a unique, nonblank Employee ID.")
+            return
+        records, exceptions = [], []
+        today = datetime.now(IST).date()
+
+        def parse_date(value):
+            if not value:
+                return None
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            raise ValueError("Use DD/MM/YYYY or YYYY-MM-DD for employment dates.")
+
+        for row in incoming.itertuples(index=False, name=None):
+            eid, name, division, department, designation, shift, status, joining, exit_date = row
+            try:
+                if division not in {"Greater Noida Plant", "D-63 Head Office"}:
+                    raise ValueError("Division is outside this import scope.")
+                if not name or not department or shift not in {"A", "B", "General"} or status not in {"Active", "Inactive"}:
+                    raise ValueError("Check name, department, shift and employment status.")
+                joined, left = parse_date(joining), parse_date(exit_date)
+                issues = []
+                if not joined:
+                    issues.append("Missing joining date")
+                if status == "Inactive" and not left:
+                    issues.append("Missing last working date")
+                if left and joined and left < joined:
+                    issues.append("Last working date precedes joining date")
+                if (joined and joined > today) or (left and left > today):
+                    issues.append("Future employment date")
+                if left and status == "Active":
+                    issues.append("Active employee has an exit date")
+                if issues:
+                    raise ValueError("; ".join(issues))
+                records.append((eid, name, division, department, designation, shift, status, joined.isoformat(), left))
+            except ValueError as exc:
+                exceptions.append({"Employee ID": eid, "Division": division, "HR review reason": str(exc)})
+        if exceptions:
+            st.warning(f"{len(exceptions)} rows held for manual HR review.")
+            st.dataframe(pd.DataFrame(exceptions), hide_index=True)
+        if not records:
+            return
+        existing = read_df("SELECT employee_id,division,status FROM employees")
+        existing = existing.rename(columns={"employee_id": "Employee ID", "division": "Saved Division", "status": "Saved Status"})
+        preview = pd.DataFrame(records, columns=columns).merge(existing, on="Employee ID", how="left")
+        st.caption(f"{len(records):,} rows ready. Review the saved and proposed divisions and statuses.")
+        st.dataframe(preview, hide_index=True, height=360)
+        fingerprint = hashlib.sha256(contents).hexdigest()
+        confirmed = st.checkbox("I verified the proposed employee changes", key=f"confirm_master_{fingerprint}")
+        if not st.button("Apply corrected master records", disabled=not confirmed, key=f"apply_master_{fingerprint}"):
+            return
+        connection = get_pg_conn()
+        try:
+            with connection.cursor() as cur:
+                cur.executemany("INSERT INTO departments(department) VALUES (%s) ON CONFLICT DO NOTHING",
+                                [(department,) for department in sorted({record[3] for record in records})])
+                cur.executemany("""INSERT INTO employees(employee_id,employee_name,division,department,designation,
+                                      shift,status,joining_date,last_working_date)
+                                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                   ON CONFLICT(employee_id) DO UPDATE SET
+                                   employee_name=excluded.employee_name,division=excluded.division,
+                                   department=excluded.department,designation=excluded.designation,
+                                   shift=excluded.shift,status=excluded.status,joining_date=excluded.joining_date,
+                                   last_working_date=excluded.last_working_date""", sorted(records))
+                cur.execute("""INSERT INTO audit_log(actor,action,module,entity_type,entity_id,details)
+                               VALUES (%s,'IMPORT','Employee Master','Employee','Bulk CSV',%s)""",
+                            (actor, f"Saved {len(records)} rows; held for HR: {', '.join(r['Employee ID'] for r in exceptions)}"))
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            st.error("The import failed. The batch was rolled back.")
+        else:
+            st.session_state.pop("simple_hr_queue", None)
+            st.success(f"Saved {len(records):,} employee records. {len(exceptions)} rows remain for manual HR review.")
+        finally:
+            connection.close()
+
+
 def render_master_template_tools(title, master_types, file_name, key_prefix):
     """Download and upload the simple template directly on the same master page."""
     allowed = set(master_types if isinstance(master_types, (list, tuple, set)) else [master_types])
@@ -21112,6 +21212,7 @@ elif page == "Master Centre":
                 "Employee Master", ["EMPLOYEE"],
                 "Reliable_Packaging_Employee_Master_Template.csv", "v64_emp_template"
             )
+            render_saved_master_import(_current_user["username"])
             all_emp=read_df("SELECT * FROM employees ORDER BY division,employee_name")
             export_columns = {
                 "employee_id": "Employee ID",
