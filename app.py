@@ -12547,11 +12547,10 @@ if page == "Home":
                 (_v115_first.isoformat(), _v115_last.isoformat()),
             )
             if not _corr_month.empty and int(_corr_month.iloc[0]["days"]):
-                _corr_days = int(_corr_month.iloc[0]["days"])
                 _corr_tons = int(_corr_month.iloc[0]["kg"]) / 1000
                 _corrugation_card = (
                     "AUTO Corrugation Output", f"{_corr_tons:,.3f} T",
-                    f"Greater Noida · {global_payroll_month:%b %Y} · {_corr_days} days"
+                    ""
                 )
     _v115_cost_items = [
         ("₹", "Gross Earned" if not _v115_money_is_final else "Final Gross Earned",
