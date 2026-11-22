@@ -12455,6 +12455,25 @@ if page == "Home":
         if _v115_money_is_final
         else (f"{_v115_pay_blockers:,} payroll blocker(s)" if _v115_pay_blockers else "Live Payroll")
     )
+    _corrugation_card = (
+        "Corrugation Output", f"{_v115_corr_output:,.2f} T",
+        f"Target {_v115_corr_target:,.2f} T · {_v115_corr_achievement:.1f}%"
+    )
+    if global_division in {ALL_DIVISIONS, "Greater Noida Plant"}:
+        _corr_table = read_df("SELECT to_regclass('auto_corrugation_daily') IS NOT NULL AS available")
+        if not _corr_table.empty and _corr_table.iloc[0]["available"]:
+            _corr_month = read_df(
+                "SELECT COUNT(*) AS days, COALESCE(SUM(weight_kg),0) AS kg "
+                "FROM auto_corrugation_daily WHERE work_date BETWEEN ? AND ?",
+                (_v115_first.isoformat(), _v115_last.isoformat()),
+            )
+            if not _corr_month.empty and int(_corr_month.iloc[0]["days"]):
+                _corr_days = int(_corr_month.iloc[0]["days"])
+                _corr_tons = int(_corr_month.iloc[0]["kg"]) / 1000
+                _corrugation_card = (
+                    "AUTO Corrugation Output", f"{_corr_tons:,.3f} T",
+                    f"Greater Noida · {global_payroll_month:%b %Y} · {_corr_days} days"
+                )
     _v115_cost_items = [
         ("₹", "Gross Earned" if not _v115_money_is_final else "Final Gross Earned",
          v5_money(_v115_gross) if can_view_salary(_current_role) else "Restricted",
@@ -12468,7 +12487,7 @@ if page == "Home":
         ("▤", "PF + ESIC", v5_money(_v115_pf_esic) if can_view_salary(_current_role) else "Restricted",
          "Final salary deductions" if _v115_money_is_final else "Employee deductions", "purple"),
         ("▣", "Contractor Payable", v5_money(_v115_contractor_cost), "Greater Noida · selected month", "amber"),
-        ("🏭", "Corrugation Output", f"{_v115_corr_output:,.2f} T", f"Target {_v115_corr_target:,.2f} T · {_v115_corr_achievement:.1f}%", "blue"),
+        ("🏭", *_corrugation_card, "blue"),
     ]
     _v115_cost_cols = st.columns(6, gap="small")
     for _v115_i, (_ic, _lb, _val, _sub, _tone) in enumerate(_v115_cost_items):
