@@ -294,11 +294,16 @@ def mis_excel(day, attendance, production):
         attendance.to_excel(writer, sheet_name="Attendance", index=False)
         if production.empty:
             production = pd.DataFrame({"Production": ["No daily production entries recorded for this scope."]})
-        production.round(2).to_excel(writer, sheet_name="Production and cost", index=False)
+        production.to_excel(writer, sheet_name="Production and cost", index=False)
         for sheet in writer.sheets.values():
             sheet.freeze_panes = "B2"
             for col in sheet.columns:
                 for cell in col:
+                    if sheet.title == "Production and cost" and cell.data_type == "n":
+                        if col[0].value in {"Tons", "Target (tons)", "Variance (tons)"}:
+                            cell.number_format = "#,##0"
+                        elif col[0].value in {"Labour cost (₹)", "Contractor cost (₹)", "Cost/ton (₹)"}:
+                            cell.number_format = "#,##0.00"
                     if cell.data_type == "f":
                         cell.data_type = "s"
                 max_width = 100 if sheet.title == "Report information" else 52
@@ -365,7 +370,9 @@ def render_response(read, request):
             st.info("No daily production entries for " + ", ".join(locations_without_output) + ".")
         st.caption("Tonnage is shown by machine and shift. The same material can pass through multiple stages.")
         config = {name: st.column_config.NumberColumn(format="%.2f")
-                  for name in ("Tons", "Labour cost (₹)", "Contractor cost (₹)", "Cost/ton (₹)")}
+                  for name in ("Labour cost (₹)", "Contractor cost (₹)", "Cost/ton (₹)")}
+        config.update({name: st.column_config.NumberColumn(format="%.0f")
+                       for name in ("Tons", "Target (tons)", "Variance (tons)")})
         st.dataframe(production, hide_index=True, width="stretch", column_config=config, key="md_assistant_production")
     st.download_button("Download MIS Excel", mis_excel(request.day, attendance, production),
                        file_name=f"Workforce_MIS_{request.day.isoformat()}.xlsx",
