@@ -10,6 +10,8 @@ import html
 import hashlib
 import hmac
 import secrets
+from threading import Lock
+from time import monotonic
 
 from datetime import date, datetime, timedelta, time
 from zoneinfo import ZoneInfo
@@ -2285,6 +2287,32 @@ def create_app_user(username, full_name, password, role="Viewer", is_active=True
         """,
         (username, full_name, hash_user_password(password), role, bool(is_active)),
     )
+
+
+@st.cache_resource
+def login_attempt_window():
+    return Lock(), {}
+
+
+def reserve_login_attempt(username):
+    """Limit password checks per account across sessions on this server."""
+    lock, attempts = login_attempt_window()
+    now = monotonic()
+    key = str(username).strip().lower()[:256]
+    with lock:
+        if len(attempts) >= 4096:
+            expired = [name for name, (expiry, _) in attempts.items() if expiry <= now]
+            for name in expired:
+                del attempts[name]
+            if len(attempts) >= 4096 and key not in attempts:
+                return False
+        expiry, count = attempts.get(key, (now + 60, 0))
+        if expiry <= now:
+            expiry, count = now + 60, 0
+        if count >= 8:
+            return False
+        attempts[key] = (expiry, count + 1)
+        return True
 
 
 def authenticate_app_user(username, password):
@@ -5264,14 +5292,18 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
         for _, row in adjustments.iterrows():
             adj_map[(str(row["division"]), str(row["employee_id"]))] = row.to_dict()
 
+    attendance_groups = {}
+    if not attendance.empty:
+        groups = attendance.groupby(
+            [attendance["employee_id"].astype(str), attendance["division"].astype(str)], sort=False
+        )
+        attendance_groups = dict(iter(groups))
     rows = []
     for _, emp in employees.iterrows():
         emp_id = str(emp["employee_id"])
         emp_div = str(emp.get("division") or "Greater Noida Plant")
-        if attendance.empty:
-            emp_att = pd.DataFrame()
-        else:
-            emp_att = attendance[(attendance["employee_id"].astype(str) == emp_id) & (attendance["division"].astype(str) == emp_div)].copy()
+        employee_punches = attendance_groups.get((emp_id, emp_div))
+        emp_att = employee_punches.copy() if employee_punches is not None else pd.DataFrame()
         if not emp_att.empty:
             emp_att["work_date_dt"] = pd.to_datetime(emp_att["work_date"], errors="coerce").dt.date
             emp_att = emp_att[emp_att["work_date_dt"] <= as_of].copy() if as_of >= first_day else emp_att.iloc[0:0]
@@ -8126,7 +8158,9 @@ body:has(.v82-login-root) .v116-brand-sub{
                 )
                 login_submit = st.form_submit_button("Sign In  →", type="primary", use_container_width=True)
 
-            if login_submit:
+            if login_submit and not reserve_login_attempt(login_username):
+                st.error("Too many sign-in attempts. Wait a minute before trying again.")
+            elif login_submit:
                 try:
                     user = authenticate_app_user(login_username, login_password)
                     if user is None:
