@@ -5250,7 +5250,7 @@ def _get_payroll_adjustments(payroll_month, division=None):
     return read_df(sql, tuple(params))
 
 
-def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
+def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS, *, monthly_attendance=None):
     first_day, last_day = _month_range(payroll_month)
     calendar_days = (last_day - first_day).days + 1
     today = date.today()
@@ -5286,7 +5286,9 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
     if division != ALL_DIVISIONS:
         att_sql += " AND division = ?"
         att_params.append(division)
-    attendance = read_df(att_sql, tuple(att_params))
+    attendance = monthly_attendance
+    if attendance is None:
+        attendance = read_df(att_sql, tuple(att_params))
     adjustments = _get_payroll_adjustments(payroll_month, division)
     adj_map = {}
     if not adjustments.empty:
@@ -11909,11 +11911,14 @@ _v94_review = 0
 _v94_master_pending = 0
 _v94_payroll_pending = False
 _v94_notification_total = 0
+_home_employees = _home_day_attendance = _home_departments = None
 
 if page in ("Home", "AI Tools"):
     try:
         _v94_emp = v5_active_employees(global_division)
         _v94_day_att = v5_attendance_for_date(global_work_date, global_division)
+        if page == "Home":
+            _home_employees, _home_day_attendance = _v94_emp, _v94_day_att
 
         _v94_active_ids = (
             set(_v94_emp["employee_id"].fillna("").astype(str).str.strip())
@@ -11937,23 +11942,22 @@ if page in ("Home", "AI Tools"):
             - timedelta(days=1)
         )
         _v94_att_sql = """
-            SELECT employee_id, status
+            SELECT COUNT(*) AS review_count
             FROM attendance
-            WHERE work_date BETWEEN ? AND ?
+            WHERE work_date BETWEEN ? AND ? AND TRIM(status)='HR Review'
         """
         _v94_att_params = [_v94_month_start.isoformat(), _v94_month_end.isoformat()]
         if global_division != ALL_DIVISIONS:
             _v94_att_sql += " AND division=?"
             _v94_att_params.append(global_division)
         _v94_month_att = read_df(_v94_att_sql, tuple(_v94_att_params))
-        if not _v94_month_att.empty and "status" in _v94_month_att.columns:
-            _v94_review = int(
-                (_v94_month_att["status"].fillna("").astype(str).str.strip() == "HR Review").sum()
-            )
+        _v94_review = int(_v94_month_att.iloc[0]["review_count"])
 
         # Employee-master readiness = active employees whose department is not
         # mapped to an active department master.
         _v94_dep_master = read_df("SELECT department FROM departments WHERE active='Yes'")
+        if page == "Home":
+            _home_departments = _v94_dep_master
         _v94_dep_set = (
             set(_v94_dep_master["department"].fillna("").astype(str).str.strip())
             if not _v94_dep_master.empty else set()
@@ -12041,10 +12045,27 @@ if page == "Home":
             warning_access=can_edit_hr(_current_role),
         )
 
-    employees = v5_active_employees(global_division)
-    attendance = v5_attendance_for_date(global_work_date, global_division)
+    employees = _home_employees if _home_employees is not None else v5_active_employees(global_division)
+    attendance = _home_day_attendance
+    if attendance is None:
+        attendance = v5_attendance_for_date(global_work_date, global_division)
+
+    # Share the selected month's records between payroll and dashboard totals.
+    _v115_first, _v115_last = _month_range(global_payroll_month)
+    _v115_month_clause, _v115_month_params = v5_division_clause(global_division, "a.")
+    try:
+        _v115_month_att = read_df(
+            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours,a.working_hours
+               FROM attendance a
+               WHERE a.work_date BETWEEN ? AND ? """ + _v115_month_clause + """
+               ORDER BY a.work_date,a.division,a.employee_id""",
+            (_v115_first.isoformat(), _v115_last.isoformat()) + _v115_month_params
+        )
+    except Exception:
+        _v115_month_att = None
+
     payroll = (
-        calculate_live_payroll(global_payroll_month, global_division)
+        calculate_live_payroll(global_payroll_month, global_division, monthly_attendance=_v115_month_att)
         if can_view_salary(_current_role) else pd.DataFrame()
     )
 
@@ -12071,7 +12092,9 @@ if page == "Home":
         )
         salary_available = int(_v10_salary_ok.sum())
         salary_missing = int((~_v10_salary_ok).sum())
-        _v10_dm = read_df("SELECT department FROM departments WHERE active='Yes'")
+        _v10_dm = _home_departments
+        if _v10_dm is None:
+            _v10_dm = read_df("SELECT department FROM departments WHERE active='Yes'")
         _v10_dep_set = set(_v10_dm["department"].astype(str).tolist()) if not _v10_dm.empty else set()
         dept_pending = (
             int((~employees["department"].fillna("").astype(str).isin(_v10_dep_set)).sum())
@@ -12338,17 +12361,7 @@ if page == "Home":
 
     # V11.5 MD ONE PAGE MONTHLY COMMAND CENTRE
     # The Home dashboard must be sufficient for MD review without opening operational tabs.
-    _v115_first, _v115_last = _month_range(global_payroll_month)
-    _v115_month_clause, _v115_month_params = v5_division_clause(global_division, "a.")
-    try:
-        _v115_month_att = read_df(
-            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours
-               FROM attendance a
-               WHERE a.work_date BETWEEN ? AND ? """ + _v115_month_clause + """
-               ORDER BY a.work_date,a.division,a.employee_id""",
-            (_v115_first.isoformat(), _v115_last.isoformat()) + _v115_month_params
-        )
-    except Exception:
+    if _v115_month_att is None:
         _v115_month_att = pd.DataFrame()
 
     _v115_month_status = (
