@@ -12302,8 +12302,12 @@ if page == "Home":
             return None
         return ("Settings", "Detailed Reports", (label, statuses, day, global_division, global_payroll_month))
 
+    st.subheader("Daily workforce")
+    st.caption(f"{global_work_date:%d %b %Y} · {global_division}")
+    if attendance.empty:
+        st.info("No attendance entries found for this working date. The monthly figures below use the selected month.")
     _v10_kpi_items = [
-        ("👥", "Total Employees", f"{active_count:,}", "Active master", "blue"),
+        ("👥", "Current Active Employees", f"{active_count:,}", "Active master", "blue"),
         ("●", "Present", f"{present:,}", f"{(present / active_count * 100):.1f}% of active" if active_count else "No active employees", "green"),
         ("●", "Absent / LWP", f"{absent:,}", "Selected working date", "red"),
         ("◒", "On Leave", f"{on_leave:,}", "CL · SL · EL · Leave", "amber"),
@@ -12487,7 +12491,7 @@ if page == "Home":
     _v115_conversion = float(_v115_ops.get("conversion_pct") or 0)
     _v115_yield = float(_v115_ops.get("yield_pct") or 0)
 
-    st.markdown("### MD Monthly Command Centre")
+    st.markdown("### Monthly workforce and attendance")
     st.caption(
         f"Complete executive view for **{global_payroll_month.strftime('%B %Y')}** · "
         f"{html.escape(str(global_division))}. Daily cards above remain the selected Working Date; "
@@ -12557,6 +12561,7 @@ if page == "Home":
         ("▣", "Contractor Payable", v5_money(_v115_contractor_cost), "Greater Noida · selected month", "amber"),
         ("🏭", *_corrugation_card, "blue"),
     ]
+    st.subheader("Monthly payroll and production")
     _v115_cost_cols = st.columns(6, gap="small")
     for _v115_i, (_ic, _lb, _val, _sub, _tone) in enumerate(_v115_cost_items):
         with _v115_cost_cols[_v115_i]:
@@ -12567,6 +12572,13 @@ if page == "Home":
             else:
                 destination = ("Cost & Attrition",) if "Cost & Attrition" in _simple_routes else None
             md_kpi_card(f"cost_{_v115_i}", _ic, _lb, _val, _sub, _tone, destination)
+
+    if v5_module_allowed("Reports"):
+        from simple_workforce import SimpleWorkforce
+
+        st.subheader("Production, manpower cost and attrition")
+        workforce = SimpleWorkforce(globals())
+        workforce.reports(heading=False)
 
     # Division-wise monthly attendance is visible directly on the MD dashboard.
     _v115_div_rows = []
@@ -12987,7 +12999,7 @@ if page == "Home":
         from simple_workforce import SimpleWorkforce
 
         workforce_panel = st.expander(
-            "Workforce production, cost & attrition", key="home_workforce_panel", on_change="rerun",
+            "Daily machine production details", key="home_workforce_panel", on_change="rerun",
         )
         if workforce_panel.open:
             with workforce_panel:
@@ -12998,7 +13010,6 @@ if page == "Home":
                     max_value=end, key=f"home_workforce_date_{start:%Y%m}",
                 )
                 workforce.home_production(report_day)
-                workforce.reports(heading=False)
 
     st.markdown(
         '<div class="v10-home-footer"><span>🌿 Reliable Packaging Industries Limited · Smart Manufacturing · Workforce · Payroll · Operations</span>'
