@@ -12224,6 +12224,50 @@ if page == "Home":
 
     # V10.1 KPI RENDER + LIVE LOGIC FIX
     # Reference-style KPI rail, driven by live selected-date data.
+    def open_kpi_source(route, settings=None, filters=None):
+        st.session_state["simple_navigation"] = route
+        if settings:
+            st.session_state["simple_settings_choice"] = settings
+        if route == "Employee 360":
+            st.session_state["_md_open_directory"] = True
+        if filters is not None:
+            st.session_state["v170_report_group"] = "HR & Attendance"
+            st.session_state["v170_report_type"] = "Attendance Register"
+            st.session_state["v170_report_div"] = global_division
+            st.session_state["v170_report_month"] = global_payroll_month
+            st.session_state["_md_attendance_filter"] = filters
+
+    def md_kpi_card(key, icon, label, value, subtitle, tone, destination):
+        if destination is None:
+            st.markdown(
+                f'<div class="v10-kpi {tone}"><div class="v10-kpi-icon">{icon}</div>'
+                f'<div><small>{html.escape(label)}</small><b>{html.escape(str(value))}</b>'
+                f'<span>{html.escape(subtitle)}</span></div></div>', unsafe_allow_html=True,
+            )
+            return
+        with st.container(key=f"md_kpi_{key}"):
+            st.button(f"{icon} {label} ↗\n\n**{value}**\n\n{subtitle}",
+                      key=f"open_md_kpi_{key}", width="stretch", on_click=open_kpi_source, args=destination)
+
+    st.markdown("""<style>
+    div[class*="st-key-md_kpi_"] button {min-height:116px; background:#152638;
+        border:1px solid #35516b; border-radius:12px; text-align:left;}
+    div[class*="st-key-md_kpi_"] button:hover {border-color:#80c8ff; background:#1d354b;}
+    div[class*="st-key-md_kpi_"] button:focus-visible {outline:2px solid #80c8ff;}
+    div[class*="st-key-md_kpi_"] button p {text-align:left; font-size:.8rem; margin-bottom:.18rem;}
+    div[class*="st-key-md_kpi_"] button strong {font-size:1.45rem;}
+    </style>""", unsafe_allow_html=True)
+
+    _md_attendance_groups = [
+        ("Present",), ("Absent", "LWP"), ("CL", "SL", "EL", "Leave"),
+        ("WO",), (),
+    ]
+
+    def md_attendance_destination(label, statuses, day=None):
+        if not (v5_module_allowed("Reports") and v5_module_allowed("Attendance")):
+            return None
+        return ("Settings", "Detailed Reports", (label, statuses, day, global_division, global_payroll_month))
+
     _v10_kpi_items = [
         ("👥", "Total Employees", f"{active_count:,}", "Active master", "blue"),
         ("●", "Present", f"{present:,}", f"{(present / active_count * 100):.1f}% of active" if active_count else "No active employees", "green"),
@@ -12235,16 +12279,10 @@ if page == "Home":
     _v10_kpi_cols = st.columns(6, gap="small")
     for _v10_i, (icon, label, value, sub, tone) in enumerate(_v10_kpi_items):
         with _v10_kpi_cols[_v10_i]:
-            st.markdown(
-                (
-                    f'<div class="v10-kpi {tone}">'
-                    f'<div class="v10-kpi-icon">{icon}</div>'
-                    f'<div><small>{html.escape(label)}</small>'
-                    f'<b>{value}</b><span>{html.escape(sub)}</span></div>'
-                    f'</div>'
-                ),
-                unsafe_allow_html=True,
+            destination = (("Employee 360",) if "Employee 360" in _simple_routes else None) if _v10_i == 0 else (
+                md_attendance_destination(label, _md_attendance_groups[_v10_i - 1], global_work_date)
             )
+            md_kpi_card(f"daily_{_v10_i}", icon, label, value, sub, tone, destination)
 
     # V11.5 MD ONE PAGE MONTHLY COMMAND CENTRE
     # The Home dashboard must be sufficient for MD review without opening operational tabs.
@@ -12431,18 +12469,14 @@ if page == "Home":
         ("!", "HR Review Pending", f"{_v115_review_days:,}", "Selected month", "red" if _v115_review_days else "green"),
     ]
     _v115_cols = st.columns(6, gap="small")
+    _md_monthly_groups = [("Present", "OD", "Half Day"), ("Absent", "LWP"), ("CL", "SL", "EL", "Leave"),
+                          ("WO", "Holiday"), (), ("HR Review",)]
     for _v115_i, (_ic, _lb, _val, _sub, _tone) in enumerate(_v115_kpi_items):
         with _v115_cols[_v115_i]:
-            st.markdown(
-                (
-                    f'<div class="v10-kpi {_tone}">'
-                    f'<div class="v10-kpi-icon">{_ic}</div>'
-                    f'<div><small>{html.escape(_lb)}</small>'
-                    f'<b>{_val}</b><span>{html.escape(_sub)}</span></div>'
-                    f'</div>'
-                ),
-                unsafe_allow_html=True,
+            destination = (("HR Review",) if "HR Review" in _simple_routes and can_edit_hr(_current_role) else None) if _v115_i == 5 else (
+                md_attendance_destination(_lb, _md_monthly_groups[_v115_i])
             )
+            md_kpi_card(f"month_{_v115_i}", _ic, _lb, _val, _sub, _tone, destination)
 
     _v115_money_is_final=bool(_v115_final_divisions)
     _v115_net_value=(
@@ -12492,16 +12526,13 @@ if page == "Home":
     _v115_cost_cols = st.columns(6, gap="small")
     for _v115_i, (_ic, _lb, _val, _sub, _tone) in enumerate(_v115_cost_items):
         with _v115_cost_cols[_v115_i]:
-            st.markdown(
-                (
-                    f'<div class="v10-kpi {_tone}">'
-                    f'<div class="v10-kpi-icon">{_ic}</div>'
-                    f'<div><small>{html.escape(_lb)}</small>'
-                    f'<b>{html.escape(str(_val))}</b><span>{html.escape(str(_sub))}</span></div>'
-                    f'</div>'
-                ),
-                unsafe_allow_html=True,
-            )
+            if _v115_i < 4:
+                destination = ("Settings", "Payroll") if can_view_salary(_current_role) and v5_module_allowed("Payroll") else None
+            elif _v115_i == 4:
+                destination = ("Settings", "Contractor Work") if v5_module_allowed("Contractors") else None
+            else:
+                destination = ("Cost & Attrition",) if "Cost & Attrition" in _simple_routes else None
+            md_kpi_card(f"cost_{_v115_i}", _ic, _lb, _val, _sub, _tone, destination)
 
     # Division-wise monthly attendance is visible directly on the MD dashboard.
     _v115_div_rows = []
@@ -13288,6 +13319,8 @@ elif page == "Management":
 # EMPLOYEES — SINGLE EMPLOYEE WORKSPACE
 # ============================================================
 elif page == "Employees":
+    if st.session_state.pop("_md_open_directory", False):
+        st.session_state["v55_emp_view"] = "Directory"
     # Clicking a Directory row can move the user directly into Employee 360.
     _pending_employee = st.session_state.pop("v55_open_employee", None)
     if _pending_employee:
@@ -19271,6 +19304,25 @@ elif page == "Reports":
                             FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
                             WHERE a.work_date BETWEEN ? AND ? """+clause+""" ORDER BY a.work_date,a.division,e.employee_name""",
                          (first.isoformat(),last.isoformat())+params)
+        card_filter = st.session_state.get("_md_attendance_filter")
+        if card_filter and card_filter[3:] == (report_div, report_month):
+            card_label, statuses, card_day, _, _ = card_filter
+            if st.checkbox(f"Filter from dashboard: {card_label}", value=True, key=f"md_filter_{card_label}_{card_day}"):
+                if card_day is not None:
+                    if not first <= card_day <= last:
+                        clause, params = v5_division_clause(report_div, "a.")
+                        report_df = read_df(
+                            """SELECT a.division AS "Division",a.work_date AS "Date",a.employee_id AS "Employee ID",
+                                      e.employee_name AS "Employee Name",a.status AS "Status",a.ot_hours AS "OT Hours"
+                               FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+                               WHERE a.work_date=?""" + clause, (card_day.isoformat(),) + params
+                        )
+                    else:
+                        report_df = report_df[report_df["Date"].astype(str).str[:10].eq(card_day.isoformat())]
+                if statuses:
+                    report_df = report_df[report_df["Status"].isin(statuses)]
+                else:
+                    report_df = report_df[pd.to_numeric(report_df["OT Hours"], errors="coerce").gt(0)]
     elif report_type=="Monthly Attendance Summary":
         clause,params=v5_division_clause(report_div,"a.")
         raw=read_df("""SELECT a.division,a.employee_id,e.employee_name,e.department,a.status,COUNT(*) AS days,
