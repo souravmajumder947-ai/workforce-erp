@@ -12272,24 +12272,35 @@ if page == "Home":
             st.session_state["_md_attendance_filter"] = filters
 
     def md_kpi_card(key, icon, label, value, subtitle, tone, destination):
+        card = (
+            f'<div class="v10-kpi {tone}"><div class="v10-kpi-icon">{icon}</div>'
+            f'<div><small>{html.escape(label)}</small><b>{html.escape(str(value))}</b>'
+            f'<span>{html.escape(subtitle)}</span></div></div>'
+        )
         if destination is None:
-            st.markdown(
-                f'<div class="v10-kpi {tone}"><div class="v10-kpi-icon">{icon}</div>'
-                f'<div><small>{html.escape(label)}</small><b>{html.escape(str(value))}</b>'
-                f'<span>{html.escape(subtitle)}</span></div></div>', unsafe_allow_html=True,
-            )
+            st.markdown(card, unsafe_allow_html=True)
             return
         with st.container(key=f"md_kpi_{key}"):
-            st.button(f"{icon} {label} ↗\n\n**{value}**\n\n{subtitle}",
-                      key=f"open_md_kpi_{key}", width="stretch", on_click=open_kpi_source, args=destination)
+            st.markdown(card, unsafe_allow_html=True)
+            st.button(f"Open {label}", key=f"open_md_kpi_{key}",
+                      width="stretch", on_click=open_kpi_source, args=destination)
 
     st.markdown("""<style>
-    div[class*="st-key-md_kpi_"] button {min-height:116px; background:#152638;
-        border:1px solid #35516b; border-radius:12px; text-align:left;}
-    div[class*="st-key-md_kpi_"] button:hover {border-color:#80c8ff; background:#1d354b;}
-    div[class*="st-key-md_kpi_"] button:focus-visible {outline:2px solid #80c8ff;}
-    div[class*="st-key-md_kpi_"] button p {text-align:left; font-size:.8rem; margin-bottom:.18rem;}
-    div[class*="st-key-md_kpi_"] button strong {font-size:1.45rem;}
+    body div[class*="st-key-md_kpi_"] {position:relative;}
+    body div[class*="st-key-md_kpi_"] div[class*="st-key-open_md_kpi_"] {
+        position:absolute !important; inset:0; z-index:1; width:100%;
+    }
+    body div[class*="st-key-md_kpi_"] div[class*="st-key-open_md_kpi_"] .stButton {
+        height:100%; width:100%;
+    }
+    body div[class*="st-key-md_kpi_"] div[class*="st-key-open_md_kpi_"] button {
+        position:absolute; inset:0; width:100%; height:100%; cursor:pointer;
+        opacity:0; border-radius:12px;
+    }
+    body div[class*="st-key-md_kpi_"]:has(button:hover) .v10-kpi,
+    body div[class*="st-key-md_kpi_"]:has(button:focus-visible) .v10-kpi {
+        outline:2px solid #80c8ff; outline-offset:-2px;
+    }
     </style>""", unsafe_allow_html=True)
 
     _md_attendance_groups = [
