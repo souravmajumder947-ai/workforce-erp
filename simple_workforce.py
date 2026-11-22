@@ -129,7 +129,8 @@ class SimpleWorkforce:
             display = output.rename(columns={'division':'Division','machine':'Machine','shift':'Shift'})
             st.dataframe(display[['Division','Machine','Shift','Manpower','Standard','Gap','Tons','Target (tons)','Output per person (tons)']],
                 hide_index=True,use_container_width=True,
-                column_config={'Tons':st.column_config.NumberColumn(format='%.2f'),
+                column_config={'Tons':st.column_config.NumberColumn(format='%.0f'),
+                    'Target (tons)':st.column_config.NumberColumn(format='%.0f'),
                     'Output per person (tons)':st.column_config.NumberColumn(format='%.2f')})
             st.caption('Gap = actual manpower minus machine/shift standard. Targets and standards are read from your masters. Machine stages are kept separate to avoid adding the same material twice.')
 
@@ -430,7 +431,7 @@ class SimpleWorkforce:
                 st.error(f"Invalid daily production file: {exc}")
                 return
             total = sum(kg for _, kg in records)
-            st.write(f"{len(records)} dates · {total:,} kg · {total / 1000:,.3f} tons")
+            st.write(f"{len(records)} dates · {total:,} kg · {total / 1000:,.0f} tons")
             st.dataframe(pd.DataFrame(sorted(records), columns=["Production date", "Production weight (kg)"]),
                          hide_index=True)
             if not st.button("Save AUTO Corrugation daily totals", type="primary"):
@@ -484,7 +485,8 @@ class SimpleWorkforce:
             st.caption("Check machines scheduled for this shift. Idle machines can be left blank.")
             st.dataframe(checklist[["machine", "Entry status", "output_ton"]].rename(
                 columns={"machine": "Machine", "output_ton": "Saved tons"}),
-                hide_index=True, width="stretch")
+                hide_index=True, width="stretch",
+                column_config={"Saved tons": st.column_config.NumberColumn(format="%.0f")})
         machine = st.selectbox("Machine", machines.machine.tolist())
         employees = self.read("""SELECT a.employee_id,e.employee_name,a.status,a.working_hours,a.ot_hours
             FROM attendance a JOIN employees e ON e.employee_id=a.employee_id
@@ -581,9 +583,9 @@ class SimpleWorkforce:
                 if not totals.empty:
                     st.subheader("Greater Noida · AUTO Corrugation daily totals")
                     kg = totals["Production weight (kg)"]
-                    st.metric("Production (tons)", f"{kg.sum() / 1000:,.3f}")
+                    st.metric("Production (tons)", f"{kg.sum() / 1000:,.0f}")
                     totals["Production (tons)"] = kg / 1000
-                    st.dataframe(totals, hide_index=True)
+                    st.dataframe(totals, hide_index=True, column_config={"Production (tons)": st.column_config.NumberColumn(format="%.0f")})
         st.subheader("Manpower cost per ton")
         st.caption("Current salary master wages + single OT after 12 hours + entered contractor labour cost, divided by machine output. Material, power and employer contributions are excluded. Historical salary revisions are not reconstructed.")
         if self.c["can_view_salary"](self.role):
@@ -604,7 +606,7 @@ class SimpleWorkforce:
                     totals.append({'Division': division, 'Machine': machine, 'Manpower shifts': int(group.Manpower.sum()),
                         'Tons': tons, 'Labour cost (₹)': cost, 'Cost/ton (₹)': cost/tons if valid and tons>0 else None,
                         'Action': 'Complete' if valid and tons>0 else 'Check daily entries'})
-                formats = {'Labour cost (₹)': st.column_config.NumberColumn(format='₹%.2f'), 'Cost/ton (₹)': st.column_config.NumberColumn(format='₹%.2f')}
+                formats = {'Tons': st.column_config.NumberColumn(format='%.0f'), 'Labour cost (₹)': st.column_config.NumberColumn(format='₹%.2f'), 'Cost/ton (₹)': st.column_config.NumberColumn(format='₹%.2f')}
                 st.dataframe(pd.DataFrame(totals), hide_index=True, use_container_width=True, column_config=formats)
                 with st.expander('Daily cost details'):
                     st.dataframe(report, hide_index=True, use_container_width=True, column_config=formats)
