@@ -1072,6 +1072,7 @@ def test_postgres_connection():
 
 
 @st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def migrate_postgres():
     conn = get_pg_conn()
     try:
@@ -5292,6 +5293,11 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
         for _, row in adjustments.iterrows():
             adj_map[(str(row["division"]), str(row["employee_id"]))] = row.to_dict()
 
+    ot_threshold = get_setting_float("ot_threshold_hours", 12.0)
+    ot_multiplier = get_setting_float("ot_multiplier", 1.0)
+    pf_ceiling = get_setting_float("pf_wage_ceiling", 15000.0)
+    pf_rate = get_setting_float("pf_employee_rate_pct", 12.0)
+    esic_rate = get_setting_float("esic_employee_rate_pct", 0.75)
     attendance_groups = {}
     if not attendance.empty:
         groups = attendance.groupby(
@@ -5357,8 +5363,8 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
         additional_fixed_earned = fixed_monthly * ratio
 
         daily_salary_rate = monthly_salary / calendar_days if calendar_days else 0.0
-        ot_hourly_rate = daily_salary_rate / get_setting_float("ot_threshold_hours", 12.0) if daily_salary_rate else 0.0
-        ot_pay = ot_hours * ot_hourly_rate * get_setting_float("ot_multiplier", 1.0)
+        ot_hourly_rate = daily_salary_rate / ot_threshold if daily_salary_rate else 0.0
+        ot_pay = ot_hours * ot_hourly_rate * ot_multiplier
 
         adj = adj_map.get((emp_div, emp_id), {})
         performance_incentive = _num(adj.get("performance_incentive"), 0)
@@ -5372,9 +5378,9 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS):
 
         pf_auto = 0.0
         if bool(emp.get("pf_applicable")):
-            prorated_ceiling = get_setting_float("pf_wage_ceiling", 15000.0) * ratio
-            pf_auto = min(basic_earned, prorated_ceiling) * (get_setting_float("pf_employee_rate_pct", 12.0) / 100.0)
-        esic_auto = gross_earned * (get_setting_float("esic_employee_rate_pct", 0.75) / 100.0) if bool(emp.get("esic_applicable")) else 0.0
+            prorated_ceiling = pf_ceiling * ratio
+            pf_auto = min(basic_earned, prorated_ceiling) * (pf_rate / 100.0)
+        esic_auto = gross_earned * (esic_rate / 100.0) if bool(emp.get("esic_applicable")) else 0.0
 
         pf_override = adj.get("pf_override") if adj else None
         esic_override = adj.get("esic_override") if adj else None
@@ -5992,6 +5998,7 @@ def dashboard_data(report_date, selected_shift):
 migrate_postgres()
 
 
+@st.cache_resource(show_spinner=False)
 def apply_greater_noida_august_2026_present_resolution():
     """One-time owner-approved correction for missing August attendance blockers."""
     resolution_key = "greater_noida_aug_2026_missing_marked_present_v1"
