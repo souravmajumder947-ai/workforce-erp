@@ -19279,9 +19279,38 @@ elif page == "Reports":
     report_title=report_type
     report_note=""
 
-    _v194_report_signature=(
-        f"{report_type}|{report_div}|{report_month.strftime('%Y-%m')}"
-    )
+    report_date = None
+    attendance_statuses = None
+    attendance_summary = pd.DataFrame()
+    if report_type == "Attendance Register":
+        dashboard_date = None
+        card_filter = st.session_state.get("_md_attendance_filter")
+        if card_filter and card_filter[3:] == (report_div, report_month):
+            card_label, statuses, card_day, _, _ = card_filter
+            if st.checkbox(f"Filter from dashboard: {card_label}", value=True, key=f"md_filter_{card_label}_{card_day}"):
+                attendance_statuses = statuses
+                dashboard_date = card_day
+
+        dates = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+        if dashboard_date is not None and dashboard_date not in dates:
+            dates.append(dashboard_date)
+            dates.sort()
+        date_options = [None, *dates]
+        report_date = st.selectbox(
+            "Attendance date",
+            date_options,
+            index=date_options.index(dashboard_date),
+            format_func=lambda day: day.strftime("%d %b %Y") if day else "All dates in selected month",
+            key=f"attendance_register_date_{report_div}_{first}_{dashboard_date}",
+        )
+
+    report_period = report_date.strftime("%d %b %Y") if report_date else report_month.strftime("%b %Y")
+    report_file_period = report_date.isoformat() if report_date else report_month.strftime("%Y_%m")
+    report_audit_context = f"Division={report_div}; Month={report_month.strftime('%Y-%m')}"
+    if report_date:
+        report_audit_context += f"; Date={report_date.isoformat()}"
+
+    _v194_report_signature = (report_type, report_div, report_month, report_date)
     if st.session_state.get("_v194_last_report_signature") != _v194_report_signature:
         record_audit_event(
             _current_user["username"],
@@ -19289,9 +19318,9 @@ elif page == "Reports":
             "Reports",
             "Report",
             report_type,
-            f"Division={report_div}; Month={report_month.strftime('%Y-%m')}",
+            report_audit_context,
         )
-        st.session_state["_v194_last_report_signature"]=_v194_report_signature
+        st.session_state["_v194_last_report_signature"] = _v194_report_signature
 
     if report_type=="MD Executive Overview":
         # Lightweight management snapshot: aggregates only, not every detail table.
@@ -19360,33 +19389,30 @@ elif page == "Reports":
         ])
 
     elif report_type=="Attendance Register":
-        clause,params=v5_division_clause(report_div,"a.")
-        report_df=read_df("""SELECT a.division AS "Division",a.work_date AS "Date",a.employee_id AS "Employee ID",
-                                   e.employee_name AS "Employee Name",e.department AS "Department",a.designation AS "Designation",
-                                   a.time_in AS "Time In",a.time_out AS "Time Out",a.working_hours AS "Working Hrs",
-                                   a.status AS "Status",a.ot_hours AS "OT Hours",a.remark AS "Remark"
-                            FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
-                            WHERE a.work_date BETWEEN ? AND ? """+clause+""" ORDER BY a.work_date,a.division,e.employee_name""",
-                         (first.isoformat(),last.isoformat())+params)
-        card_filter = st.session_state.get("_md_attendance_filter")
-        if card_filter and card_filter[3:] == (report_div, report_month):
-            card_label, statuses, card_day, _, _ = card_filter
-            if st.checkbox(f"Filter from dashboard: {card_label}", value=True, key=f"md_filter_{card_label}_{card_day}"):
-                if card_day is not None:
-                    if not first <= card_day <= last:
-                        clause, params = v5_division_clause(report_div, "a.")
-                        report_df = read_df(
-                            """SELECT a.division AS "Division",a.work_date AS "Date",a.employee_id AS "Employee ID",
-                                      e.employee_name AS "Employee Name",a.status AS "Status",a.ot_hours AS "OT Hours"
-                               FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
-                               WHERE a.work_date=?""" + clause, (card_day.isoformat(),) + params
-                        )
-                    else:
-                        report_df = report_df[report_df["Date"].astype(str).str[:10].eq(card_day.isoformat())]
-                if statuses:
-                    report_df = report_df[report_df["Status"].isin(statuses)]
-                else:
-                    report_df = report_df[pd.to_numeric(report_df["OT Hours"], errors="coerce").gt(0)]
+        clause, params = v5_division_clause(report_div, "a.")
+        start_date, end_date = (report_date, report_date) if report_date else (first, last)
+        report_df = read_df(
+            """SELECT a.division AS "Division",a.work_date AS "Date",a.employee_id AS "Employee ID",
+                      e.employee_name AS "Employee Name",e.department AS "Department",a.designation AS "Designation",
+                      a.time_in AS "Time In",a.time_out AS "Time Out",a.working_hours AS "Working Hrs",
+                      a.status AS "Status",a.ot_hours AS "OT Hours",a.remark AS "Remark"
+               FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+               WHERE a.work_date BETWEEN ? AND ? """ + clause + """
+               ORDER BY a.work_date,a.division,e.employee_name""",
+            (start_date.isoformat(), end_date.isoformat()) + params,
+        )
+        if attendance_statuses:
+            report_df = report_df[report_df["Status"].isin(attendance_statuses)]
+        elif attendance_statuses is not None:
+            report_df = report_df[pd.to_numeric(report_df["OT Hours"], errors="coerce").gt(0)]
+
+        if not report_df.empty:
+            attendance_summary = report_df.assign(
+                Status=report_df["Status"].fillna("Unknown"),
+            ).groupby(["Date", "Status"]).size().unstack(fill_value=0)
+            attendance_summary["Total records"] = attendance_summary.sum(axis=1)
+            attendance_summary = attendance_summary.reset_index()
+
     elif report_type=="Monthly Attendance Summary":
         clause,params=v5_division_clause(report_div,"a.")
         raw=read_df("""SELECT a.division,a.employee_id,e.employee_name,e.department,a.status,COUNT(*) AS days,
@@ -20276,7 +20302,7 @@ elif page == "Reports":
           <div style="font-size:9px;color:#708ba3;font-weight:850;letter-spacing:.12em;">CONTROLLED REPORT</div>
           <div style="font-size:17px;color:#f4f8fc;font-weight:900;margin-top:2px;">{html.escape(report_type)}</div>
           <div style="font-size:10px;color:#8fa5b9;margin-top:3px;">
-            {html.escape(str(report_div))} · {report_month.strftime('%b %Y')} · Live ERP source
+            {html.escape(str(report_div))} · {report_period} · Live ERP source
           </div>
         </div>
         """,
@@ -20285,6 +20311,10 @@ elif page == "Reports":
 
     if report_type in {"Attendance Register","Monthly Attendance Summary"}:
         _v183_status_legend()
+
+    if not attendance_summary.empty:
+        with st.expander("Daily attendance summary", expanded=True):
+            st.dataframe(attendance_summary, hide_index=True, use_container_width=True, height=200)
 
     if report_df.empty:
         if report_note:
@@ -20296,7 +20326,7 @@ elif page == "Reports":
             st.warning(report_note)
         st.success(
             f"Report ready · {len(report_df):,} rows · "
-            f"{report_div} · {report_month.strftime('%b %Y')} · Live database"
+            f"{report_div} · {report_period} · Live database"
         )
         st.dataframe(
             _v183_style_status_table(report_df),
@@ -20304,10 +20334,10 @@ elif page == "Reports":
             use_container_width=True,
             height=min(620, max(260, 38 * min(len(report_df) + 1, 16))),
         )
-        report_bytes=make_excel_report(report_df,report_title,f"{report_div} | {report_month.strftime('%b %Y')}")
+        report_bytes=make_excel_report(report_df,report_title,f"{report_div} | {report_period}")
         _v194_report_downloaded=st.download_button(
             "Download Excel Report",data=report_bytes,
-            file_name=f"{report_type.replace('/','-').replace(' ','_')}_{report_month.strftime('%Y_%m')}.xlsx",
+            file_name=f"{report_type.replace('/','-').replace(' ','_')}_{report_file_period}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",use_container_width=True
         )
@@ -20318,7 +20348,7 @@ elif page == "Reports":
                 "Reports",
                 "Report",
                 report_type,
-                f"Division={report_div}; Month={report_month.strftime('%Y-%m')}; Rows={len(report_df)}",
+                f"{report_audit_context}; Rows={len(report_df)}",
             )
 
 # ============================================================
