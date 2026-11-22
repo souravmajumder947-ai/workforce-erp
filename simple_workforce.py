@@ -1,6 +1,7 @@
 """Daily workforce workflow. Existing authentication and master data stay authoritative."""
 import hashlib
 import json
+from decimal import Decimal, InvalidOperation
 from calendar import monthrange
 from datetime import date
 
@@ -400,6 +401,60 @@ class SimpleWorkforce:
         except Exception as exc:
             st.error(f"No selected changes saved: {exc}")
 
+    def auto_corrugation_upload(self):
+        with st.expander("AUTO Corrugation · Daily totals"):
+            st.caption("Import the Finsys Date Total production weight for Greater Noida. These totals are reported separately from machine entries.")
+            upload = st.file_uploader("Daily production CSV", type=["csv"], key="auto_corrugation_csv")
+            if upload is None:
+                return
+            try:
+                upload.seek(0)
+                rows = pd.read_csv(upload, dtype=str, keep_default_na=False)
+                required = {"Production Date", "Finsys Machine / Stage", "Production Weight (kg)"}
+                if rows.empty or not required.issubset(rows.columns):
+                    raise ValueError("Use the daily production CSV with date, stage and production weight in kg.")
+                start, end = self.period()
+                records = []
+                for day, stage, weight in rows[["Production Date", "Finsys Machine / Stage",
+                                                "Production Weight (kg)"]].itertuples(index=False, name=None):
+                    day = date.fromisoformat(day.strip())
+                    kg = Decimal(weight.strip())
+                    if not start <= day <= end or stage.strip().upper() != "AUTO CORRUGATION":
+                        raise ValueError("Every row must be AUTO CORRUGATION for the selected month.")
+                    if not kg.is_finite() or kg < 0 or kg != kg.to_integral_value() or kg > 999999999999:
+                        raise ValueError("Production weight must be a nonnegative whole number of kilograms.")
+                    records.append((day, int(kg)))
+                if len({day for day, _ in records}) != len(records):
+                    raise ValueError("The file must contain one row per production date.")
+            except (InvalidOperation, ValueError) as exc:
+                st.error(f"Invalid daily production file: {exc}")
+                return
+            total = sum(kg for _, kg in records)
+            st.write(f"{len(records)} dates · {total:,} kg · {total / 1000:,.3f} tons")
+            st.dataframe(pd.DataFrame(sorted(records), columns=["Production date", "Production weight (kg)"]),
+                         hide_index=True)
+            if not st.button("Save AUTO Corrugation daily totals", type="primary"):
+                return
+
+            def save(cur):
+                cur.execute("""CREATE TABLE IF NOT EXISTS auto_corrugation_daily (
+                    work_date DATE PRIMARY KEY, weight_kg BIGINT NOT NULL CHECK (weight_kg >= 0),
+                    entered_by TEXT NOT NULL)""")
+                for day, kg in sorted(records):
+                    cur.execute("""INSERT INTO auto_corrugation_daily (work_date,weight_kg,entered_by)
+                                   VALUES (%s,%s,%s) ON CONFLICT (work_date) DO NOTHING""",
+                                (day, kg, self.user["username"]))
+                    if not cur.rowcount:
+                        cur.execute("SELECT weight_kg FROM auto_corrugation_daily WHERE work_date=%s", (day,))
+                        if cur.fetchone()[0] != kg:
+                            raise ValueError(f"{day}: a different total already exists. No rows were changed.")
+            try:
+                self.write(save)
+            except Exception as exc:
+                st.error(f"Daily totals could not be saved: {exc}")
+            else:
+                st.success(f"Verified {len(records)} daily AUTO Corrugation totals in the ERP.")
+
     def production(self):
         st.title("Production & manpower")
         if st.session_state.pop("simple_production_saved", False):
@@ -408,6 +463,8 @@ class SimpleWorkforce:
         if self.division == self.c["ALL_DIVISIONS"]:
             st.info("Select one Division in the sidebar.")
             return
+        if self.division == "Greater Noida Plant":
+            self.auto_corrugation_upload()
         machines = self.read("SELECT machine FROM machines WHERE active=TRUE ORDER BY machine")
         if machines.empty:
             st.info("Add machines in Settings first.")
@@ -515,6 +572,18 @@ class SimpleWorkforce:
             st.title("Cost & attrition")
         start, end = self.period()
         st.caption(f"{start:%B %Y} · {self.division}")
+        if self.division in {"Greater Noida Plant", self.c["ALL_DIVISIONS"]}:
+            table = self.read("SELECT to_regclass('auto_corrugation_daily') IS NOT NULL AS available")
+            if not table.empty and bool(table.iloc[0]["available"]):
+                totals = self.read("""SELECT work_date AS "Date", weight_kg AS "Production weight (kg)"
+                                      FROM auto_corrugation_daily WHERE work_date BETWEEN ? AND ?
+                                      ORDER BY work_date""", (start, end))
+                if not totals.empty:
+                    st.subheader("Greater Noida · AUTO Corrugation daily totals")
+                    kg = totals["Production weight (kg)"]
+                    st.metric("Production (tons)", f"{kg.sum() / 1000:,.3f}")
+                    totals["Production (tons)"] = kg / 1000
+                    st.dataframe(totals, hide_index=True)
         st.subheader("Manpower cost per ton")
         st.caption("Current salary master wages + single OT after 12 hours + entered contractor labour cost, divided by machine output. Material, power and employer contributions are excluded. Historical salary revisions are not reconstructed.")
         if self.c["can_view_salary"](self.role):
