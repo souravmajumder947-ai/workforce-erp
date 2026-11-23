@@ -6087,6 +6087,20 @@ if "auth_token" not in st.session_state:
 
 # Streamlit can occasionally establish a fresh browser session after a
 # reconnect. Restore the signed-in user from a short-lived server-side token.
+if st.session_state["auth_user"] is None:
+    _browser_token = st.query_params.get("session")
+    if _browser_token:
+        try:
+            _restored_user = restore_login_from_token(_browser_token)
+        except _PG_TRANSIENT_ERRORS:
+            st.warning("The database is reconnecting. Refresh this tab to resume your session.")
+            st.stop()
+        if _restored_user:
+            st.session_state["auth_user"] = _restored_user
+            st.session_state["auth_token"] = _browser_token
+        else:
+            st.query_params.pop("session", None)
+
 # ============================================================
 # V8.1 — EARLY PREMIUM CSS FOR LOGIN + APP SHELL
 # ============================================================
@@ -11284,18 +11298,27 @@ def sidebar_routes_for(role, allowed):
 
 
 _simple_routes = sidebar_routes_for(_current_role, v5_module_allowed)
+_hr_direct_routes = {
+    "Employee records": ("Employee records", "Employees"),
+    "Salary and statutory details": ("Salary and statutory details", "Payroll"),
+    "Attendance and leave entry": ("Attendance and leave entry", "Attendance"),
+    "Payroll": ("Payroll", "Payroll"),
+    "Joining and leaving": ("Joining and leaving", "Employees"),
+}
+if "simple_navigation" not in st.session_state:
+    _saved_page = st.query_params.get("page")
+    if _saved_page in _simple_routes:
+        st.session_state["simple_navigation"] = _saved_page
+    elif _hr_workspace_allowed and _saved_page in _hr_direct_routes:
+        _saved_label, _saved_module = _hr_direct_routes[_saved_page]
+        if v5_module_allowed(_saved_module):
+            st.session_state["hr_active_task"] = _saved_label
+            st.session_state["simple_navigation"] = _saved_label
 if _hr_workspace_allowed and "simple_navigation" not in st.session_state and _current_role == "HR":
     st.session_state["simple_navigation"] = "HR workspace"
 _hr_task = st.session_state.pop("hr_task_request", None)
 if _hr_task and _hr_workspace_allowed:
     _hr_task_name, _hr_employee_id = _hr_task
-    _hr_direct_routes = {
-        "Employee records": ("Employee records", "Employees"),
-        "Salary and statutory details": ("Salary and statutory details", "Payroll"),
-        "Attendance and leave entry": ("Attendance and leave entry", "Attendance"),
-        "Payroll": ("Payroll", "Payroll"),
-        "Joining and leaving": ("Joining and leaving", "Employees"),
-    }
     if _hr_task_name in _hr_direct_routes:
         _hr_label, _hr_module = _hr_direct_routes[_hr_task_name]
         if v5_module_allowed(_hr_module):
@@ -11379,7 +11402,10 @@ if page == "Simple Settings":
     _simple_settings = sidebar_settings_for(_current_role, v5_module_allowed)
     if _simple_settings:
         if st.session_state.get("simple_settings_choice") not in _simple_settings:
-            st.session_state["simple_settings_choice"] = next(iter(_simple_settings))
+            _saved_setting = st.query_params.get("settings")
+            st.session_state["simple_settings_choice"] = (
+                _saved_setting if _saved_setting in _simple_settings else next(iter(_simple_settings))
+            )
         _setting = st.sidebar.selectbox("Settings", list(_simple_settings), key="simple_settings_choice")
         page = _simple_settings[_setting]
         if page == "Master Centre":
@@ -11389,9 +11415,11 @@ if page == "Simple Settings":
         st.stop()
 
 st.sidebar.markdown('<div class="v5-sidebar-label">Live Context</div>', unsafe_allow_html=True)
-global_division = st.sidebar.selectbox(
-    "Division", [ALL_DIVISIONS]+DIVISIONS, key="v5_global_division"
-)
+_division_options = [ALL_DIVISIONS] + DIVISIONS
+_saved_division = st.query_params.get("division")
+if "v5_global_division" not in st.session_state and _saved_division in _division_options:
+    st.session_state["v5_global_division"] = _saved_division
+global_division = st.sidebar.selectbox("Division", _division_options, key="v5_global_division")
 # V13.1: Working Date removed from sidebar to avoid date/month confusion.
 # Each operational page controls its own date/period.
 global_work_date = date.today()
@@ -11404,16 +11432,26 @@ _v154_last_month_end = date.today().replace(day=1) - timedelta(days=1)
 _v154_default_payroll_month = date(
     _v154_last_month_end.year, _v154_last_month_end.month, 1
 )
+if "v5_global_payroll_month" not in st.session_state:
+    _saved_month = st.query_params.get("month")
+    _restored_month = next((d for d in _month_opts if d.isoformat() == _saved_month), None)
+    st.session_state["v5_global_payroll_month"] = (
+        _restored_month or (_v154_default_payroll_month if _v154_default_payroll_month in _month_opts else _month_opts[0])
+    )
+
 global_payroll_month = st.sidebar.selectbox(
     "Month", _month_opts,
-    index=next(
-        (i for i,d in enumerate(_month_opts)
-         if d == _v154_default_payroll_month),
-        0
-    ),
     format_func=lambda d:d.strftime("%b %Y"),
     key="v5_global_payroll_month",
 )
+
+_page_context = st.query_params.to_dict()
+_restored_context = dict(_page_context, page=_simple_choice, division=global_division,
+                         month=global_payroll_month.isoformat())
+if _simple_routes[_simple_choice] == "Simple Settings":
+    _restored_context["settings"] = _setting
+if _restored_context != _page_context:
+    st.query_params.from_dict(_restored_context)
 
 # V19.4 USER ACTIVITY TRACKING
 # Log navigation only when page/context actually changes, not on every Streamlit rerun.
@@ -11476,10 +11514,11 @@ if st.sidebar.button("Sign out", use_container_width=True, key="v5_logout"):
     st.session_state.pop("_v194_last_nav_signature", None)
     st.session_state.pop("_v194_last_report_signature", None)
     st.session_state.pop("warning_letter_extraction", None)
-    try:
-        del st.query_params["session"]
-    except Exception:
-        pass
+    for _param in ("session", "page", "settings", "division", "month"):
+        st.query_params.pop(_param, None)
+    for _key in ("simple_navigation", "workspace_menu", "simple_settings_choice",
+                 "hr_active_task", "v5_global_division", "v5_global_payroll_month"):
+        st.session_state.pop(_key, None)
     st.rerun()
 
 @st.cache_data(ttl=60, show_spinner=False)
