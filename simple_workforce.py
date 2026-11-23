@@ -25,27 +25,29 @@ def current_attendance_review_reason(row):
     source_issue = str(row.issue)
     if source_issue.startswith("Division mismatch"):
         return source_issue
-    if pd.isna(row.employment_status) or str(row.department).strip().upper() == "HR REVIEW":
-        reason = "Employee ID awaiting HR Master confirmation"
-    elif row.master_division != row.division:
+    work_day = employment_date(row.work_date)
+    joined = employment_date(row.joining_date)
+    left = employment_date(row.last_working_date)
+    master_exists = pd.notna(row.employment_status)
+    master_pending = not master_exists or str(row.department).strip().upper() == "HR REVIEW"
+    inactive = str(row.employment_status).strip().upper() in INACTIVE
+
+    if master_exists and pd.notna(row.master_division) and row.master_division != row.division:
         reason = f"Division mismatch: master={row.master_division}; file={row.division}"
+    elif pd.notna(left) and work_day > left:
+        reason = f"Attendance after last working date ({left:%d %b %Y})"
+    elif pd.notna(joined) and work_day < joined:
+        reason = f"Attendance before joining date ({joined:%d %b %Y})"
+    elif master_pending:
+        reason = "Employee ID awaiting HR Master confirmation"
+    elif inactive and pd.isna(left):
+        reason = "Inactive employee missing last working date"
+    elif pd.isna(joined):
+        reason = "Employee Master missing a verified joining date"
+    elif source_issue == "Employee ID awaiting HR Master confirmation" or source_issue.startswith("Employee currently inactive:"):
+        reason = "Employment details verified in Employee Master; check sheet status and punches"
     else:
-        work_day = employment_date(row.work_date)
-        joined = employment_date(row.joining_date)
-        left = employment_date(row.last_working_date)
-        inactive = str(row.employment_status).strip().upper() in INACTIVE
-        if pd.notna(left) and work_day > left:
-            reason = f"Attendance after last working date ({left:%d %b %Y})"
-        elif pd.notna(joined) and work_day < joined:
-            reason = f"Attendance before joining date ({joined:%d %b %Y})"
-        elif inactive and pd.isna(left):
-            reason = "Inactive employee missing last working date"
-        elif pd.isna(joined):
-            reason = "Employee Master missing a verified joining date"
-        elif source_issue == "Employee ID awaiting HR Master confirmation" or source_issue.startswith("Employee currently inactive:"):
-            reason = "Employment details verified in Employee Master; check sheet status and punches"
-        else:
-            return source_issue
+        return source_issue
     if "Punch check:" in source_issue and source_issue != reason:
         return f"{reason} · {source_issue}"
     return reason
