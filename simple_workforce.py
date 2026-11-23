@@ -74,6 +74,15 @@ def is_post_exit_attendance_placeholder(row):
     return bool(pd.notna(last_day) and work_day > last_day and (pd.isna(joined) or joined <= last_day))
 
 
+def review_csv(frame):
+    """Prevent imported text from becoming a spreadsheet formula."""
+    def safe_cell(value):
+        if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+            return "'" + value
+        return value
+    return frame.map(safe_cell).to_csv(index=False).encode("utf-8-sig")
+
+
 def labour_amount(salary, day, status, ot_hours):
     daily = float(salary) / monthrange(day.year, day.month)[1]
     factor = 0.5 if status == "Half Day" else (1.0 if status in PAID else 0.0)
@@ -334,6 +343,42 @@ class SimpleWorkforce:
         if not self.c["can_edit_hr"](self.role):
             st.dataframe(rows, hide_index=True)
             return
+        export_labels = {
+            "employee_id": "Employee ID", "employee_name": "Employee Name",
+            "work_date": "Attendance Date", "division": "Attendance Division",
+            "master_division": "Master Division", "department": "Master Department",
+            "employment_status": "Master Status", "joining_date": "Master Joining Date",
+            "last_working_date": "Master Last Working Date", "issue": "Review Reason",
+            "raw_status": "Sheet Status", "time_in": "Time In", "time_out": "Time Out",
+            "working_hours": "Working Hours", "ot_hours": "OT Hours",
+        }
+        master_rows = rows[rows.issue.str.startswith((
+            "Division mismatch", "Employee ID awaiting", "Employee Master missing",
+            "Inactive employee missing", "Attendance before joining", "Attendance after last working",
+        ))]
+        detail_col, master_col = st.columns(2)
+        detail_col.download_button(
+            "Download all HR Review details",
+            review_csv(rows[list(export_labels)].rename(columns=export_labels)),
+            f"hr_review_{start:%Y_%m}.csv",
+            "text/csv",
+        )
+        if not master_rows.empty:
+            master_fields = [field for field in export_labels if field not in {
+                "work_date", "raw_status", "time_in", "time_out", "working_hours", "ot_hours",
+            }]
+            master_check = (
+                master_rows.groupby(master_fields, dropna=False, sort=False)
+                .size().rename("Affected attendance rows").reset_index()
+                .sort_values("employee_id", kind="stable").rename(columns=export_labels)
+            )
+            master_col.download_button(
+                "Download Employee Master check list",
+                review_csv(master_check),
+                f"employee_master_checks_{start:%Y_%m}.csv",
+                "text/csv",
+            )
+        st.caption("Downloads cover the selected division and month. Verify division mismatches before changing Employee Master.")
         issue_filter, employee_filter = st.columns(2)
         issue = issue_filter.selectbox("Review reason", ["All reasons"] + sorted(rows.issue.unique()))
         if issue != "All reasons":
