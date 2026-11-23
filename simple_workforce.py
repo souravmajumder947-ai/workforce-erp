@@ -21,10 +21,19 @@ def employment_date(value):
 
 
 
-def current_attendance_review_reason(row):
+def attendance_issue_after_master_update(row):
     source_issue = str(row.issue)
-    if source_issue.startswith("Division mismatch"):
+    if pd.isna(row.master_division) or row.master_division != row.division:
         return source_issue
+    remaining = [
+        part.strip() for part in source_issue.split(" | ")
+        if not part.strip().startswith("Division mismatch:")
+    ]
+    return " | ".join(remaining) or "Division now matches Employee Master; check sheet status and punches"
+
+
+def current_attendance_review_reason(row):
+    source_issue = attendance_issue_after_master_update(row)
     work_day = employment_date(row.work_date)
     joined = employment_date(row.joining_date)
     left = employment_date(row.last_working_date)
@@ -34,6 +43,8 @@ def current_attendance_review_reason(row):
 
     if master_exists and pd.notna(row.master_division) and row.master_division != row.division:
         reason = f"Division mismatch: master={row.master_division}; file={row.division}"
+    elif source_issue.startswith("Division mismatch"):
+        return source_issue
     elif pd.notna(left) and work_day > left:
         reason = f"Attendance after last working date ({left:%d %b %Y})"
     elif pd.notna(joined) and work_day < joined:
@@ -59,7 +70,8 @@ def is_post_exit_attendance_placeholder(row):
         return False
     if pd.isna(row.master_division) or row.master_division != row.division:
         return False
-    if str(row.issue).startswith("Division mismatch") or "Punch check:" in str(row.issue):
+    source_issue = attendance_issue_after_master_update(row)
+    if source_issue.startswith("Division mismatch") or "Punch check:" in source_issue:
         return False
     if str(row.raw_status).strip().upper() not in {"AA", "A", "ABSENT", "WO", "W/O", "OFF"}:
         return False
