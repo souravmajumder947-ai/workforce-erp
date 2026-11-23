@@ -53,6 +53,27 @@ def current_attendance_review_reason(row):
     return reason
 
 
+def is_post_exit_attendance_placeholder(row):
+    """Keep imported off-day placeholders visible without requiring an HR decision."""
+    if str(row.employment_status).strip().upper() not in INACTIVE:
+        return False
+    if pd.isna(row.master_division) or row.master_division != row.division:
+        return False
+    if str(row.issue).startswith("Division mismatch") or "Punch check:" in str(row.issue):
+        return False
+    if str(row.raw_status).strip().upper() not in {"AA", "A", "ABSENT", "WO", "W/O", "OFF"}:
+        return False
+    no_punch = {"", "00:00", "00:00:00"}
+    if any(pd.notna(punch) and str(punch).strip() not in no_punch for punch in (row.time_in, row.time_out)):
+        return False
+    if pd.to_numeric(row.working_hours, errors="coerce") != 0 or pd.to_numeric(row.ot_hours, errors="coerce") != 0:
+        return False
+    work_day = employment_date(row.work_date)
+    last_day = employment_date(row.last_working_date)
+    joined = employment_date(row.joining_date)
+    return bool(pd.notna(last_day) and work_day > last_day and (pd.isna(joined) or joined <= last_day))
+
+
 def labour_amount(salary, day, status, ot_hours):
     daily = float(salary) / monthrange(day.year, day.month)[1]
     factor = 0.5 if status == "Half Day" else (1.0 if status in PAID else 0.0)
@@ -281,7 +302,7 @@ class SimpleWorkforce:
         clause, params = self.scope("a.division")
         rows = self.read("""SELECT a.id,a.work_date,a.employee_id,
             COALESCE(e.employee_name,a.source_employee_name,a.employee_id) AS employee_name,
-            a.division,a.shift,a.time_in,a.time_out,a.working_hours,a.raw_status,
+            a.division,a.shift,a.time_in,a.time_out,a.working_hours,a.ot_hours,a.raw_status,
             COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
             a.status,a.remark,a.updated_at,COALESCE(e.department,'HR Review') AS department,
             e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date,
@@ -290,8 +311,23 @@ class SimpleWorkforce:
             WHERE (a.status='HR Review' OR a.review_required=TRUE)
             AND a.work_date BETWEEN ? AND ?""" + clause + " ORDER BY a.work_date,a.employee_id,a.id",
             (start.isoformat(), end.isoformat()) + params)
+        if not rows.empty:
+            placeholders = pd.Series(
+                [is_post_exit_attendance_placeholder(row) for row in rows.itertuples(index=False)],
+                index=rows.index,
+                dtype=bool,
+            )
+            if placeholders.any():
+                with st.expander(f"Post-exit sheet rows ({placeholders.sum():,})"):
+                    st.caption("No-punch absence and weekly-off rows dated after a recorded exit. These source rows remain available for reference.")
+                    st.dataframe(
+                        rows.loc[placeholders, ["work_date", "employee_id", "employee_name", "division",
+                                               "raw_status", "last_working_date"]],
+                        hide_index=True,
+                    )
+                rows = rows.loc[~placeholders].copy()
         if rows.empty:
-            st.success("No attendance issues for this month and division.")
+            st.success("No attendance issues requiring HR action for this month and division.")
             return
         rows["issue"] = [current_attendance_review_reason(row) for row in rows.itertuples(index=False)]
         st.metric("Rows needing HR action", len(rows))
@@ -329,7 +365,7 @@ class SimpleWorkforce:
                               "raw_status", "time_in", "time_out", "Final status", "Final hours", "HR reason"],
                 disabled=[c for c in rows.columns if c not in editable],
                 column_config={"id": None, "department": None, "joining_date": None, "last_working_date": None,
-                    "updated_at": None, "employment_status": None, "master_division": None, "working_hours": None, "status": None, "remark": None,
+                    "updated_at": None, "employment_status": None, "master_division": None, "working_hours": None, "ot_hours": None, "status": None, "remark": None,
                     "Display date": st.column_config.TextColumn("Date"),
                     "employee_id": st.column_config.TextColumn("Employee ID"),
                     "employee_name": st.column_config.TextColumn("Employee"),
