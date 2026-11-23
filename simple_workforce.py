@@ -56,7 +56,11 @@ def current_attendance_review_reason(row):
     elif pd.isna(joined):
         reason = "Employee Master missing a verified joining date"
     elif source_issue == "Employee ID awaiting HR Master confirmation" or source_issue.startswith("Employee currently inactive:"):
-        reason = "Employment details verified in Employee Master; check sheet status and punches"
+        remaining_issues = [
+            issue.strip() for issue in source_issue.split(" | ")
+            if issue.strip() and not issue.strip().startswith(("Employee currently inactive:", "Employee ID awaiting HR Master confirmation"))
+        ]
+        return " | ".join(remaining_issues) or "Employment details verified in Employee Master; check sheet status and punches"
     else:
         return source_issue
     if "Punch check:" in source_issue and source_issue != reason:
