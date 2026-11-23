@@ -278,6 +278,90 @@ class SimpleWorkforce:
         except Exception as exc:
             st.error(f"Attendance could not be saved: {exc}")
 
+    def remove_post_exit_month(self, start, end):
+        if self.role != "Owner" or self.division == self.c["ALL_DIVISIONS"]:
+            return
+        inactive = sorted(INACTIVE)
+        with st.expander("Remove attendance for employees who left before this month"):
+            master = self.read(
+                """SELECT employee_id,employee_name,status,last_working_date::text AS exit_date
+                   FROM employees WHERE division=? AND UPPER(TRIM(status))=ANY(?)
+                   ORDER BY employee_name""",
+                (self.division, inactive),
+            )
+            exits = master.exit_date.map(employment_date)
+            eligible = master.loc[exits.lt(pd.Timestamp(start))]
+            labels = dict(zip(eligible.employee_id, eligible.employee_name))
+            ids = sorted(st.multiselect(
+                "Employees whose attendance should be removed", list(labels),
+                format_func=lambda eid: f"{labels[eid]} ({eid})",
+                key=f"remove_post_exit_ids_{self.division}_{start}",
+            ))
+            if not ids:
+                return
+            scope = (self.division, start.isoformat(), end.isoformat(), ids)
+            selection = """
+                SELECT id,employee_id,work_date::text AS work_date,status,updated_at::text AS version
+                FROM attendance WHERE division=%s AND work_date BETWEEN %s AND %s
+                AND employee_id=ANY(%s)
+            """
+            preview = self.read(selection.replace("%s", "?") + " ORDER BY id", scope)
+            if preview.empty:
+                st.info("No matching attendance rows in this month and division.")
+                return
+            st.warning(f"Permanently remove {len(preview):,} attendance rows for the selected employees "
+                       f"in {self.division}, {start:%B %Y}. This includes rows outside HR Review.")
+            st.dataframe(preview[["employee_id", "work_date", "status"]], hide_index=True)
+            revision = hashlib.sha256(preview.to_json().encode()).hexdigest()
+            confirmed = st.checkbox(
+                "I verified the employee IDs and dates and confirm permanent removal",
+                key=f"confirm_remove_post_exit_{revision}",
+            )
+            if not st.button("Permanently remove selected attendance", disabled=not confirmed,
+                             key=f"apply_remove_post_exit_{revision}"):
+                return
+
+            def remove(cur):
+                cur.execute(
+                    """SELECT employee_id,status,last_working_date::text FROM employees
+                       WHERE division=%s AND employee_id=ANY(%s)
+                       ORDER BY employee_id FOR SHARE""", (self.division, ids),
+                )
+                locked_master = cur.fetchall()
+                if len(locked_master) != len(ids) or any(
+                    str(status).strip().upper() not in INACTIVE or
+                    not employment_date(exit_date) < pd.Timestamp(start)
+                    for _, status, exit_date in locked_master
+                ):
+                    raise ValueError("Employee Master changed. Review the selected employees again.")
+                cur.execute(selection + " ORDER BY id FOR UPDATE", scope)
+                locked_rows = cur.fetchall()
+                expected = [(row.id, row.version if pd.notna(row.version) else None)
+                            for row in preview.itertuples(index=False)]
+                if [(row[0], row[4]) for row in locked_rows] != expected:
+                    raise ValueError("Attendance changed. Review the updated preview before removing rows.")
+                cur.execute(
+                    """DELETE FROM attendance WHERE division=%s AND work_date BETWEEN %s AND %s
+                       AND employee_id=ANY(%s) AND id=ANY(%s)""",
+                    (*scope, [int(row_id) for row_id, _ in expected]),
+                )
+                if cur.rowcount != len(expected):
+                    raise ValueError("Attendance changed. No rows were removed.")
+                cur.execute(
+                    """INSERT INTO audit_log(actor,action,module,entity_type,entity_id,details)
+                       VALUES (%s,'DELETE','Attendance','Employee',%s,%s)""",
+                    (self.user["username"], ", ".join(ids),
+                     f"{self.division}; {start:%Y-%m}; removed {len(expected)} post-exit attendance rows"),
+                )
+
+            try:
+                self.write(remove)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            st.session_state["simple_hr_success"] = f"Removed {len(preview):,} attendance rows for {', '.join(ids)}."
+            st.rerun()
+
     def review(self):
         st.title("HR Review")
         message = st.session_state.pop("simple_hr_success", None)
@@ -285,6 +369,7 @@ class SimpleWorkforce:
             st.success(message)
         start, end = self.period()
         st.caption(f"{start:%d %b %Y} to {end:%d %b %Y}. Check the issue, choose the final status and add a reason.")
+        self.remove_post_exit_month(start, end)
         master_clause, master_params = self.scope()
         pending = self.read("SELECT employee_id,employee_name,division,designation FROM employees WHERE UPPER(TRIM(department))='HR REVIEW'" + master_clause, master_params)
         if not pending.empty and self.c["can_edit_hr"](self.role):
