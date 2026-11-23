@@ -20,6 +20,37 @@ def employment_date(value):
     return pd.to_datetime(value, errors='coerce', dayfirst=not iso)
 
 
+
+def current_attendance_review_reason(row):
+    source_issue = str(row.issue)
+    if source_issue.startswith("Division mismatch"):
+        return source_issue
+    if pd.isna(row.employment_status) or str(row.department).strip().upper() == "HR REVIEW":
+        reason = "Employee ID awaiting HR Master confirmation"
+    elif row.master_division != row.division:
+        reason = f"Division mismatch: master={row.master_division}; file={row.division}"
+    else:
+        work_day = employment_date(row.work_date)
+        joined = employment_date(row.joining_date)
+        left = employment_date(row.last_working_date)
+        inactive = str(row.employment_status).strip().upper() in INACTIVE
+        if pd.notna(left) and work_day > left:
+            reason = f"Attendance after last working date ({left:%d %b %Y})"
+        elif pd.notna(joined) and work_day < joined:
+            reason = f"Attendance before joining date ({joined:%d %b %Y})"
+        elif inactive and pd.isna(left):
+            reason = "Inactive employee missing last working date"
+        elif pd.isna(joined):
+            reason = "Employee Master missing a verified joining date"
+        elif source_issue == "Employee ID awaiting HR Master confirmation" or source_issue.startswith("Employee currently inactive:"):
+            reason = "Employment details verified in Employee Master; check sheet status and punches"
+        else:
+            return source_issue
+    if "Punch check:" in source_issue and source_issue != reason:
+        return f"{reason} · {source_issue}"
+    return reason
+
+
 def labour_amount(salary, day, status, ot_hours):
     daily = float(salary) / monthrange(day.year, day.month)[1]
     factor = 0.5 if status == "Half Day" else (1.0 if status in PAID else 0.0)
@@ -245,25 +276,22 @@ class SimpleWorkforce:
                                 st.error(f"Employee could not be confirmed: {exc}")
                 else:
                     st.info("Admin must add a department in Settings before confirming employees.")
-        queue_key = (self.user["username"], self.division, start)
-        queue = st.session_state.get("simple_hr_queue")
-        refresh = st.button("Refresh review queue")
-        if refresh or queue is None or queue[0] != queue_key:
-            clause, params = self.scope("a.division")
-            rows = self.read("""SELECT a.id,a.work_date,a.employee_id,
-                COALESCE(e.employee_name,a.source_employee_name,a.employee_id) AS employee_name,
-                a.division,a.shift,a.time_in,a.time_out,a.working_hours,a.raw_status,
-                COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
-                a.status,a.remark,a.updated_at,COALESCE(e.department,'HR Review') AS department,e.joining_date,e.last_working_date,e.status AS employment_status
-                FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
-                WHERE (a.status='HR Review' OR a.review_required=TRUE)
-                AND a.work_date BETWEEN ? AND ?""" + clause + " ORDER BY a.work_date,a.employee_id", (start.isoformat(), end.isoformat()) + params)
-            st.session_state["simple_hr_queue"] = (queue_key, rows)
-        else:
-            rows = queue[1]
+        clause, params = self.scope("a.division")
+        rows = self.read("""SELECT a.id,a.work_date,a.employee_id,
+            COALESCE(e.employee_name,a.source_employee_name,a.employee_id) AS employee_name,
+            a.division,a.shift,a.time_in,a.time_out,a.working_hours,a.raw_status,
+            COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
+            a.status,a.remark,a.updated_at,COALESCE(e.department,'HR Review') AS department,
+            e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date,
+            e.status AS employment_status,e.division AS master_division
+            FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+            WHERE (a.status='HR Review' OR a.review_required=TRUE)
+            AND a.work_date BETWEEN ? AND ?""" + clause + " ORDER BY a.work_date,a.employee_id,a.id",
+            (start.isoformat(), end.isoformat()) + params)
         if rows.empty:
             st.success("No attendance issues for this month and division.")
             return
+        rows["issue"] = [current_attendance_review_reason(row) for row in rows.itertuples(index=False)]
         st.metric("Rows needing HR action", len(rows))
         if not self.c["can_edit_hr"](self.role):
             st.dataframe(rows, hide_index=True)
@@ -283,7 +311,11 @@ class SimpleWorkforce:
         rows["HR reason"] = ""
         rows["Final hours"] = pd.to_numeric(rows.working_hours, errors="coerce").fillna(0.0)
         editable = {"Resolve", "Final status", "HR reason", "Final hours"}
-        with st.form("simple_hr_resolution"):
+        queue_revision = hashlib.sha256(
+            rows[["id", "updated_at", "issue", "joining_date", "last_working_date",
+                  "employment_status", "master_division"]].to_json().encode()
+        ).hexdigest()
+        with st.form(f"simple_hr_resolution_{queue_revision}"):
             bulk_status = st.selectbox("Status for selected rows",
                                        ["Use status from sheet", "Use manually entered final status"] + sorted(PAID | {"Absent", "LWP"}))
             st.caption("Use status from sheet saves eligible rows and leaves exceptions in HR Review.")
@@ -295,7 +327,7 @@ class SimpleWorkforce:
                               "raw_status", "time_in", "time_out", "Final status", "Final hours", "HR reason"],
                 disabled=[c for c in rows.columns if c not in editable],
                 column_config={"id": None, "department": None, "joining_date": None, "last_working_date": None,
-                    "updated_at": None, "employment_status": None, "working_hours": None, "status": None, "remark": None,
+                    "updated_at": None, "employment_status": None, "master_division": None, "working_hours": None, "status": None, "remark": None,
                     "Display date": st.column_config.TextColumn("Date"),
                     "employee_id": st.column_config.TextColumn("Employee ID"),
                     "employee_name": st.column_config.TextColumn("Employee"),
@@ -304,7 +336,7 @@ class SimpleWorkforce:
                     "raw_status": st.column_config.TextColumn("Sheet status"),
                     "issue": st.column_config.TextColumn("What HR needs to check"),
                     "Final status": st.column_config.SelectboxColumn(options=sorted(PAID | {"Absent", "LWP"})),
-                    "Final hours": st.column_config.NumberColumn(min_value=0.0, max_value=24.0, step=0.25)}, key=f"simple_hr_editor_{self.division}_{start}_{issue}_{employee}")
+                    "Final hours": st.column_config.NumberColumn(min_value=0.0, max_value=24.0, step=0.25)}, key=f"simple_hr_editor_{self.division}_{start}_{issue}_{employee}_{queue_revision}")
             submitted = st.form_submit_button("Save selected HR decisions", type="primary")
         if not submitted:
             return
