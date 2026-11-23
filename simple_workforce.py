@@ -755,7 +755,8 @@ class SimpleWorkforce:
             return
         saved = st.session_state.pop("employment_dates_saved", None)
         if saved:
-            st.success(f"Saved employment dates for {saved:,} employees.")
+            employee_label = "employee" if saved == 1 else "employees"
+            st.success(f"Saved employment dates for {saved:,} {employee_label}.")
         start, end = self.period()
         result = attrition_summary(employees.to_dict("records"), start, end)
         confirmed_master = employees[~employees.department.astype(str).str.strip().str.upper().eq("HR REVIEW")]
@@ -774,27 +775,49 @@ class SimpleWorkforce:
         row = employees[employees.employee_id==eid].iloc[0]
         st.caption(f"{row.division} · {row.status}")
         joined = employment_date(row.joining_date)
-        left = pd.to_datetime(row.last_working_date, errors='coerce')
-        with st.form('simple_dates'):
-            join = st.date_input('Joining date', value=None if pd.isna(joined) else joined.date())
-            leave = st.date_input('Last working date (blank if still employed)', value=None if pd.isna(left) else left.date())
-            submit = st.form_submit_button('Save dates', type='primary')
+        left = employment_date(row.last_working_date)
+        with st.form(f"simple_dates_{eid}"):
+            join = st.date_input("Joining date", value=None if pd.isna(joined) else joined.date())
+            leave = st.date_input("Last working date (blank if still employed)", value=None if pd.isna(left) else left.date())
+            if pd.isna(joined):
+                st.caption("You can save a confirmed last working date while HR verifies the joining date.")
+            submit = st.form_submit_button("Save dates", type="primary")
         if submit:
-            if not join or (leave and leave < join) or (leave and leave > date.today()):
-                st.error('Enter a joining date and a valid last working date. Future departures cannot be recorded here.')
+            today = date.today()
+            if (not join and not leave) or (join and join > today) or (leave and (leave > today or (join and leave < join))):
+                st.error("Enter a valid employment date. Dates cannot be in the future, and the last working date must be on or after joining.")
                 return
-            inactive = str(row.status).upper() in INACTIVE
-            if inactive and not leave:
-                st.error('This employee is inactive. Enter their actual last working date. Reactivation remains an Admin action in Employee Master.')
+            if str(row.status).strip().upper() in INACTIVE and not leave:
+                st.error("Enter the actual last working date for this inactive employee. Admin can reactivate employees in Employee Master.")
                 return
+            if not join and pd.notna(joined):
+                st.error("Keep the saved joining date or enter a verified correction.")
+                return
+
             def save(cur):
-                if leave:
-                    cur.execute("UPDATE employees SET joining_date=%s,last_working_date=%s,status='Left' WHERE employee_id=%s", (join.isoformat(),leave,eid))
-                else:
-                    cur.execute('UPDATE employees SET joining_date=%s,last_working_date=NULL WHERE employee_id=%s', (join.isoformat(),eid))
-            self.write(save)
-            st.session_state.pop('simple_hr_queue', None)
-            st.success('Employment dates saved. Attrition will recalculate automatically.')
+                cur.execute(
+                    """UPDATE employees SET joining_date=COALESCE(%s, joining_date),
+                              last_working_date=%s, status=%s
+                       WHERE employee_id=%s AND division IS NOT DISTINCT FROM %s
+                         AND joining_date::text IS NOT DISTINCT FROM %s
+                         AND last_working_date::text IS NOT DISTINCT FROM %s
+                         AND status IS NOT DISTINCT FROM %s""",
+                    (join.isoformat() if join else None, leave.isoformat() if leave else None,
+                     "Left" if leave else row.status, eid, row.division,
+                     None if pd.isna(row.joining_date) else row.joining_date,
+                     None if pd.isna(row.last_working_date) else row.last_working_date, row.status),
+                )
+                if cur.rowcount != 1:
+                    raise ValueError("This employee record changed. Reopen the page and review the saved dates.")
+
+            try:
+                self.write(save)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            st.session_state.pop("simple_hr_queue", None)
+            st.session_state["employment_dates_saved"] = 1
+            st.rerun()
 
     def render(self, page):
         {'Simple Attendance': self.attendance, 'Simple HR Review': self.review,
