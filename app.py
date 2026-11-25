@@ -12593,6 +12593,7 @@ if page == "Home":
         if _v115_money_is_final
         else (f"{_v115_pay_blockers:,} payroll blocker(s)" if _v115_pay_blockers else "Live Payroll")
     )
+    _corr_daily = pd.DataFrame()
     _corrugation_card = (
         "Corrugation Output", f"{_v115_corr_output:,.2f} T",
         f"Target {_v115_corr_target:,.2f} T · {_v115_corr_achievement:.1f}%"
@@ -12600,13 +12601,13 @@ if page == "Home":
     if global_division in {ALL_DIVISIONS, "Greater Noida Plant"}:
         _corr_table = read_df("SELECT to_regclass('auto_corrugation_daily') IS NOT NULL AS available")
         if not _corr_table.empty and _corr_table.iloc[0]["available"]:
-            _corr_month = read_df(
-                "SELECT COUNT(*) AS days, COALESCE(SUM(weight_kg),0) AS kg "
-                "FROM auto_corrugation_daily WHERE work_date BETWEEN ? AND ?",
+            _corr_daily = read_df(
+                "SELECT work_date, weight_kg FROM auto_corrugation_daily "
+                "WHERE work_date BETWEEN ? AND ? ORDER BY work_date",
                 (_v115_first.isoformat(), _v115_last.isoformat()),
             )
-            if not _corr_month.empty and int(_corr_month.iloc[0]["days"]):
-                _corr_tons = int(_corr_month.iloc[0]["kg"]) / 1000
+            if not _corr_daily.empty:
+                _corr_tons = float(_corr_daily["weight_kg"].sum()) / 1000
                 _corrugation_card = (
                     "AUTO Corrugation Output", f"{_corr_tons:,.0f} T",
                     ""
@@ -12636,6 +12637,101 @@ if page == "Home":
             else:
                 destination = ("Cost & Attrition",) if "Cost & Attrition" in _simple_routes else None
             md_kpi_card(f"cost_{_v115_i}", _ic, _lb, _val, _sub, _tone, destination)
+
+    if not _corr_daily.empty and v5_module_allowed("Reports"):
+        import json
+        from simple_workforce import production_cost_rows
+
+        _corr_division = "Greater Noida Plant"
+        _corr_params = (_corr_division, _v115_first.isoformat(), _v115_last.isoformat())
+        _corr_assignments = read_df(
+            """SELECT work_date,division,shift,machine,output_ton,employee_ids,
+                      contractor_headcount,contractor_cost
+               FROM workforce_daily_output
+               WHERE division=? AND work_date BETWEEN ? AND ?
+                 AND LOWER(REGEXP_REPLACE(machine, '[^a-zA-Z0-9]', '', 'g'))
+                     ~ '^(autocorrugation|autocorrugator|corrugator)[0-9]*$'""",
+            _corr_params,
+        )
+        _corr_can_view_cost = can_view_salary(_current_role)
+        _corr_attendance = pd.DataFrame()
+        if _corr_can_view_cost and not _corr_assignments.empty:
+            _corr_attendance = read_df(
+                """SELECT a.employee_id,a.work_date,a.shift,a.division,a.status,
+                          COALESCE(a.review_required,FALSE) AS review_required,a.ot_hours,
+                          e.monthly_salary,e.department
+                   FROM attendance a JOIN employees e ON e.employee_id=a.employee_id
+                   WHERE a.division=? AND a.work_date BETWEEN ? AND ?""",
+                _corr_params,
+            )
+
+        _corr_by_day = {
+            str(day)[:10]: rows for day, rows in _corr_assignments.groupby("work_date")
+        } if not _corr_assignments.empty else {}
+        _corr_productivity = []
+        for _daily in _corr_daily.itertuples(index=False):
+            _day = str(_daily.work_date)[:10]
+            _tons = float(_daily.weight_kg) / 1000
+            _assignments = _corr_by_day.get(_day)
+            _people = _cost = None
+            if _assignments is not None and abs(float(_assignments.output_ton.sum()) - _tons) <= 0.001:
+                _worker_ids = [
+                    str(eid) for raw_ids in _assignments.employee_ids
+                    for eid in json.loads(raw_ids)
+                ]
+                _contractors = _assignments.contractor_headcount
+                _staffing_complete = (
+                    _assignments.employee_ids.map(lambda ids: bool(json.loads(ids)))
+                    | _contractors.gt(0)
+                ).all()
+                if _staffing_complete and _contractors.gt(0).sum() <= 1:
+                    _people = len(set(_worker_ids)) + int(_contractors.sum())
+                # The existing labour calculation charges a daily wage per assignment.
+                # Duplicate employees or contractor shifts need a verified daily total.
+                if (_corr_can_view_cost and _people and len(_worker_ids) == len(set(_worker_ids))
+                        and (_assignments.contractor_cost.gt(0) == _contractors.gt(0)).all()):
+                    _cost_rows = production_cost_rows(_assignments, _corr_attendance)
+                    if _cost_rows["Labour cost (₹)"].notna().all():
+                        _cost = float(_cost_rows["Labour cost (₹)"].sum())
+            _corr_productivity.append({
+                "Date": _day, "Output (T)": _tons, "People worked": _people,
+                "Labour cost (₹)": _cost,
+                "Cost per ton (₹/T)": _cost / _tons if _cost is not None and _tons else None,
+                "Tons per person": _tons / _people if _people else None,
+            })
+
+        _corr_detail = pd.DataFrame(_corr_productivity)
+        _corr_total_tons = _corr_detail["Output (T)"].sum()
+        _corr_logged_people = _corr_detail["People worked"]
+        _corr_logged_cost = _corr_detail["Labour cost (₹)"]
+        _corr_worker_days = _corr_logged_people.sum() if _corr_logged_people.notna().all() else None
+        _corr_cost_total = _corr_logged_cost.sum() if _corr_logged_cost.notna().all() else None
+        _cost_value = (
+            "Restricted" if not _corr_can_view_cost else
+            "N/A" if not _corr_total_tons else
+            "Pending" if _corr_cost_total is None else f"₹{_corr_cost_total / _corr_total_tons:,.2f}"
+        )
+        _worker_value = (
+            "Pending" if _corr_worker_days is None else
+            "N/A" if not _corr_worker_days else f"{_corr_total_tons / _corr_worker_days:,.2f}"
+        )
+        st.caption("Greater Noida · AUTO Corrugation · selected month")
+        _productivity_left, _productivity_right = st.columns(2, gap="small")
+        with _productivity_left:
+            md_kpi_card("corr_labour_cost", "₹", "Manpower Cost per Ton", _cost_value, "₹ per ton", "amber", None)
+        with _productivity_right:
+            md_kpi_card("corr_tons_person", "🏭", "Tonnage per Person", _worker_value, "Tons per worker-day", "blue", None)
+        with st.expander("Daily corrugation productivity"):
+            st.caption("Monthly cost per ton uses total labour cost divided by output. Monthly tonnage per person uses output divided by worker-days. "
+                       "Pending means production, staffing or cost records could not be reconciled for the period.")
+            _visible_columns = (
+                _corr_detail.columns.tolist() if _corr_can_view_cost else
+                ["Date", "Output (T)", "People worked", "Tons per person"]
+            )
+            st.dataframe(
+                _corr_detail[_visible_columns].round(2), hide_index=True, width="stretch",
+                column_config={"Output (T)": st.column_config.NumberColumn(format="%.0f")},
+            )
 
     # Division-wise monthly attendance is visible directly on the MD dashboard.
     _v115_div_rows = []
