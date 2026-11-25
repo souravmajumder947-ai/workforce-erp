@@ -12340,19 +12340,23 @@ if page == "Home":
             st.session_state["v170_report_month"] = global_payroll_month
             st.session_state["_md_attendance_filter"] = filters
 
-    def md_kpi_card(key, icon, label, value, subtitle, tone, destination):
+    def open_daily_corrugation_productivity():
+        st.session_state["_md_corr_productivity_open"] = True
+
+    def md_kpi_card(key, icon, label, value, subtitle, tone, destination=None, *, on_click=None):
         card = (
             f'<div class="v10-kpi {tone}"><div class="v10-kpi-icon">{icon}</div>'
             f'<div><small>{html.escape(label)}</small><b>{html.escape(str(value))}</b>'
             f'<span>{html.escape(subtitle)}</span></div></div>'
         )
-        if destination is None:
+        if destination is None and on_click is None:
             st.markdown(card, unsafe_allow_html=True)
             return
         with st.container(key=f"md_kpi_{key}"):
             st.markdown(card, unsafe_allow_html=True)
-            st.button(f"Open {label}", key=f"open_md_kpi_{key}",
-                      width="stretch", on_click=open_kpi_source, args=destination)
+            st.button(f"Open {label}", key=f"open_md_kpi_{key}", width="stretch",
+                      on_click=on_click if on_click is not None else open_kpi_source,
+                      args=destination if on_click is None else None)
 
     st.markdown("""<style>
     body div[class*="st-key-md_kpi_"] {position:relative;}
@@ -12718,10 +12722,13 @@ if page == "Home":
         st.caption("Greater Noida · AUTO Corrugation · selected month")
         _productivity_left, _productivity_right = st.columns(2, gap="small")
         with _productivity_left:
-            md_kpi_card("corr_labour_cost", "₹", "Manpower Cost per Ton", _cost_value, "₹ per ton", "amber", None)
+            md_kpi_card("corr_labour_cost", "₹", "Manpower Cost per Ton", _cost_value, "₹ per ton", "amber",
+                        on_click=open_daily_corrugation_productivity)
         with _productivity_right:
-            md_kpi_card("corr_tons_person", "🏭", "Tonnage per Person", _worker_value, "Tons per worker-day", "blue", None)
-        with st.expander("Daily corrugation productivity"):
+            md_kpi_card("corr_tons_person", "🏭", "Tonnage per Person", _worker_value, "Tons per worker-day", "blue",
+                        on_click=open_daily_corrugation_productivity)
+        with st.expander("Daily corrugation productivity",
+                         expanded=st.session_state.pop("_md_corr_productivity_open", False)):
             st.caption("Monthly cost per ton uses total labour cost divided by output. Monthly tonnage per person uses output divided by worker-days. "
                        "Pending means production, staffing or cost records could not be reconciled for the period.")
             _visible_columns = (
