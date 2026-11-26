@@ -5278,7 +5278,7 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS, *, monthly_att
         return pd.DataFrame()
 
     att_sql = """
-        SELECT employee_id, division, work_date, status, working_hours, ot_hours
+        SELECT employee_id, division, work_date, status, working_hours, ot_hours, COALESCE(review_required,FALSE) AS review_required
         FROM attendance
         WHERE work_date BETWEEN ? AND ?
     """
@@ -5348,7 +5348,7 @@ def calculate_live_payroll(payroll_month, division=ALL_DIVISIONS, *, monthly_att
             weekly_off_days = float(status_counts.get("WO", 0))
             paid_leave_days = float(status_counts.get("CL", 0) + status_counts.get("SL", 0) + status_counts.get("EL", 0) + status_counts.get("Leave", 0))
             lwp_days = float(status_counts.get("LWP", 0) + status_counts.get("Absent", 0))
-            review_days = float(status_counts.get("HR Review", 0))
+            review_days = float((emp_att.status.eq("HR Review") | emp_att.get("review_required",pd.Series(False,index=emp_att.index)).eq(True)).sum()) if not emp_att.empty else 0.0
             attendance_records = int(emp_att["work_date"].nunique()) if not emp_att.empty else 0
             missing_days = max(0.0, float(eligible_elapsed - attendance_records))
 
@@ -11951,6 +11951,10 @@ _v94_master_pending = 0
 _v94_payroll_pending = False
 _v94_notification_total = 0
 _home_employees = _home_day_attendance = _home_departments = None
+_v94_month_rows = None
+_v94_expected = _v94_covered = _v94_missing_days = 0
+_v94_readiness_error = False
+_v94_salary_scope = _v94_salary_missing = 0
 
 if page in ("Home", "AI Tools"):
     try:
@@ -11965,32 +11969,49 @@ if page in ("Home", "AI Tools"):
         )
         _v94_active_ids.discard("")
 
-        _v94_day_ids = (
-            set(_v94_day_att["employee_id"].fillna("").astype(str).str.strip())
-            if not _v94_day_att.empty and "employee_id" in _v94_day_att.columns else set()
-        )
-        _v94_day_ids.discard("")
-
-        _v94_upload_pending = bool(_v94_active_ids) and _v94_day_att.empty
-        _v94_missing = len(_v94_active_ids - _v94_day_ids) if _v94_active_ids else 0
-
-        # Review signals for the selected working month.
-        _v94_month_start = global_work_date.replace(day=1)
-        _v94_month_end = (
-            (_v94_month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-            - timedelta(days=1)
-        )
-        _v94_att_sql = """
-            SELECT COUNT(*) AS review_count
-            FROM attendance
-            WHERE work_date BETWEEN ? AND ? AND TRIM(status)='HR Review'
-        """
-        _v94_att_params = [_v94_month_start.isoformat(), _v94_month_end.isoformat()]
-        if global_division != ALL_DIVISIONS:
-            _v94_att_sql += " AND division=?"
-            _v94_att_params.append(global_division)
-        _v94_month_att = read_df(_v94_att_sql, tuple(_v94_att_params))
-        _v94_review = int(_v94_month_att.iloc[0]["review_count"])
+        # Monthly readiness follows the selected payroll period, not the daily cards.
+        from simple_workforce import is_post_exit_attendance_placeholder, employment_date
+        _v94_month_start, _v94_month_end = _month_range(global_payroll_month)
+        _v94_as_of = min(_v94_month_end, datetime.now(IST).date())
+        _v94_month_clause, _v94_month_params = v5_division_clause(global_division, "a.")
+        _v94_month_rows = read_df(
+            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours,a.working_hours,
+                      a.raw_status,a.time_in,a.time_out,COALESCE(a.review_required,FALSE) AS review_required,
+                      COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
+                      e.status AS employment_status,e.division AS master_division,
+                      e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date,
+                      e.employee_name,e.department,e.designation
+               FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+               WHERE a.work_date BETWEEN ? AND ?""" + _v94_month_clause,
+            (_v94_month_start.isoformat(), _v94_month_end.isoformat()) + _v94_month_params)
+        if not _v94_month_rows.empty:
+            _v94_post_exit = pd.Series([is_post_exit_attendance_placeholder(r) for r in _v94_month_rows.itertuples(index=False)],
+                                       index=_v94_month_rows.index)
+            _v94_month_rows = _v94_month_rows.loc[~_v94_post_exit].copy()
+        _v94_review = int((_v94_month_rows.status.eq("HR Review") | _v94_month_rows.review_required.eq(True)).sum())
+        _v94_valid = _v94_month_rows.loc[~_v94_month_rows.review_required.eq(True)
+            & _v94_month_rows.status.isin(["Present","OD","Half Day","Absent","LWP","WO","Holiday","CL","SL","EL","Leave"])]
+        _v94_recorded = {(str(r.employee_id),str(r.division),str(r.work_date)[:10]) for r in _v94_valid.itertuples()}
+        _v94_eligible_ids = set()
+        for _emp in _v94_emp.itertuples():
+            _joined = employment_date(_emp.joining_date)
+            _left = employment_date(getattr(_emp,"last_working_date",None))
+            _first = max(_v94_month_start, _joined.date()) if pd.notna(_joined) else _v94_month_start
+            _last = min(_v94_as_of, _left.date()) if pd.notna(_left) else _v94_as_of
+            if _first > _last:
+                continue
+            _v94_eligible_ids.add(str(_emp.employee_id))
+            _days = pd.date_range(_first,_last)
+            _expected = len(_days)
+            # Approved Head Office calendar-pay policy does not require biometric rows.
+            _covered = _expected if str(_emp.division).strip().upper()=="D-63 HEAD OFFICE" else sum(
+                (str(_emp.employee_id),str(_emp.division),d.date().isoformat()) in _v94_recorded for d in _days)
+            _v94_expected += _expected
+            _v94_covered += _covered
+            if _covered < _expected:
+                _v94_missing += 1
+                _v94_missing_days += _expected-_covered
+        _v94_upload_pending = bool(_v94_expected and not _v94_covered)
 
         # Employee-master readiness = active employees whose department is not
         # mapped to an active department master.
@@ -12001,13 +12022,13 @@ if page in ("Home", "AI Tools"):
             set(_v94_dep_master["department"].fillna("").astype(str).str.strip())
             if not _v94_dep_master.empty else set()
         )
-        if _v94_active_ids and not _v94_emp.empty and "department" in _v94_emp.columns:
+        if _v94_eligible_ids and not _v94_emp.empty and "department" in _v94_emp.columns:
             if _v94_dep_set:
                 _v94_master_pending = int(
-                    (~_v94_emp["department"].fillna("").astype(str).str.strip().isin(_v94_dep_set)).sum()
+                    ((_v94_emp.employee_id.astype(str).isin(_v94_eligible_ids)) & ((~_v94_emp["department"].fillna("").astype(str).str.strip().isin(_v94_dep_set)) | _v94_emp.joining_date.map(employment_date).isna())).sum()
                 )
             else:
-                _v94_master_pending = len(_v94_active_ids)
+                _v94_master_pending = len(_v94_eligible_ids)
 
         # Payroll readiness = every salary-active employee in the selected
         # scope has a finalized/imported payroll record for the selected month.
@@ -12026,6 +12047,13 @@ if page in ("Home", "AI Tools"):
             _v94_payroll_ids.discard("")
         else:
             _v94_payroll_ids = set()
+        _v94_payroll_ids &= _v94_eligible_ids
+        _v94_salary_scope = len(_v94_payroll_ids)
+        if _v94_salary_scope:
+            _salary_emps = _v94_emp.loc[_v94_emp.employee_id.astype(str).isin(_v94_payroll_ids)]
+            _salary_ok = (pd.to_numeric(_salary_emps.monthly_salary,errors="coerce").fillna(0).gt(0)
+                          | pd.to_numeric(_salary_emps.gross_pay,errors="coerce").fillna(0).gt(0))
+            _v94_salary_missing = int((~_salary_ok).sum())
 
         _v94_final_sql = """
             SELECT employee_id
@@ -12050,9 +12078,11 @@ if page in ("Home", "AI Tools"):
             + int(_v94_review)
             + int(_v94_master_pending)
             + int(_v94_payroll_pending)
+            + int(_v94_salary_missing)
         )
     except Exception:
         # Never allow dashboard readiness diagnostics to take the ERP offline.
+        _v94_readiness_error = True
         _v94_upload_pending = False
         _v94_missing = 0
         _v94_review = 0
@@ -12082,6 +12112,7 @@ if page == "Home":
             employee_access=v5_module_allowed("Employees"),
             payroll_access=v5_module_allowed("Payroll") and can_view_salary(_current_role),
             warning_access=can_edit_hr(_current_role),
+            selected_month=global_payroll_month,selected_division=global_division,
         )
 
     employees = _home_employees if _home_employees is not None else v5_active_employees(global_division)
@@ -12092,20 +12123,7 @@ if page == "Home":
     # Share the selected month's records between payroll and dashboard totals.
     _v115_first, _v115_last = _month_range(global_payroll_month)
     _v115_month_clause, _v115_month_params = v5_division_clause(global_division, "a.")
-    try:
-        _v115_month_att = read_df(
-            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours,a.working_hours,
-                      a.raw_status,a.time_in,a.time_out,COALESCE(a.review_required,FALSE) AS review_required,
-                      COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
-                      e.status AS employment_status,e.division AS master_division,
-                      e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date
-               FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
-               WHERE a.work_date BETWEEN ? AND ? """ + _v115_month_clause + """
-               ORDER BY a.work_date,a.division,a.employee_id""",
-            (_v115_first.isoformat(), _v115_last.isoformat()) + _v115_month_params
-        )
-    except Exception:
-        _v115_month_att = None
+    _v115_month_att = _v94_month_rows
 
     payroll = (
         calculate_live_payroll(global_payroll_month, global_division, monthly_attendance=_v115_month_att)
@@ -12144,11 +12162,12 @@ if page == "Home":
             if _v10_dep_set else active_count
         )
 
-    _v10_salary_ready = (salary_available / active_count * 100.0) if active_count else 0.0
+    salary_missing = _v94_salary_missing
+    _v10_salary_ready = (100.0 * (_v94_salary_scope - _v94_salary_missing) / _v94_salary_scope) if _v94_salary_scope else 0.0
     _v10_dept_ready = ((active_count - dept_pending) / active_count * 100.0) if active_count else 0.0
-    _v10_att_rows = len(attendance)
-    _v10_att_coverage = min(100.0, (_v10_att_rows / active_count * 100.0)) if active_count else 0.0
-    _v10_review_rate = (review / max(_v10_att_rows, 1) * 100.0)
+    _v10_att_rows = len(_v94_month_rows) if _v94_month_rows is not None else 0
+    _v10_att_coverage = (100.0 * _v94_covered / _v94_expected) if _v94_expected else 0.0
+    _v10_review_rate = (_v94_review / max(_v10_att_rows, 1) * 100.0)
     _v10_pay_blockers = int(
         ((payroll["Missing Days"] > 0) | (payroll["HR Review"] > 0)).sum()
     ) if not payroll.empty else 0
@@ -12168,10 +12187,14 @@ if page == "Home":
             - min(12.0, _v10_review_rate * 0.8),
         ),
     )
-    if _v94_upload_pending:
-        _v10_health_word, _v10_health_tone = "Awaiting Attendance", "warn"
-        # Keep the ring meaningful as a system-readiness score until daily attendance arrives.
-        _v10_health = max(0.0, min(100.0, (_v10_salary_ready * 0.55) + (_v10_dept_ready * 0.45)))
+    if _v94_readiness_error:
+        _v10_health_word, _v10_health_tone = "Data check unavailable", "warn"
+    elif _v94_upload_pending:
+        _v10_health_word, _v10_health_tone = "Awaiting attendance", "warn"
+    elif _v94_missing or _v94_review or _v94_salary_missing or _v10_pay_blockers:
+        _v10_health_word, _v10_health_tone = "Review required", "warn"
+    elif _v94_payroll_pending:
+        _v10_health_word, _v10_health_tone = "Payroll approval pending", "warn"
     elif _v10_health >= 90:
         _v10_health_word, _v10_health_tone = "Excellent", "good"
     elif _v10_health >= 75:
@@ -12954,7 +12977,7 @@ if page == "Home":
         with st.container(border=True):
             st.markdown(
                 f"""
-                <div class="v10-panel-title"><span>WORKFORCE READINESS</span><small>Live controls</small></div>
+                <div class="v10-panel-title"><span>WORKFORCE READINESS</span><small>{global_payroll_month:%b %Y}</small></div>
                 <div class="v10-health-wrap">
                   <div class="v10-health-ring" style="--v10score:{_v10_health:.1f};">
                     <div><b>{_v10_health:.0f}</b><small>/100</small></div>
@@ -12962,9 +12985,9 @@ if page == "Home":
                   <div class="v10-health-copy">
                     <small>Overall Status</small>
                     <b class="{_v10_health_tone}">● {_v10_health_word}</b>
-                    <span>Attendance coverage {_v10_att_coverage:.1f}%</span>
+                    <span>Active master coverage {_v10_att_coverage:.1f}% ({_v94_covered:,}/{_v94_expected:,} days)</span>
                     <span>Salary readiness {_v10_salary_ready:.1f}%</span>
-                    <span>Payroll readiness {_v10_pay_ready:.1f}%</span>
+                    <span>Payroll attendance readiness {_v10_pay_ready:.1f}%</span>
                   </div>
                 </div>
                 """,
@@ -13049,10 +13072,12 @@ if page == "Home":
 
     # AI priority alerts.
     _v10_alerts = []
+    if _v94_readiness_error:
+        _v10_alerts.append(("Readiness check unavailable", "Reload or check database connection", "High", "Attendance"))
     if _v94_upload_pending:
-        _v10_alerts.append(("Attendance Not Loaded", f"No source rows for {global_work_date.strftime('%d %b %Y')}", "High", "Attendance"))
+        _v10_alerts.append(("Attendance Not Loaded", f"No eligible attendance recorded for {global_payroll_month:%b %Y}", "High", "Attendance"))
     if _v94_missing:
-        _v10_alerts.append(("Missing Attendance", f"{_v94_missing:,} active employee(s) need source verification", "High", "Attendance"))
+        _v10_alerts.append(("Missing Attendance", f"{_v94_missing:,} active employee(s) · {_v94_missing_days:,} missing eligible days", "High", "Attendance"))
     if _v94_review:
         _v10_alerts.append(("HR Review Pending", f"{_v94_review:,} attendance review row(s)", "High", "Attendance"))
     if _v94_master_pending:
@@ -13062,7 +13087,7 @@ if page == "Home":
     if _v94_payroll_pending and _v10_payroll_close_due and "Payroll" in available_modules:
         _v10_alerts.append(("Payroll Not Finalized", f"{global_payroll_month.strftime('%b %Y')} is not fully closed", "Medium", "Payroll"))
     if salary_missing:
-        _v10_alerts.append(("Salary Master Gap", f"{salary_missing:,} employee(s) have no salary value", "Medium", "Employees"))
+        _v10_alerts.append(("Salary Master Gap", f"{salary_missing:,} payroll-eligible employee(s) have no salary value", "Medium", "Employees"))
     if not _v10_alerts:
         _v10_alerts.append(("All Clear", "No priority HR exception in the selected context", "Low", "Home"))
 
@@ -20557,19 +20582,8 @@ elif page == "AI Tools":
     )
 
     ai_emp = v5_active_employees(global_division)
-    ai_att = read_df(
-        """SELECT a.work_date,a.division,a.employee_id,a.status,a.working_hours,a.ot_hours,
-                  e.employee_name,e.department,e.designation
-           FROM attendance a
-           LEFT JOIN employees e ON e.employee_id=a.employee_id
-           WHERE a.work_date BETWEEN ? AND ?"""
-        + ("" if global_division==ALL_DIVISIONS else " AND a.division=?")
-        + " ORDER BY a.work_date",
-        (
-            (global_work_date-timedelta(days=29)).isoformat(),
-            global_work_date.isoformat()
-        ) + (() if global_division==ALL_DIVISIONS else (global_division,))
-    )
+    ai_att = _v94_month_rows if _v94_month_rows is not None else pd.DataFrame(
+        columns=["work_date","division","employee_id","status","working_hours","ot_hours","employee_name","department","designation","review_required"])
     ai_pay = (
         calculate_live_payroll(global_payroll_month, global_division)
         if can_view_salary(_current_role) else pd.DataFrame()
@@ -20582,7 +20596,7 @@ elif page == "AI Tools":
             pd.to_numeric(ai_emp.get("monthly_salary",0),errors="coerce").fillna(0).gt(0)
             | pd.to_numeric(ai_emp.get("gross_pay",0),errors="coerce").fillna(0).gt(0)
         )
-        ai_salary_missing = int((~_sal_ok).sum())
+        ai_salary_missing = _v94_salary_missing
 
         _dm = read_df("SELECT department FROM departments WHERE active='Yes'")
         _approved = set(_dm["department"].astype(str).tolist()) if not _dm.empty else set()
@@ -20590,7 +20604,7 @@ elif page == "AI Tools":
             (~ai_emp["department"].fillna("").astype(str).isin(_approved)).sum()
         ) if _approved else len(ai_emp)
 
-    ai_hr_review = int((ai_att["status"]=="HR Review").sum()) if not ai_att.empty else 0
+    ai_hr_review = _v94_review
     ai_ot = float(pd.to_numeric(ai_att.get("ot_hours",0),errors="coerce").fillna(0).sum()) if not ai_att.empty else 0
     ai_pay_blocked = int(
         ((ai_pay["Missing Days"]>0)|(ai_pay["HR Review"]>0)).sum()
@@ -20598,11 +20612,11 @@ elif page == "AI Tools":
 
     v5_kpis([
         ("Employees",f"{len(ai_emp):,}","Current selected scope","blue"),
-        ("30D Attendance Rows",f"{len(ai_att):,}","Recent attendance signals","good"),
+        ("Monthly Attendance Rows",f"{len(ai_att):,}","Selected payroll month","good"),
         ("Salary Missing",f"{ai_salary_missing:,}","Data-quality gap","warn" if ai_salary_missing else "good"),
         ("Dept. Pending",f"{ai_dept_pending:,}","Functional mapping review","warn" if ai_dept_pending else "good"),
-        ("HR Review Signals",f"{ai_hr_review:,}","Last 30 days","warn" if ai_hr_review else "good"),
-        ("OT Hours",f"{ai_ot:,.1f}","Last 30 days","blue"),
+        ("HR Review Signals",f"{ai_hr_review:,}","Selected month","warn" if ai_hr_review else "good"),
+        ("OT Hours",f"{ai_ot:,.1f}","Selected month","blue"),
     ])
 
     # V9.6 AI COMMAND CENTRE
@@ -20633,7 +20647,7 @@ elif page == "AI Tools":
           <div class="v96-ai-console-grid">
             <div><small>RISK INDEX</small><b>{_v96_ai_risk_label}</b></div>
             <div><small>PAYROLL BLOCKERS</small><b>{ai_pay_blocked:,}</b></div>
-            <div><small>30D HR REVIEW</small><b>{ai_hr_review:,}</b></div>
+            <div><small>MONTHLY HR REVIEW</small><b>{ai_hr_review:,}</b></div>
             <div><small>AUTOMATION GATE</small><b>{"READY" if _v96_ai_automation_ready else "BLOCKED"}</b></div>
           </div>
         </div>
@@ -20644,7 +20658,7 @@ elif page == "AI Tools":
     st.markdown(
         '<div class="v8-ai-grid">'
         f'<div class="v8-ai-card purple"><div class="icon">✦</div><div class="title">Data Quality Assistant</div><div class="copy">{ai_salary_missing} salary gap(s), {ai_dept_pending} department decision(s). Prioritize master quality before payroll finalization.</div></div>'
-        f'<div class="v8-ai-card green"><div class="icon">◉</div><div class="title">Attendance Insight</div><div class="copy">{ai_hr_review} HR-review attendance signal(s) were detected in the last 30 days.</div></div>'
+        f'<div class="v8-ai-card green"><div class="icon">◉</div><div class="title">Attendance Insight</div><div class="copy">{ai_hr_review} HR-review attendance signal(s) were detected in the selected month.</div></div>'
         f'<div class="v8-ai-card amber"><div class="icon">₹</div><div class="title">Payroll Risk Alert</div><div class="copy">{ai_pay_blocked} employee(s) currently block payroll finalization for {global_payroll_month.strftime("%b %Y")}.</div></div>'
         f'<div class="v8-ai-card"><div class="icon">▦</div><div class="title">Workforce Intelligence</div><div class="copy">Visualize department, division, attendance status and overtime distribution from the live HR database.</div></div>'
         '</div>',
@@ -20708,7 +20722,7 @@ elif page == "AI Tools":
             with st.container(border=True):
                 v5_panel("30-Day Attendance Trend","Present / absent / review signals over time.")
                 if ai_att.empty:
-                    st.info("No attendance data in the last 30 days.")
+                    st.info("No attendance data in the selected month.")
                 else:
                     trend = (
                         ai_att.groupby(["work_date","status"])
@@ -20728,7 +20742,7 @@ elif page == "AI Tools":
                     st.altair_chart(chart,use_container_width=True)
         with a2:
             with st.container(border=True):
-                v5_panel("Status Mix","Last 30 days.")
+                v5_panel("Status Mix","Selected month.")
                 if ai_att.empty:
                     st.info("No attendance data.")
                 else:
@@ -20788,11 +20802,11 @@ elif page == "AI Tools":
                 elif "employee" in q and ("how many" in q or "count" in q):
                     answer=f"There are {len(ai_emp):,} active employee(s) in the selected scope."
                 elif "review" in q or "exception" in q:
-                    answer=f"There are {ai_hr_review:,} attendance HR-review signal(s) in the last 30 days and {ai_pay_blocked:,} payroll blocker(s) in the selected month."
+                    answer=f"There are {ai_hr_review:,} attendance HR-review signal(s) in the selected month and {ai_pay_blocked:,} payroll blocker(s) in the selected month."
                 elif "overtime" in q or "ot " in q or q=="ot":
-                    answer=f"Total recorded OT in the last 30 days is {ai_ot:,.2f} hours."
+                    answer=f"Total recorded OT in the selected month is {ai_ot:,.2f} hours."
                 elif "attendance" in q:
-                    answer=f"The last 30 days contain {len(ai_att):,} attendance row(s), including {ai_hr_review:,} HR-review signal(s)."
+                    answer=f"The selected month contain {len(ai_att):,} attendance row(s), including {ai_hr_review:,} HR-review signal(s)."
                 else:
                     answer=(
                         "I can currently answer live questions about employee headcount, salary gaps, "
@@ -20808,10 +20822,10 @@ elif page == "AI Tools":
         st.markdown('<div class="v96-section-head"><span>AUTOMATION HUB</span><small>Live readiness gates · no silent data edits</small></div>', unsafe_allow_html=True)
 
         _v96_auto_rows = [
-            ("Attendance source", "READY" if not _v94_upload_pending else "ACTION", "Attendance exists for the selected working date" if not _v94_upload_pending else "Attendance upload is required"),
+            ("Attendance source", "READY" if not _v94_upload_pending else "ACTION", "Attendance source exists for the selected month" if not _v94_upload_pending else "Attendance upload is required"),
             ("HR Review", "READY" if _v94_review == 0 else "ACTION", "No review rows in the current month" if _v94_review == 0 else f"{_v94_review:,} attendance review row(s) pending"),
             ("Employee Master", "READY" if _v94_master_pending == 0 else "ACTION", "No temporary HR Review department mappings" if _v94_master_pending == 0 else f"{_v94_master_pending:,} master record(s) pending"),
-            ("Missing attendance", "READY" if _v94_missing == 0 else "CHECK", "No active employee is missing the selected-date row" if _v94_missing == 0 else f"{_v94_missing:,} active employee(s) need source verification"),
+            ("Missing attendance", "READY" if _v94_missing == 0 else "CHECK", "No eligible active employee-days are missing" if _v94_missing == 0 else f"{_v94_missing:,} active employee(s) · {_v94_missing_days:,} missing days"),
             ("Payroll close", "READY" if not _v94_payroll_pending else "CHECK", "Selected payroll context is finalized" if not _v94_payroll_pending else f"{global_payroll_month.strftime('%b %Y')} is not fully finalized"),
         ]
         for _v96_auto_name, _v96_auto_state, _v96_auto_detail in _v96_auto_rows:
