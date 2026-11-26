@@ -528,7 +528,7 @@ class SimpleWorkforce:
         st.caption(f"{start:%d %b %Y} to {end:%d %b %Y}. Check the issue, choose the final status and add a reason.")
         self.remove_post_exit_month(start, end)
         master_clause, master_params = self.scope()
-        pending = self.read("SELECT employee_id,employee_name,division,designation FROM employees WHERE UPPER(TRIM(department))='HR REVIEW'" + master_clause, master_params)
+        pending = self.read("SELECT employee_id,employee_name,division,designation FROM employees WHERE UPPER(TRIM(department))='HR REVIEW' AND COALESCE(UPPER(TRIM(status)), '') NOT IN ('INACTIVE','LEFT','RESIGNED','TERMINATED')" + master_clause, master_params)
         if not pending.empty and self.c["can_edit_hr"](self.role):
             with st.expander(f"Confirm new employees ({len(pending)})", expanded=False):
                 st.caption("Confirm identity and employment details once. Then resolve their attendance below.")
