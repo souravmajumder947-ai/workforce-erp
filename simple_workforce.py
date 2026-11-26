@@ -366,6 +366,118 @@ class SimpleWorkforce:
             st.session_state["simple_hr_success"] = f"Removed {len(preview):,} attendance rows for {', '.join(ids)}."
             st.rerun()
 
+    def import_hr_remarks(self, rows, start, end):
+        with st.expander("Import HR-reviewed Excel"):
+            st.caption("Upload the downloaded HR Review sheet with Remark filled as MISS PUNCH or LEFT. "
+                       "For missing hours, HR can add a Final Working Hours column.")
+            upload = st.file_uploader("HR-reviewed Excel", type=["xlsx", "csv"], key="hr_remarks_upload")
+            if upload is None:
+                return
+            try:
+                incoming = (pd.read_excel(upload, dtype=str, keep_default_na=False)
+                            if upload.name.lower().endswith(".xlsx")
+                            else pd.read_csv(upload, dtype=str, keep_default_na=False))
+                required = {"Employee ID", "Attendance Date", "Attendance Division", "Remark", "Working Hours", "Sheet Status"}
+                if not required.issubset(incoming.columns):
+                    raise ValueError("Use the downloaded HR Review headers and add the Remark column.")
+                incoming["Employee ID"] = incoming["Employee ID"].str.strip()
+                incoming["Attendance Date"] = incoming["Attendance Date"].map(employment_date)
+                incoming["Attendance Division"] = incoming["Attendance Division"].str.strip()
+                incoming["Remark"] = incoming["Remark"].str.strip().str.upper()
+                keys = ["Employee ID", "Attendance Date", "Attendance Division"]
+                if (incoming["Attendance Date"].isna().any() or incoming["Employee ID"].eq("").any()
+                        or incoming.duplicated(keys).any()):
+                    raise ValueError("Every row needs a unique employee, date and division.")
+            except (ValueError, OSError) as exc:
+                st.error(str(exc))
+                return
+
+            live = {}
+            for row in rows.itertuples(index=False):
+                key = (str(row.employee_id), employment_date(row.work_date), row.division)
+                live.setdefault(key, []).append(row)
+            ready, held = [], []
+            for _, record in incoming.iterrows():
+                key = tuple(record[field] for field in keys)
+                matches = live.get(key, [])
+                decision = record["Remark"]
+                problem = None
+                if len(matches) != 1:
+                    problem = "No unique pending ERP row matches this employee, date and division."
+                elif decision == "LEFT":
+                    problem = "Confirm employment exit date and use the owner removal workflow for out-of-employment attendance."
+                elif decision != "MISS PUNCH":
+                    problem = "Remark must be MISS PUNCH or LEFT."
+                else:
+                    row = matches[0]
+                    joined = employment_date(row.joining_date)
+                    left = employment_date(row.last_working_date)
+                    hours = pd.to_numeric(record.get("Final Working Hours", "") or row.working_hours, errors="coerce")
+                    if (pd.isna(joined) or key[1] < joined or (pd.notna(left) and key[1] > left)
+                            or (str(row.employment_status).strip().upper() in INACTIVE and pd.isna(left))
+                            or pd.isna(row.master_division) or row.master_division != row.division
+                            or str(row.department).strip().upper() == "HR REVIEW"):
+                        problem = "Employee Master or employment dates need correction."
+                    elif (pd.isna(pd.to_numeric(record["Working Hours"], errors="coerce"))
+                          or pd.isna(row.working_hours)
+                          or abs(float(record["Working Hours"]) - float(row.working_hours)) > 0.02
+                          or str(record["Sheet Status"]).strip().upper() != str(row.raw_status).strip().upper()):
+                        problem = "Source attendance changed since export; review again."
+                    elif pd.isna(hours) or not 0 < float(hours) <= 24:
+                        problem = "HR must add verified Final Working Hours."
+                    else:
+                        ready.append((row, float(hours)))
+                if problem:
+                    held.append(dict(zip(keys, key), Remark=decision, **{"Action needed": problem}))
+
+            st.write(f"{len(ready):,} rows ready to mark Present; {len(held):,} rows held for review.")
+            if held:
+                held_table = pd.DataFrame(held)
+                st.dataframe(held_table, hide_index=True)
+                st.download_button("Download remaining HR checks", review_csv(held_table),
+                                   f"hr_remaining_{start:%Y_%m}.csv", "text/csv")
+            if not ready:
+                return
+            st.dataframe(pd.DataFrame([
+                {"Employee ID": row.employee_id, "Attendance Date": row.work_date,
+                 "Attendance Division": row.division, "Final Status": "Present", "Final Working Hours": hours}
+                for row, hours in ready
+            ]), hide_index=True)
+            revision = hashlib.sha256(repr([(row.id, row.updated_at, hours) for row, hours in ready]).encode()).hexdigest()
+            verified = st.checkbox("HR has verified the listed Present statuses and working hours",
+                                   key=f"hr_remarks_confirm_{revision}")
+            if not st.button("Apply verified MISS PUNCH decisions", disabled=not verified,
+                             key=f"hr_remarks_apply_{revision}"):
+                return
+            threshold = self.c["get_setting_float"]("ot_threshold_hours", 12.0)
+
+            def save(cur):
+                for row, hours in sorted(ready, key=lambda item: item[0].id):
+                    cur.execute("""UPDATE attendance AS a SET status='Present',working_hours=%s,ot_hours=%s,
+                        review_required=FALSE,source_issue='',remark=%s,reviewed_by=%s,updated_at=CURRENT_TIMESTAMP
+                        WHERE a.id=%s AND a.division=%s AND a.updated_at IS NOT DISTINCT FROM %s
+                        AND (a.status='HR Review' OR a.review_required=TRUE)
+                        AND EXISTS (SELECT 1 FROM employees e WHERE e.employee_id=a.employee_id
+                          AND e.division=a.division AND e.department IS NOT DISTINCT FROM %s
+                          AND e.status IS NOT DISTINCT FROM %s
+                          AND e.joining_date::text IS NOT DISTINCT FROM %s
+                          AND e.last_working_date::text IS NOT DISTINCT FROM %s)""",
+                        (hours, max(0.0, hours-threshold),
+                         f"{row.remark or ''} | HR {self.user['username']}: MISS PUNCH (Excel)",
+                         self.user["username"], int(row.id), row.division,
+                         None if pd.isna(row.updated_at) else row.updated_at, row.department, row.employment_status,
+                         None if pd.isna(row.joining_date) else row.joining_date,
+                         None if pd.isna(row.last_working_date) else row.last_working_date))
+                    if cur.rowcount != 1:
+                        raise ValueError("Attendance or Employee Master changed. Review the file again.")
+            try:
+                self.write(save)
+            except Exception as exc:
+                st.error(f"No changes saved: {exc}")
+                return
+            st.session_state["simple_hr_success"] = f"Resolved {len(ready):,} MISS PUNCH attendance rows."
+            st.rerun()
+
     def review(self):
         st.title("HR Review")
         message = st.session_state.pop("simple_hr_success", None)
@@ -444,6 +556,7 @@ class SimpleWorkforce:
         if not self.c["can_edit_hr"](self.role):
             st.dataframe(rows, hide_index=True)
             return
+        self.import_hr_remarks(rows, start, end)
         export_labels = {
             "employee_id": "Employee ID", "employee_name": "Employee Name",
             "work_date": "Attendance Date", "division": "Attendance Division",
