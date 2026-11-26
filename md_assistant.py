@@ -7,12 +7,13 @@ import re
 import pandas as pd
 import streamlit as st
 
-from simple_workforce import attrition_summary, production_cost_rows
+from simple_workforce import attrition_summary, production_cost_rows, is_post_exit_attendance_placeholder
 
 
 DIVISIONS = {
     "Greater Noida Plant": "Greater Noida Plant",
     "D-63 Head Office": "Sector 63 Head Office",
+    "Dhaulana Glass Plant": "Dhaulana Glass Plant",
 }
 LEAVE_STATUSES = {"Leave", "CL", "SL", "EL", "LWP"}
 QUESTION_EXAMPLES = (
@@ -115,14 +116,10 @@ def interpret_question(question, selected_day, today):
     prompt = question.casefold().strip()
     if not prompt:
         raise ValueError("Enter an ERP question.")
-    if re.search(r"\b(?:dhaulana|glass plant)\b", prompt):
-        raise ValueError("MD Assistant currently covers Greater Noida Plant and Sector 63 Head Office.")
-
     noida = bool(re.search(r"\b(?:greater noida|noida plant)\b", prompt))
     office = bool(re.search(r"\b(?:head office|(?:sector|sec|d)\s*-?\s*63)\b", prompt))
-    divisions = tuple(DIVISIONS)
-    if noida != office:
-        divisions = (divisions[0 if noida else 1],)
+    glass = bool(re.search(r"\b(?:dhaulana|glass plant)\b", prompt))
+    divisions = tuple(d for d,wanted in zip(DIVISIONS,(noida,office,glass)) if wanted) or tuple(DIVISIONS)
 
     if re.search(r"\b(?:payroll|employee salary|warning letters?|bank details|delete|approve|send|update)\b", prompt):
         raise ValueError("This assistant answers reporting questions about attendance, HR review, production, labour cost and attrition.")
@@ -137,7 +134,7 @@ def interpret_question(question, selected_day, today):
     ):
         intent = "compare_cost"
     elif re.search(r"\b(?:hr reviews?|hr cases?|pending hr|exceptions?)\b", prompt):
-        intent = "hr"
+        intent = "hr" if re.search(r"\b(?:today|yesterday)\b|\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{4}", prompt) else "hr_month"
     elif re.search(r"\b(?:mis|report|attendance|manpower|production|tonnage|cost|overview|summary)\b", prompt):
         intent = "mis"
     else:
@@ -171,13 +168,19 @@ def interpret_question(question, selected_day, today):
 
 def attendance_rows(read, day, divisions):
     placeholders = ",".join("?" for _ in divisions)
-    return read(
+    rows = read(
         """SELECT a.employee_id,a.work_date,a.shift,a.division,a.status,a.review_required,a.ot_hours,
-                  e.monthly_salary,e.department
+                  e.monthly_salary,e.department,a.raw_status,a.time_in,a.time_out,a.working_hours,
+                  COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
+                  e.status AS employment_status,e.division AS master_division,
+                  e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date
            FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
            WHERE a.work_date=? AND a.division IN (""" + placeholders + ")",
         (day.isoformat(), *divisions),
     )
+    if not rows.empty:
+        rows = rows.loc[[not is_post_exit_attendance_placeholder(r) for r in rows.itertuples(index=False)]].copy()
+    return rows
 
 
 def attendance_summary(attendance, divisions):
@@ -271,13 +274,20 @@ def attrition_rows(read, day, divisions):
 
 def monthly_hr_rows(read, day, divisions):
     placeholders = ",".join("?" for _ in divisions)
-    counts = read(
-        """SELECT division,COUNT(*) AS pending FROM attendance
-           WHERE work_date BETWEEN ? AND ? AND (status='HR Review' OR review_required=TRUE)
-           AND division IN (""" + placeholders + ") GROUP BY division",
+    rows = read(
+        """SELECT a.work_date,a.division,a.raw_status,a.time_in,a.time_out,a.working_hours,a.ot_hours,
+                  COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
+                  e.status AS employment_status,e.division AS master_division,
+                  e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date
+           FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+           WHERE a.work_date BETWEEN ? AND ? AND (a.status='HR Review' OR a.review_required=TRUE)
+           AND a.division IN (""" + placeholders + ")",
         (day.replace(day=1).isoformat(), day.isoformat(), *divisions),
     )
-    by_division = dict(zip(counts.division, counts.pending))
+    by_division = {}
+    for r in rows.itertuples(index=False):
+        if not is_post_exit_attendance_placeholder(r):
+            by_division[r.division] = by_division.get(r.division,0)+1
     return pd.DataFrame([{"Location": DIVISIONS[d], "Pending HR review": int(by_division.get(d, 0))} for d in divisions])
 
 
@@ -342,6 +352,10 @@ def render_response(read, request):
             )
             st.dataframe(comparison, hide_index=True, width="stretch")
         return
+    if request.intent == "hr_month":
+        st.markdown("**Pending HR review this month**")
+        st.dataframe(monthly_hr_rows(read, request.day, request.divisions),hide_index=True,width="stretch")
+        return
     if request.intent == "hr":
         attendance = attendance_summary(attendance_rows(read, request.day, request.divisions), request.divisions)
         st.markdown("**Pending HR review**")
@@ -400,7 +414,7 @@ def render_md_assistant(read, today, username):
         render_response(read, request)
 
 
-def render_jarvis_launcher(read, today, username, *, reports_access, employee_access, payroll_access, warning_access):
+def render_jarvis_launcher(read, today, username, *, reports_access, employee_access, payroll_access, warning_access, selected_month=None, selected_division=None):
     state_key = f"jarvis_open_{username}"
     is_open = st.session_state.get(state_key, False)
 
@@ -423,14 +437,18 @@ def render_jarvis_launcher(read, today, username, *, reports_access, employee_ac
 
             from jarvis_employee import employee_sections, find_employee, render_employee_answer, reporting_period
 
-            selected = st.date_input("Reporting date", value=today, max_value=today, key=f"jarvis_date_{username}")
+            from calendar import monthrange
+            default_day = min(today, selected_month.replace(day=monthrange(selected_month.year,selected_month.month)[1])) if selected_month else today
+            scope = (selected_division,) if selected_division in DIVISIONS else tuple(DIVISIONS)
+            selected = st.date_input("Reporting date", value=default_day, max_value=today, key=f"jarvis_date_{username}_{default_day}")
+            st.caption("Default reporting scope: " + ", ".join(DIVISIONS[d] for d in scope))
             answer_key = f"jarvis_answer_{username}"
             if reports_access:
                 briefing, mis = st.columns(2)
                 if briefing.button("What needs attention?", key=f"jarvis_briefing_{username}"):
-                    st.session_state[answer_key] = ("report", Request("briefing", selected, tuple(DIVISIONS)))
+                    st.session_state[answer_key] = ("report", Request("briefing", selected, scope))
                 if mis.button("Generate Daily MIS", key=f"jarvis_mis_{username}"):
-                    st.session_state[answer_key] = ("report", Request("mis", selected, tuple(DIVISIONS)))
+                    st.session_state[answer_key] = ("report", Request("mis", selected, scope))
             with st.form(f"jarvis_ask_{username}"):
                 question = st.text_input("Ask JARVIS", max_chars=250,
                                          placeholder="Employee: Sourav Majumder | performance 2026-10")
@@ -454,7 +472,10 @@ def render_jarvis_launcher(read, today, username, *, reports_access, employee_ac
                         start, end = reporting_period(prompt, selected, today)
                         st.session_state[answer_key] = ("employee", (identity, employee_sections(prompt), start, end))
                     else:
-                        st.session_state[answer_key] = ("report", interpret_question(question, selected, today))
+                        request = interpret_question(question, selected, today)
+                        if not re.search(r"\b(?:greater noida|noida plant|head office|dhaulana|glass plant|(?:sector|sec|d)\s*-?\s*63)\b", question, re.I):
+                            request = Request(request.intent,request.day,scope)
+                        st.session_state[answer_key] = ("report", request)
                 except ValueError as exc:
                     st.info(str(exc))
             answer = st.session_state.get(answer_key)
@@ -467,7 +488,7 @@ def render_jarvis_launcher(read, today, username, *, reports_access, employee_ac
                 identity, sections, start, end = request
                 matches = find_employee(read, identity, tuple(DIVISIONS))
                 if matches.empty:
-                    st.info("No matching employee in Greater Noida Plant or Sector 63 Head Office.")
+                    st.info("No matching employee in the ERP divisions.")
                     return
                 exact = matches.employee_id.astype(str).str.strip().str.casefold().eq(identity.casefold())
                 if exact.any():
