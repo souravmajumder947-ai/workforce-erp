@@ -12094,8 +12094,12 @@ if page == "Home":
     _v115_month_clause, _v115_month_params = v5_division_clause(global_division, "a.")
     try:
         _v115_month_att = read_df(
-            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours,a.working_hours
-               FROM attendance a
+            """SELECT a.division,a.work_date,a.employee_id,a.status,a.ot_hours,a.working_hours,
+                      a.raw_status,a.time_in,a.time_out,COALESCE(a.review_required,FALSE) AS review_required,
+                      COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
+                      e.status AS employment_status,e.division AS master_division,
+                      e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date
+               FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
                WHERE a.work_date BETWEEN ? AND ? """ + _v115_month_clause + """
                ORDER BY a.work_date,a.division,a.employee_id""",
             (_v115_first.isoformat(), _v115_last.isoformat()) + _v115_month_params
@@ -12407,6 +12411,11 @@ if page == "Home":
     if _v115_month_att is None:
         _v115_month_att = pd.DataFrame()
 
+    from simple_workforce import is_post_exit_attendance_placeholder
+    if not _v115_month_att.empty:
+        _post_exit = pd.Series([is_post_exit_attendance_placeholder(r) for r in _v115_month_att.itertuples(index=False)],
+                               index=_v115_month_att.index)
+        _v115_month_att = _v115_month_att.loc[~_post_exit].copy()
     _v115_month_status = (
         _v115_month_att["status"].fillna("").astype(str).str.strip()
         if not _v115_month_att.empty else pd.Series(dtype=str)
@@ -12417,7 +12426,7 @@ if page == "Home":
     _v115_absent_days = float(_v115_month_status.isin(["Absent","LWP"]).sum())
     _v115_leave_days = float(_v115_month_status.isin(["Leave","CL","SL","EL"]).sum())
     _v115_wo_days = float(_v115_month_status.isin(["WO","Holiday"]).sum())
-    _v115_review_days = int((_v115_month_status == "HR Review").sum())
+    _v115_review_days = int(((_v115_month_status == "HR Review") | _v115_month_att.get("review_required", pd.Series(False,index=_v115_month_status.index))).sum())
     _v115_att_records = len(_v115_month_att)
     _v115_att_employees = (
         int(_v115_month_att["employee_id"].astype(str).nunique())
@@ -12574,7 +12583,7 @@ if page == "Home":
         ("◒", "Leave Days", f"{_v115_leave_days:,.0f}", "CL · SL · EL · Leave", "amber"),
         ("◷", "WO / Holiday Days", f"{_v115_wo_days:,.0f}", f"Half days {_v115_half_days:,.0f}", "purple"),
         ("◴", "Monthly OT Hours", f"{_v115_month_ot:,.2f}", f"{_v115_att_employees:,} employees seen", "cyan"),
-        ("!", "HR Review Pending", f"{_v115_review_days:,}", "Selected month", "red" if _v115_review_days else "green"),
+        ("!", "HR Review Pending", f"{_v115_review_days:,}", "Actionable rows · selected month", "red" if _v115_review_days else "green"),
     ]
     _v115_cols = st.columns(6, gap="small")
     _md_monthly_groups = [("Present", "OD", "Half Day"), ("Absent", "LWP"), ("CL", "SL", "EL", "Leave"),
@@ -12719,18 +12728,58 @@ if page == "Home":
             "Pending" if _corr_worker_days is None else
             "N/A" if not _corr_worker_days else f"{_corr_total_tons / _corr_worker_days:,.2f}"
         )
+        # In the absence of machine assignments, use verified Corrugation Line
+        # attendance as a clearly identified departmental productivity proxy.
+        _cost_sub, _worker_sub = "₹ per ton", "Tons per worker-day"
+        if _corr_cost_total is None or _corr_worker_days is None:
+            from simple_workforce import labour_amount
+            _proxy = read_df("""SELECT a.employee_id,a.work_date,a.status,a.ot_hours,
+                       COALESCE(a.review_required,FALSE) AS review_required""" +
+                       (",e.monthly_salary" if _corr_can_view_cost else "") +
+                       """ FROM attendance a JOIN employees e ON e.employee_id=a.employee_id
+                       WHERE a.division=? AND e.division=a.division AND a.work_date BETWEEN ? AND ?
+                       AND UPPER(TRIM(e.department))='CORRUGATION LINE'
+                       AND (e.last_working_date IS NULL OR a.work_date<=e.last_working_date)
+                       AND (e.joining_date IS NULL OR a.work_date>=e.joining_date)""", _corr_params)
+            if not _proxy.empty:
+                _proxy["Date"] = _proxy.work_date.astype(str).str[:10]
+                _proxy = _proxy.loc[~_proxy.review_required & _proxy.status.isin(["Present","OD","Half Day","WO","Holiday","CL","SL","EL","Leave","Absent","LWP"])]
+                # Do not count duplicate employee-days or silently double-charge salaries.
+                _proxy = _proxy.loc[~_proxy.duplicated(["employee_id","Date"],keep=False)].copy()
+                _proxy["worker_days"] = _proxy.status.map({"Present":1,"OD":1,"Half Day":0.5}).fillna(0)
+                _proxy_people = _proxy.groupby("Date").worker_days.sum()
+                _proxy_cost = pd.Series(dtype=float)
+                if _corr_can_view_cost:
+                    _proxy["salary"] = pd.to_numeric(_proxy.monthly_salary,errors="coerce")
+                    _proxy["cost"] = [labour_amount(r.salary,pd.Timestamp(r.Date).date(),r.status,r.ot_hours or 0)
+                                      if pd.notna(r.salary) and r.salary>0 else None for r in _proxy.itertuples()]
+                    _proxy_cost = _proxy.groupby("Date").cost.sum(min_count=1)
+                if _corr_worker_days is None:
+                    _corr_detail["People worked"] = _corr_detail.Date.map(_proxy_people)
+                    _corr_detail["Tons per person"] = _corr_detail["Output (T)"].div(_corr_detail["People worked"].where(_corr_detail["People worked"]>0))
+                    _matched = _corr_detail["People worked"].gt(0)
+                    if _matched.any():
+                        _worker_value = f"{_corr_detail.loc[_matched,'Output (T)'].sum()/_corr_detail.loc[_matched,'People worked'].sum():,.2f}"
+                        _worker_sub = f"Est. Corrugation Line · {_matched.sum()}/{len(_corr_detail)} output days"
+                if _corr_can_view_cost and _corr_cost_total is None and not _proxy_cost.empty:
+                    _corr_detail["Labour cost (₹)"] = _corr_detail.Date.map(_proxy_cost)
+                    _corr_detail["Cost per ton (₹/T)"] = _corr_detail["Labour cost (₹)"].div(_corr_detail["Output (T)"].where(_corr_detail["Output (T)"]>0))
+                    _matched = _corr_detail["Labour cost (₹)"].notna() & _corr_detail["Output (T)"].gt(0)
+                    if _matched.any():
+                        _cost_value = f"₹{_corr_detail.loc[_matched,'Labour cost (₹)'].sum()/_corr_detail.loc[_matched,'Output (T)'].sum():,.2f}"
+                        _cost_sub = f"Est. direct wages · {_matched.sum()}/{len(_corr_detail)} output days"
         st.caption("Greater Noida · AUTO Corrugation · selected month")
         _productivity_left, _productivity_right = st.columns(2, gap="small")
         with _productivity_left:
-            md_kpi_card("corr_labour_cost", "₹", "Manpower Cost per Ton", _cost_value, "₹ per ton", "amber",
+            md_kpi_card("corr_labour_cost", "₹", "Manpower Cost per Ton", _cost_value, _cost_sub, "amber",
                         on_click=open_daily_corrugation_productivity)
         with _productivity_right:
-            md_kpi_card("corr_tons_person", "🏭", "Tonnage per Person", _worker_value, "Tons per worker-day", "blue",
+            md_kpi_card("corr_tons_person", "🏭", "Tonnage per Person", _worker_value, _worker_sub, "blue",
                         on_click=open_daily_corrugation_productivity)
         with st.expander("Daily corrugation productivity",
                          expanded=st.session_state.pop("_md_corr_productivity_open", False)):
             st.caption("Monthly cost per ton uses total labour cost divided by output. Monthly tonnage per person uses output divided by worker-days. "
-                       "Pending means production, staffing or cost records could not be reconciled for the period.")
+                       "Estimated values use verified Corrugation Line attendance on matching output dates, not machine assignments. Direct wages exclude contractor costs, employer contributions and unrecorded salaries; they are not final payroll. Coverage is shown on each card.")
             _visible_columns = (
                 _corr_detail.columns.tolist() if _corr_can_view_cost else
                 ["Date", "Output (T)", "People worked", "Tons per person"]
@@ -12761,7 +12810,7 @@ if page == "Home":
             "Absent/LWP": int(_v115_ss.isin(["Absent","LWP"]).sum()),
             "Leave": int(_v115_ss.isin(["Leave","CL","SL","EL"]).sum()),
             "WO/Holiday": int(_v115_ss.isin(["WO","Holiday"]).sum()),
-            "HR Review": int((_v115_ss == "HR Review").sum()),
+            "HR Review": int(((_v115_ss == "HR Review") | _v115_sub.get("review_required", pd.Series(False,index=_v115_ss.index))).sum()),
             "OT Hours": (
                 float(pd.to_numeric(_v115_sub.get("ot_hours", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
                 if not _v115_sub.empty else 0.0
