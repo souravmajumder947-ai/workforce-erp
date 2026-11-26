@@ -5,6 +5,7 @@ import math
 
 import pandas as pd
 import streamlit as st
+from simple_workforce import is_post_exit_attendance_placeholder
 
 
 def open_task(task, employee_id=None):
@@ -190,18 +191,24 @@ def render_hr_workspace(context):
         st.success(success)
     employees = read(
         """SELECT employee_id,employee_name,department,designation,division,status,monthly_salary,
-                  joining_date,mobile_number,bank_account,pf_applicable,uan_number,esic_applicable,esic_number
+                  joining_date,mobile_number,bank_account,pf_applicable,uan_number,esic_applicable,esic_number, salary_active,gross_pay
            FROM employees WHERE 1=1""" + clause + " ORDER BY employee_name", params,
     )
     reviews = read(
-        """SELECT COUNT(*) AS count FROM attendance
-           WHERE (status='HR Review' OR review_required=TRUE) AND work_date BETWEEN ? AND ?""" + clause,
+        """SELECT a.work_date,a.division,a.raw_status,a.time_in,a.time_out,a.working_hours,a.ot_hours,
+                  COALESCE(NULLIF(a.source_issue,''),'Incomplete punch or attendance exception') AS issue,
+                  e.status AS employment_status,e.division AS master_division,
+                  e.joining_date::text AS joining_date,e.last_working_date::text AS last_working_date
+           FROM attendance a LEFT JOIN employees e ON e.employee_id=a.employee_id
+           WHERE (a.status='HR Review' OR a.review_required=TRUE) AND a.work_date BETWEEN ? AND ?"""
+           + clause.replace("division","a.division"),
         (start.isoformat(), end.isoformat(), *params),
     )
-    pending = int(reviews.iloc[0]["count"])
+    pending = sum(not is_post_exit_attendance_placeholder(r) for r in reviews.itertuples(index=False))
     active = employees.loc[employees.status.eq("Active")]
-    unconfirmed = employees.department.fillna("").str.strip().str.upper().eq("HR REVIEW")
-    missing_salary = active.monthly_salary.fillna(0).le(0)
+    unconfirmed = active.department.fillna("").str.strip().str.upper().eq("HR REVIEW")
+    salary_scope = active.salary_active.fillna(True).eq(True)
+    missing_salary = salary_scope & active.monthly_salary.fillna(0).le(0) & active.gross_pay.fillna(0).le(0)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Active employees", len(active))
     c2.metric("Attendance to review", pending)
@@ -241,9 +248,9 @@ def render_hr_workspace(context):
     incomplete = employees.copy()
     incomplete["Needs HR action"] = incomplete.apply(
         lambda row: ", ".join(label for label, missing in [
-            ("Confirm employee", str(row.department).strip().upper() == "HR REVIEW"),
+            ("Confirm employee", row.status == "Active" and str(row.department).strip().upper() == "HR REVIEW"),
             ("Joining date", pd.isna(pd.to_datetime(row.joining_date, errors="coerce"))),
-            ("Salary", row.status == "Active" and (pd.isna(row.monthly_salary) or row.monthly_salary <= 0)),
+            ("Salary", row.status == "Active" and (pd.isna(row.salary_active) or bool(row.salary_active)) and (pd.isna(row.monthly_salary) or row.monthly_salary <= 0) and (pd.isna(row.gross_pay) or row.gross_pay <= 0)),
             ("Bank account", not str(row.bank_account or "").strip()),
             ("UAN", row.pf_applicable and not str(row.uan_number or "").strip()),
             ("ESIC number", row.esic_applicable and not str(row.esic_number or "").strip()),
