@@ -597,6 +597,42 @@ class SimpleWorkforce:
         if not self.c["can_edit_hr"](self.role):
             st.dataframe(rows, hide_index=True)
             return
+        if self.role == "Owner":
+            transferred = rows.loc[rows.master_division.notna() & rows.master_division.ne(rows.division)]
+            if not transferred.empty:
+                with st.expander("Remove transferred employee attendance from old division"):
+                    choices = sorted(set(zip(transferred.employee_id, transferred.division)))
+                    choice = st.selectbox("Employee and old division", choices, index=None,
+                                          format_func=lambda x: f"{x[0]} · {x[1]}")
+                    if choice:
+                        selected = transferred.loc[transferred.employee_id.eq(choice[0]) & transferred.division.eq(choice[1])]
+                        st.warning(f"Permanently remove {len(selected)} selected pending attendance rows for {start:%B %Y} only. Employee Master and other attendance are unchanged.")
+                        st.dataframe(selected[["employee_id","work_date","division","master_division","working_hours"]], hide_index=True)
+                        rev = hashlib.sha256(selected[["id","updated_at"]].to_json().encode()).hexdigest()
+                        ok = st.checkbox("Confirm deletion of these old-division review rows", key=f"transfer_confirm_{rev}")
+                        if st.button("Delete old-division review rows", disabled=not ok, key=f"transfer_delete_{rev}"):
+                            def remove_transfer(cur):
+                                for r in selected.itertuples(index=False):
+                                    cur.execute("""DELETE FROM attendance a WHERE a.id=%s AND a.employee_id=%s
+                                        AND a.division=%s AND a.work_date=%s
+                                        AND a.updated_at IS NOT DISTINCT FROM %s
+                                        AND (a.status='HR Review' OR a.review_required=TRUE)
+                                        AND EXISTS (SELECT 1 FROM employees e WHERE e.employee_id=a.employee_id
+                                        AND e.division=%s AND e.division<>a.division)""",
+                                        (int(r.id), r.employee_id, r.division, employment_date(r.work_date).date(),
+                                         None if pd.isna(r.updated_at) else r.updated_at, r.master_division))
+                                    if cur.rowcount != 1:
+                                        raise ValueError("Attendance or master changed; no rows deleted.")
+                                cur.execute("""INSERT INTO audit_log(actor,action,module,entity_type,entity_id,details)
+                                    VALUES (%s,'DELETE','Attendance','Employee',%s,%s)""",
+                                    (self.user["username"], str(choice[0]), f"{choice[1]}; {start:%Y-%m}; removed {len(selected)} old-division review rows"))
+                            try:
+                                self.write(remove_transfer)
+                            except Exception as exc:
+                                st.error(f"No rows deleted: {exc}")
+                            else:
+                                st.session_state["simple_hr_success"] = f"Deleted {len(selected)} old-division attendance review rows."
+                                st.rerun()
         self.import_hr_remarks(rows, start, end)
         export_labels = {
             "employee_id": "Employee ID", "employee_name": "Employee Name",
