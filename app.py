@@ -11420,9 +11420,8 @@ _saved_division = st.query_params.get("division")
 if "v5_global_division" not in st.session_state and _saved_division in _division_options:
     st.session_state["v5_global_division"] = _saved_division
 global_division = st.sidebar.selectbox("Division", _division_options, key="v5_global_division")
-# V13.1: Working Date removed from sidebar to avoid date/month confusion.
-# Each operational page controls its own date/period.
-global_work_date = date.today()
+# Operational entry pages keep their independent dates. Home has a month-scoped working date.
+global_work_date = datetime.now(IST).date()
 _month_opts = v5_month_options()
 
 # Payroll normally runs for the last completed month.  Defaulting to the
@@ -11445,9 +11444,47 @@ global_payroll_month = st.sidebar.selectbox(
     key="v5_global_payroll_month",
 )
 
+# The historical MD dashboard defaults to the latest recorded attendance date
+# inside the selected month and division, and never silently uses today's date.
+if page == "Home":
+    _dash_first, _dash_last = _month_range(global_payroll_month)
+    _dash_today = datetime.now(IST).date()
+    _dash_latest_limit = max(_dash_first,min(_dash_last,_dash_today))
+    _dash_scope = (global_division,global_payroll_month.isoformat())
+    _dash_date_key = "md_dashboard_working_date"
+    if st.session_state.get("_md_work_date_scope") != _dash_scope or _dash_date_key not in st.session_state:
+        _dash_default = _dash_latest_limit
+        try:
+            _latest_clause,_latest_params = v5_division_clause(global_division,"a.")
+            _latest = read_df("""SELECT MAX(a.work_date) AS latest FROM attendance a
+                WHERE a.work_date BETWEEN ? AND ?
+                AND ((a.status IN ('Present','OD','Half Day','Absent','LWP','WO','Holiday','CL','SL','EL','Leave')
+                      AND COALESCE(a.review_required,FALSE)=FALSE)
+                     OR COALESCE(a.working_hours,0)>0 OR COALESCE(a.ot_hours,0)>0)"""
+                +_latest_clause,(_dash_first.isoformat(),_dash_latest_limit.isoformat())+_latest_params)
+            if not _latest.empty and pd.notna(_latest.iloc[0]["latest"]):
+                _dash_default = pd.Timestamp(_latest.iloc[0]["latest"]).date()
+        except Exception:
+            pass
+        # Restore a manually chosen date only on initial session load for its exact context.
+        if _saved_division==global_division and st.query_params.get("month")==global_payroll_month.isoformat():
+            try:
+                _saved_work_date = date.fromisoformat(st.query_params.get("working_date",""))
+                if _dash_first <= _saved_work_date <= _dash_latest_limit:
+                    _dash_default = _saved_work_date
+            except (TypeError,ValueError):
+                pass
+        st.session_state[_dash_date_key] = _dash_default
+        st.session_state["_md_work_date_scope"] = _dash_scope
+    global_work_date = st.sidebar.date_input("Working Date",min_value=_dash_first,
+        max_value=_dash_latest_limit,key=_dash_date_key,format="DD/MM/YYYY",
+        help="Daily attendance cards use this date. Monthly payroll and production continue to use Month.")
+
 _page_context = st.query_params.to_dict()
 _restored_context = dict(_page_context, page=_simple_choice, division=global_division,
                          month=global_payroll_month.isoformat())
+if page == "Home":
+    _restored_context["working_date"] = global_work_date.isoformat()
 if _simple_routes[_simple_choice] == "Simple Settings":
     _restored_context["settings"] = _setting
 if _restored_context != _page_context:
@@ -12119,6 +12156,8 @@ if page == "Home":
     attendance = _home_day_attendance
     if attendance is None:
         attendance = v5_attendance_for_date(global_work_date, global_division)
+    if _v94_month_rows is not None:
+        attendance = _v94_month_rows.loc[_v94_month_rows.work_date.astype(str).str[:10].eq(global_work_date.isoformat())].copy()
 
     # Share the selected month's records between payroll and dashboard totals.
     _v115_first, _v115_last = _month_range(global_payroll_month)
@@ -12132,14 +12171,15 @@ if page == "Home":
 
     active_count = len(employees)
     _v10_status = attendance["status"].fillna("").astype(str) if not attendance.empty else pd.Series(dtype=str)
-    present = int((_v10_status == "Present").sum()) if not attendance.empty else 0
+    _v10_status = _v10_status.mask(attendance.get("review_required",pd.Series(False,index=_v10_status.index)).eq(True),"HR Review")
+    present = int(_v10_status.isin(["Present","OD"]).sum()) if not attendance.empty else 0
     absent = int(_v10_status.isin(["Absent", "LWP"]).sum()) if not attendance.empty else 0
     on_leave = int(_v10_status.isin(["CL", "SL", "EL", "Leave"]).sum()) if not attendance.empty else 0
-    weekly_off = int((_v10_status == "WO").sum()) if not attendance.empty else 0
+    weekly_off = int(_v10_status.isin(["WO","Holiday"]).sum()) if not attendance.empty else 0
     half_day = int((_v10_status == "Half Day").sum()) if not attendance.empty else 0
     review = int((_v10_status == "HR Review").sum()) if not attendance.empty else 0
     ot_hours = (
-        float(pd.to_numeric(attendance.get("ot_hours", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
+        float(pd.to_numeric(attendance.loc[_v10_status.ne("HR Review"),"ot_hours"], errors="coerce").fillna(0).sum())
         if not attendance.empty else 0.0
     )
 
@@ -12208,7 +12248,7 @@ if page == "Home":
     _v10_top1, _v10_top2, _v10_top3 = st.columns([1.45, 1.0, .72], gap="small")
     with _v10_top1:
         st.markdown(
-            '<div class="v10-product-line"><b>Management overview</b><span>Attendance today · Payroll by selected month</span></div>',
+            '<div class="v10-product-line"><b>Management overview</b><span>Daily attendance · Payroll by selected month</span></div>',
             unsafe_allow_html=True,
         )
     with _v10_top2:
@@ -12404,8 +12444,8 @@ if page == "Home":
     </style>""", unsafe_allow_html=True)
 
     _md_attendance_groups = [
-        ("Present",), ("Absent", "LWP"), ("CL", "SL", "EL", "Leave"),
-        ("WO",), (),
+        ("Present","OD"), ("Absent", "LWP"), ("CL", "SL", "EL", "Leave"),
+        ("WO","Holiday"), (),
     ]
 
     def md_attendance_destination(label, statuses, day=None):
@@ -12413,13 +12453,19 @@ if page == "Home":
             return None
         return ("Settings", "Detailed Reports", (label, statuses, day, global_division, global_payroll_month))
 
+    _day_loaded = not attendance.empty
+    _day_label = global_work_date.strftime("%d %b %Y")
+    def _daily_value(value):
+        return value if _day_loaded else "Not Uploaded"
+    def _daily_sub(text):
+        return text if _day_loaded else f"No records · {_day_label}"
     _v10_kpi_items = [
         ("👥", "Total Employees", f"{active_count:,}", "Active master", "blue"),
-        ("●", "Present", f"{present:,}", f"{(present / active_count * 100):.1f}% of active" if active_count else "No active employees", "green"),
-        ("●", "Absent / LWP", f"{absent:,}", "Selected working date", "red"),
-        ("◒", "On Leave", f"{on_leave:,}", "CL · SL · EL · Leave", "amber"),
-        ("◷", "Weekly Off", f"{weekly_off:,}", f"Half day {half_day:,}", "purple"),
-        ("◴", "OT Hours", f"{ot_hours:,.2f}", "Selected working date", "cyan"),
+        ("●", "Present", _daily_value(f"{present:,}"), _daily_sub(_day_label), "green"),
+        ("●", "Absent / LWP", _daily_value(f"{absent:,}"), _daily_sub(_day_label), "red"),
+        ("◒", "On Leave", _daily_value(f"{on_leave:,}"), _daily_sub(_day_label), "amber"),
+        ("◷", "Weekly Off / Holiday", _daily_value(f"{weekly_off:,}"), _daily_sub(f"Half day {half_day:,} · {_day_label}"), "purple"),
+        ("◴", "OT Hours", _daily_value(f"{ot_hours:,.2f}"), _daily_sub(_day_label), "cyan"),
     ]
     _v10_kpi_cols = st.columns(6, gap="small")
     for _v10_i, (icon, label, value, sub, tone) in enumerate(_v10_kpi_items):
