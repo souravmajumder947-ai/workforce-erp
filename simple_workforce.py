@@ -396,7 +396,7 @@ class SimpleWorkforce:
             for row in rows.itertuples(index=False):
                 key = (str(row.employee_id), employment_date(row.work_date), row.division)
                 live.setdefault(key, []).append(row)
-            ready, held = [], []
+            ready, held, removable = [], [], []
             for _, record in incoming.iterrows():
                 key = tuple(record[field] for field in keys)
                 matches = live.get(key, [])
@@ -405,7 +405,16 @@ class SimpleWorkforce:
                 if len(matches) != 1:
                     problem = "No unique pending ERP row matches this employee, date and division."
                 elif decision == "LEFT":
-                    problem = "Confirm employment exit date and use the owner removal workflow for out-of-employment attendance."
+                    row = matches[0]
+                    if (self.role == "Owner" and str(row.employment_status).strip().upper() in INACTIVE
+                            and row.master_division == row.division
+                            and pd.notna(row.working_hours)
+                            and pd.notna(pd.to_numeric(record["Working Hours"], errors="coerce"))
+                            and abs(float(record["Working Hours"]) - float(row.working_hours)) <= 0.02
+                            and str(record["Sheet Status"]).strip().upper() == str(row.raw_status).strip().upper()):
+                        removable.append(row)
+                    else:
+                        problem = "LEFT row requires matching inactive employee and unchanged source attendance."
                 elif decision != "MISS PUNCH":
                     problem = "Remark must be MISS PUNCH or LEFT."
                 else:
@@ -430,6 +439,38 @@ class SimpleWorkforce:
                 if problem:
                     held.append(dict(zip(keys, key), Remark=decision, **{"Action needed": problem}))
 
+            if removable and self.role == "Owner":
+                st.warning(f"Permanently delete {len(removable):,} matching LEFT attendance rows only. "
+                           "Employee Master, other attendance and saved payroll records are not deleted.")
+                st.dataframe(pd.DataFrame([{"Employee ID": r.employee_id, "Date": r.work_date,
+                    "Division": r.division, "Hours": r.working_hours} for r in removable]), hide_index=True)
+                rev = hashlib.sha256(repr([(r.id,r.updated_at) for r in removable]).encode()).hexdigest()
+                confirm = st.checkbox("Confirm permanent deletion of only these LEFT review rows", key=f"left_confirm_{rev}")
+                if st.button("Delete LEFT attendance rows", disabled=not confirm, key=f"left_delete_{rev}"):
+                    def remove(cur):
+                        ids = []
+                        for r in sorted(removable, key=lambda r: r.id):
+                            cur.execute("""DELETE FROM attendance a WHERE a.id=%s AND a.employee_id=%s
+                                AND a.division=%s AND a.work_date=%s
+                                AND a.updated_at IS NOT DISTINCT FROM %s
+                                AND (a.status='HR Review' OR a.review_required=TRUE)
+                                AND EXISTS (SELECT 1 FROM employees e WHERE e.employee_id=a.employee_id
+                                AND e.division=a.division AND UPPER(TRIM(e.status))=ANY(%s))""",
+                                (int(r.id), r.employee_id, r.division, employment_date(r.work_date).date(),
+                                 None if pd.isna(r.updated_at) else r.updated_at, sorted(INACTIVE)))
+                            if cur.rowcount != 1:
+                                raise ValueError("Attendance or master changed; no rows deleted.")
+                            ids.append(int(r.id))
+                        cur.execute("""INSERT INTO audit_log(actor,action,module,entity_type,entity_id,details)
+                            VALUES (%s,'DELETE','Attendance','HR Review',%s,%s)""",
+                            (self.user["username"], f"{start:%Y-%m}", f"Deleted {len(ids)} HR-approved LEFT review rows; attendance IDs: {ids}"))
+                    try:
+                        self.write(remove)
+                    except Exception as exc:
+                        st.error(f"No rows deleted: {exc}")
+                        return
+                    st.session_state["simple_hr_success"] = f"Deleted {len(removable):,} LEFT attendance rows."
+                    st.rerun()
             st.write(f"{len(ready):,} rows ready to mark Present; {len(held):,} rows held for review.")
             if held:
                 held_table = pd.DataFrame(held)
