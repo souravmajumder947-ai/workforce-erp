@@ -519,6 +519,75 @@ class SimpleWorkforce:
             st.session_state["simple_hr_success"] = f"Resolved {len(ready):,} MISS PUNCH attendance rows."
             st.rerun()
 
+    def fill_confirmed_present_days(self, start, end):
+        if self.role != "Owner" or self.division == self.c["ALL_DIVISIONS"]:
+            return
+        with st.expander("Fill HR-confirmed missing attendance days"):
+            st.caption("Owner only · Inserts missing dates as Present; existing attendance, punches and OT stay unchanged. No punch times or hours are invented.")
+            raw = st.text_area("Confirmed employee IDs (comma separated)", key="confirmed_present_ids")
+            ids = sorted(set(x.strip() for x in raw.replace("\n", ",").split(",") if x.strip()))
+            if not ids:
+                return
+            master = self.read("""SELECT employee_id,employee_name,division,status,joining_date::text AS joining_date,
+                       last_working_date::text AS last_working_date,shift,designation
+                       FROM employees WHERE employee_id=ANY(?)""", (ids,))
+            if len(master)!=len(ids) or any(r.division!=self.division or str(r.status).strip().upper()!="ACTIVE"
+                     or pd.isna(employment_date(r.joining_date)) for r in master.itertuples()):
+                st.error("Each ID must be an active employee in this division with a saved joining date.")
+                return
+            existing = self.read("""SELECT employee_id,work_date::text AS work_date,division FROM attendance
+                WHERE employee_id=ANY(?) AND work_date BETWEEN ? AND ?""", (ids,start.isoformat(),end.isoformat()))
+            if not existing.empty and existing.division.ne(self.division).any():
+                st.error("Existing attendance in another division; reconcile before filling dates.")
+                return
+            seen = {(str(r.employee_id),str(r.work_date)[:10]) for r in existing.itertuples()}
+            records=[]
+            for r in master.itertuples():
+                joined=employment_date(r.joining_date).date()
+                left=employment_date(r.last_working_date)
+                last=min(end,date.today(),left.date() if pd.notna(left) else end)
+                for d in pd.date_range(max(start,joined),last):
+                    ds=d.date().isoformat()
+                    if (str(r.employee_id),ds) not in seen:
+                        records.append((str(r.employee_id),ds,str(r.shift or "General"),r.employee_name,r.designation))
+            if not records:
+                st.success("No missing eligible attendance dates for these IDs.")
+                return
+            preview=pd.DataFrame(records,columns=["Employee ID","Date","Shift","Employee","Designation"])
+            st.write(f"{len(records)} missing days for {preview['Employee ID'].nunique()} employees.")
+            st.dataframe(preview.groupby(["Employee ID","Employee"]).size().rename("Missing days").reset_index(),hide_index=True)
+            rev=hashlib.sha256(repr(records).encode()).hexdigest()
+            verified=st.checkbox("Confirm these missing dates were Present (no hours or OT added)",key=f"present_confirm_{rev}")
+            if not st.button("Save confirmed missing Present days",disabled=not verified,key=f"present_save_{rev}"):
+                return
+            def insert(cur):
+                cur.execute("LOCK TABLE attendance IN SHARE ROW EXCLUSIVE MODE")
+                for eid,ds,shift,name,designation in records:
+                    cur.execute("""INSERT INTO attendance(work_date,shift,employee_id,status,ot_hours,division,
+                       designation,day_name,time_in,time_out,working_hours,raw_status,remark,source_type,
+                       review_required,source_employee_name,source_issue,reviewed_by)
+                       SELECT %s,%s,e.employee_id,'Present',0,e.division,%s,%s,NULL,NULL,0,'HR CONFIRMED PRESENT',
+                         'Owner-confirmed missing attendance; no punches or overtime supplied','HR manual confirmation',
+                         FALSE,%s,'',%s FROM employees e
+                       WHERE e.employee_id=%s AND e.division=%s AND UPPER(TRIM(e.status))='ACTIVE'
+                       AND e.joining_date IS NOT NULL AND e.joining_date::text<=%s
+                       AND (e.last_working_date IS NULL OR e.last_working_date::text >= %s)
+                       AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.employee_id=e.employee_id AND a.work_date=%s)
+                       ON CONFLICT(work_date,shift,employee_id) DO NOTHING""",
+                       (ds,shift,designation,pd.Timestamp(ds).day_name(),name,self.user["username"],eid,self.division,ds,ds,ds))
+                    if cur.rowcount!=1:
+                        raise ValueError("Attendance or master changed. No records saved.")
+                cur.execute("""INSERT INTO audit_log(actor,action,module,entity_type,entity_id,details)
+                      VALUES (%s,'INSERT','Attendance','HR Review',%s,%s)""",
+                      (self.user["username"],f"{start:%Y-%m}",f"Inserted {len(records)} confirmed missing Present days for {', '.join(ids)}"))
+            try:
+                self.write(insert)
+            except Exception as exc:
+                st.error(f"No records saved: {exc}")
+                return
+            st.session_state["simple_hr_success"]=f"Saved {len(records)} confirmed missing Present days."
+            st.rerun()
+
     def review(self):
         st.title("HR Review")
         message = st.session_state.pop("simple_hr_success", None)
@@ -527,6 +596,7 @@ class SimpleWorkforce:
         start, end = self.period()
         st.caption(f"{start:%d %b %Y} to {end:%d %b %Y}. Check the issue, choose the final status and add a reason.")
         self.remove_post_exit_month(start, end)
+        self.fill_confirmed_present_days(start, end)
         master_clause, master_params = self.scope()
         pending = self.read("SELECT employee_id,employee_name,division,designation FROM employees WHERE UPPER(TRIM(department))='HR REVIEW' AND COALESCE(UPPER(TRIM(status)), '') NOT IN ('INACTIVE','LEFT','RESIGNED','TERMINATED')" + master_clause, master_params)
         if not pending.empty and self.c["can_edit_hr"](self.role):
