@@ -5567,6 +5567,39 @@ def attendance_cost_factor(status):
     return 0.0
 
 
+def payroll_with_grand_total(frame):
+    """Display/export only: total additive payroll fields, never identifiers or percentages."""
+    if frame.empty:
+        return frame.copy()
+    result = frame.copy()
+    if "S.No" not in result.columns:
+        result.insert(0, "S.No", range(1, len(result) + 1))
+    total = {col: None for col in result.columns}
+    total["Employee Name"] = "GRAND TOTAL"
+    additive = {"Monthly Salary", "Calendar Days", "Attendance Records", "Paid Days",
+                "Present Days", "WO", "Paid Leave", "LWP/Absent", "HR Review", "Missing Days",
+                "OT Hours", "Gross Earned", "Fixed Allowance Earned", "OT Pay",
+                "Performance Incentive", "Attendance Bonus", "Endorsement Allowance",
+                "Total Payable", "PF", "ESIC", "TDS", "Advance", "Other Deduction", "Fine",
+                "Fooding", "Total Deduction", "Calculated Net", "Net Payable"}
+    for col in additive.intersection(result.columns):
+        total[col] = round(pd.to_numeric(result[col], errors="coerce").sum(min_count=1), 2)
+    if "Payroll State" in total:
+        total["Payroll State"] = "Pending" if any(
+            pd.to_numeric(result[c], errors="coerce").gt(0).any()
+            for c in ("HR Review", "Missing Days") if c in result
+        ) else f"{len(result):,} employees"
+    return pd.concat([result, pd.DataFrame([total], columns=result.columns)], ignore_index=True)
+
+
+def payroll_total_style(frame):
+    return frame.style.apply(
+        lambda row: ["background-color: #203e61; color: #ffffff; font-weight: bold"
+                     if row["Employee Name"] == "GRAND TOTAL" else "" for _ in row],
+        axis=1,
+    )
+
+
 def make_excel_report(df, report_title, filters_text=""):
     """Create a branded Excel download without changing the database."""
     # V6.7: exported reports also carry a visible serial number.
@@ -5631,6 +5664,11 @@ def make_excel_report(df, report_title, filters_text=""):
                     pass
             cell = ws.cell(row_idx, col_idx, value)
             cell.alignment = Alignment(vertical="top", wrap_text=False)
+            if report_title == "Live Salary Register" and "Employee Name" in df.columns and row[df.columns.get_loc("Employee Name")] == "GRAND TOTAL":
+                cell.fill = PatternFill("solid", fgColor="203E61")
+                cell.font = Font(color="FFFFFF", bold=True)
+            if report_title == "Live Salary Register" and isinstance(value, (int, float)) and str(df.columns[col_idx-1]) not in {"S.No", "Employee ID"}:
+                cell.number_format = "#,##0.00"
 
     for col_idx, col_name in enumerate(df.columns, 1):
         sample = [str(col_name)] + [str(v) for v in df.iloc[:100, col_idx - 1].tolist() if pd.notna(v)]
@@ -15818,14 +15856,21 @@ elif page == "Payroll":
                      "warn" if _live_blockers else "good"),
                 ])
                 compact_cols=["Division","Employee ID","Employee Name","Department","Designation","Monthly Salary","Paid Days","HR Review","Missing Days","OT Hours","Gross Earned","OT Pay","PF","ESIC","Total Deduction","Calculated Net","Net Payable","Payroll State"]
-                st.dataframe(payroll[[c for c in compact_cols if c in payroll.columns]],hide_index=True,use_container_width=True,
-                    column_config={
-                        "Monthly Salary":st.column_config.NumberColumn("Monthly Salary",format="₹%.2f"),
-                        "Gross Earned":st.column_config.NumberColumn("Gross Earned",format="₹%.2f"),
-                        "OT Pay":st.column_config.NumberColumn("OT Pay",format="₹%.2f"),
-                        "Net Payable":st.column_config.NumberColumn("Net Payable",format="₹%.2f"),
-                    })
-                st.caption("Use Report Centre for Excel salary registers and statutory reports.")
+                _pay_departments = sorted(payroll["Department"].dropna().astype(str).unique())
+                _pay_dept = st.selectbox("Department", ["All Departments"] + _pay_departments, key="live_payroll_department")
+                _pay_filtered = payroll if _pay_dept == "All Departments" else payroll.loc[payroll["Department"].astype(str) == _pay_dept]
+                _pay_display = payroll_with_grand_total(_pay_filtered[[c for c in compact_cols if c in payroll.columns]])
+                _pay_formats = {c: st.column_config.NumberColumn(c, format="₹%.2f") for c in
+                                ("Monthly Salary", "Gross Earned", "OT Pay", "PF", "ESIC", "Total Deduction", "Calculated Net", "Net Payable")}
+                _pay_formats.update({c: st.column_config.NumberColumn(c, format="%.2f") for c in ("Paid Days", "OT Hours")})
+                if not _pay_display.empty:
+                    st.caption(f"Grand totals · {len(_pay_filtered):,} employees · {_pay_dept}")
+                    _original_st_dataframe(payroll_total_style(_pay_display.tail(1)), hide_index=True, use_container_width=True, height=80, column_config=_pay_formats)
+                    _original_st_dataframe(payroll_total_style(_pay_display), hide_index=True, use_container_width=True, column_config=_pay_formats)
+                    st.download_button("Download Payroll Excel with totals", make_excel_report(payroll_with_grand_total(_pay_filtered), "Live Salary Register", f"{global_division} | {global_payroll_month:%b %Y} | {_pay_dept}"), file_name=f"Live_Payroll_{global_payroll_month:%Y-%m}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                else:
+                    st.info("No payroll records for this department.")
+                st.caption("Use Report Centre for other salary registers and statutory reports.")
 
         if _v141_pay_section=="Adjustments":
             if global_division==ALL_DIVISIONS:
@@ -20590,13 +20635,14 @@ elif page == "Reports":
             f"Report ready · {len(report_df):,} rows · "
             f"{report_div} · {report_period} · Live database"
         )
+        _report_display = payroll_with_grand_total(report_df) if report_type == "Live Salary Register" else report_df
         st.dataframe(
-            _v183_style_status_table(report_df),
+            payroll_total_style(_report_display) if report_type == "Live Salary Register" else _v183_style_status_table(_report_display),
             hide_index=True,
             use_container_width=True,
             height=min(620, max(260, 38 * min(len(report_df) + 1, 16))),
         )
-        report_bytes=make_excel_report(report_df,report_title,f"{report_div} | {report_period}")
+        report_bytes=make_excel_report(_report_display,report_title,f"{report_div} | {report_period}")
         _v194_report_downloaded=st.download_button(
             "Download Excel Report",data=report_bytes,
             file_name=f"{report_type.replace('/','-').replace(' ','_')}_{report_file_period}.xlsx",
