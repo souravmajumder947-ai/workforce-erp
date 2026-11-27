@@ -5574,8 +5574,10 @@ def payroll_with_grand_total(frame):
     result = frame.copy()
     if "S.No" not in result.columns:
         result.insert(0, "S.No", range(1, len(result) + 1))
-    total = {col: None for col in result.columns}
+    total = {col: ("" if not pd.api.types.is_numeric_dtype(result[col]) else None) for col in result.columns}
     total["Employee Name"] = "GRAND TOTAL"
+    result["S.No"] = result["S.No"].astype(str)
+    total["S.No"] = ""
     additive = {"Monthly Salary", "Calendar Days", "Attendance Records", "Paid Days",
                 "Present Days", "WO", "Paid Leave", "LWP/Absent", "HR Review", "Missing Days",
                 "OT Hours", "Gross Earned", "Fixed Allowance Earned", "OT Pay",
@@ -15863,9 +15865,32 @@ elif page == "Payroll":
                 _pay_formats = {c: st.column_config.NumberColumn(c, format="₹%.2f") for c in
                                 ("Monthly Salary", "Gross Earned", "OT Pay", "PF", "ESIC", "Total Deduction", "Calculated Net", "Net Payable")}
                 _pay_formats.update({c: st.column_config.NumberColumn(c, format="%.2f") for c in ("Paid Days", "OT Hours")})
+                _pay_formats.update({c: st.column_config.NumberColumn(c, format="%d") for c in ("HR Review", "Missing Days")})
                 if not _pay_display.empty:
-                    st.caption(f"Grand totals · {len(_pay_filtered):,} employees · {_pay_dept}")
-                    _original_st_dataframe(payroll_total_style(_pay_display.tail(1)), hide_index=True, use_container_width=True, height=80, column_config=_pay_formats)
+                    _pay_total = _pay_display.iloc[-1]
+                    _pay_summary_groups = [
+                        ("Salary & attendance", [("Monthly salary", "Monthly Salary", True), ("Paid days", "Paid Days", False), ("OT hours", "OT Hours", False), ("HR review", "HR Review", False), ("Missing days", "Missing Days", False)]),
+                        ("Earnings & deductions", [("Gross earned", "Gross Earned", True), ("OT pay", "OT Pay", True), ("PF", "PF", True), ("ESIC", "ESIC", True), ("Total deduction", "Total Deduction", True), ("Calculated net", "Calculated Net", True), ("Net payable", "Net Payable", True)]),
+                    ]
+                    _pay_summary_html = []
+                    for _group_title, _fields in _pay_summary_groups:
+                        _cells = []
+                        for _label, _col, _money in _fields:
+                            _value = _pay_total.get(_col)
+                            _shown = "—" if pd.isna(_value) else (("₹" if _money else "") + f"{float(_value):,.2f}")
+                            if _col == "Net Payable" and ((pd.to_numeric(_pay_filtered["HR Review"], errors="coerce") > 0) | (pd.to_numeric(_pay_filtered["Missing Days"], errors="coerce") > 0)).any():
+                                _shown = "Pending"
+                            _cells.append(f'<div class="payroll-total-cell"><span>{_label}</span><strong>{_shown}</strong></div>')
+                        _pay_summary_html.append(f'<div class="payroll-total-group"><div class="payroll-total-label">{_group_title}</div><div class="payroll-total-grid">{"".join(_cells)}</div></div>')
+                    st.markdown("""<style>
+                    .payroll-total-panel{border:1px solid #304860;border-radius:12px;background:linear-gradient(135deg,#142337,#101c2b);padding:14px 16px;margin:4px 0 12px}
+                    .payroll-total-title{font-size:13px;color:#c1d6ed;font-weight:700;margin-bottom:10px}
+                    .payroll-total-group+.payroll-total-group{border-top:1px solid #30435a;margin-top:10px;padding-top:10px}
+                    .payroll-total-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#91a8bf;margin-bottom:8px}
+                    .payroll-total-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+                    .payroll-total-cell{min-width:0}.payroll-total-cell span{display:block;font-size:11px;color:#aebfd2;margin-bottom:4px}
+                    .payroll-total-cell strong{display:block;font-size:15px;color:#f0f6ff;font-weight:700;white-space:nowrap}
+                    </style>""" + f'<div class="payroll-total-panel"><div class="payroll-total-title">PAYROLL GRAND TOTAL · {len(_pay_filtered):,} employees · {html.escape(_pay_dept)}</div>{"".join(_pay_summary_html)}</div>', unsafe_allow_html=True)
                     _original_st_dataframe(payroll_total_style(_pay_display), hide_index=True, use_container_width=True, column_config=_pay_formats)
                     st.download_button("Download Payroll Excel with totals", make_excel_report(payroll_with_grand_total(_pay_filtered), "Live Salary Register", f"{global_division} | {global_payroll_month:%b %Y} | {_pay_dept}"), file_name=f"Live_Payroll_{global_payroll_month:%Y-%m}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 else:
