@@ -127,9 +127,9 @@ def production_cost_rows(output, att):
     return pd.DataFrame(summary)
 
 
-def attrition_summary(employees, start, end):
+def attrition_employee_groups(employees, start, end):
     """Opening = immediately before period; closing = after last-day departures."""
-    opening = closing = leavers = 0
+    groups = {"opening": [], "closing": [], "leavers": []}
     issues = []
     for employee in employees:
         if str(employee.get("department", "")).strip().upper() == "HR REVIEW":
@@ -145,9 +145,18 @@ def attrition_summary(employees, start, end):
         if left and left < joined:
             issues.append(str(employee["employee_id"]))
             continue
-        opening += int(joined < start and (left is None or left >= start))
-        closing += int(joined <= end and (left is None or left > end))
-        leavers += int(left is not None and start <= left <= end)
+        if joined < start and (left is None or left >= start):
+            groups["opening"].append(employee)
+        if joined <= end and (left is None or left > end):
+            groups["closing"].append(employee)
+        if left is not None and start <= left <= end:
+            groups["leavers"].append(employee)
+    return groups, issues
+
+
+def attrition_summary(employees, start, end):
+    groups, issues = attrition_employee_groups(employees, start, end)
+    opening, closing, leavers = (len(groups[key]) for key in ("opening", "closing", "leavers"))
     average = (opening + closing) / 2
     rate = None if issues or average <= 0 else leavers / average * 100
     return {"opening": opening, "closing": closing, "leavers": leavers, "rate": rate, "issues": issues}
@@ -1092,18 +1101,69 @@ class SimpleWorkforce:
             st.info("Salary access is required to view labour costs.")
         st.subheader("Monthly manpower attrition")
         clause, params = self.scope()
-        employees = self.read("SELECT employee_id,department,joining_date,last_working_date,status FROM employees WHERE 1=1" + clause, params)
+        employees = self.read("SELECT employee_id,employee_name,division,department,designation,joining_date,last_working_date,status FROM employees WHERE 1=1" + clause + " ORDER BY employee_name,employee_id", params)
         result = attrition_summary(employees.to_dict('records'), start, end)
         if result['issues']:
             st.warning(f"Complete joining / last working dates for {len(result['issues'])} employee(s) in Settings → Joining & Leaving. Attrition is unavailable until these dates are complete.")
             with st.expander('Employees needing dates'):
                 st.write(', '.join(result['issues']))
         else:
-            a,b,c,d = st.columns(4)
-            a.metric('Opening headcount', result['opening'])
-            b.metric('Closing headcount', result['closing'])
-            c.metric('Employees left', result['leavers'])
-            d.metric('Attrition', 'N/A' if result['rate'] is None else f"{result['rate']:.2f}%")
+            st.markdown('''<style>
+            div[class*="st-key-attrition_card_"] {position:relative;}
+            div[class*="st-key-attrition_card_"] div[class*="st-key-attrition_open_"] {
+                position:absolute !important; inset:0; z-index:1; width:100%;
+            }
+            div[class*="st-key-attrition_open_"] .stButton {height:100%; width:100%;}
+            div[class*="st-key-attrition_open_"] button {
+                position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer;
+            }
+            div[class*="st-key-attrition_card_"]:has(button:hover) [data-testid="stMetric"],
+            div[class*="st-key-attrition_card_"]:has(button:focus-visible) [data-testid="stMetric"] {
+                outline:2px solid #80c8ff; outline-offset:-2px; border-radius:12px;
+            }
+            </style>''', unsafe_allow_html=True)
+            scope_key = (self.division, start.isoformat(), end.isoformat())
+            if st.session_state.get("attrition_detail_scope") != scope_key:
+                st.session_state["attrition_detail_scope"] = scope_key
+                st.session_state.pop("attrition_detail_selected", None)
+            cards = [
+                ("opening", "Opening headcount", result["opening"]),
+                ("closing", "Closing headcount", result["closing"]),
+                ("leavers", "Employees left", result["leavers"]),
+                ("rate", "Attrition", "N/A" if result["rate"] is None else f"{result['rate']:.2f}%"),
+            ]
+            for col, (key, label, value) in zip(st.columns(4), cards):
+                with col:
+                    with st.container(key=f"attrition_card_{key}"):
+                        st.metric(label, value)
+                        if st.button(f"View {label} details", key=f"attrition_open_{key}", width="stretch"):
+                            st.session_state["attrition_detail_selected"] = key
+            selected = st.session_state.get("attrition_detail_selected")
+            if selected in {"opening", "closing", "leavers", "rate"}:
+                groups, _ = attrition_employee_groups(employees.to_dict("records"), start, end)
+                labels = {key: label for key, label, _ in cards}
+                st.subheader(f"{labels[selected]} details")
+                st.caption(f"{start:%B %Y} · {self.division}")
+                if selected == "rate":
+                    average = (result["opening"] + result["closing"]) / 2
+                    rate_text = "N/A" if result["rate"] is None else f"{result['rate']:.2f}%"
+                    st.write(f"Average headcount = ({result['opening']} + {result['closing']}) / 2 = {average:,.2f}")
+                    st.write(f"Attrition = {result['leavers']} departures / {average:,.2f} average headcount × 100 = {rate_text}" if average else "Attrition is unavailable because average headcount is zero.")
+                    st.caption("Employees included in the departure count")
+                fields = {"employee_id": "Employee ID", "employee_name": "Employee Name",
+                          "division": "Division", "department": "Department", "designation": "Designation",
+                          "joining_date": "Joining Date", "last_working_date": "Last Working Date",
+                          "status": "Current Employment Status"}
+                rows = groups["leavers" if selected == "rate" else selected]
+                detail = pd.DataFrame(rows, columns=list(fields)).rename(columns=fields)
+                st.caption(f"{len(detail):,} employees")
+                if detail.empty:
+                    st.info("No employees in this group for the selected month and division.")
+                else:
+                    st.dataframe(detail, hide_index=True, width="stretch")
+                    st.download_button("Download employee details", review_csv(detail),
+                                       f"attrition_{selected}_{start:%Y-%m}.csv", "text/csv",
+                                       key="attrition_detail_download")
         st.caption('Attrition = employees with last working date in the month ÷ average opening and closing headcount × 100. Temporary HR Review masters are excluded. This measures all recorded departures, not only voluntary resignations.')
 
     def bulk_employment_dates(self, employees):
